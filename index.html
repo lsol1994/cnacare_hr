@@ -1627,13 +1627,27 @@ function cleanForFirebase(obj) {
   return obj;
 }
 
+// ─── id 생성/키 변환 헬퍼 ───
+// Firebase 키는 정수/일반 문자열이어야 하고 . # $ / [ ] 를 포함할 수 없음
+// (기존 코드 일부가 id: Date.now()+Math.random() 처럼 소수점 있는 id를 생성 → Firebase 키로 쓰면 오류 발생)
+let _genIdSeq = 0;
+function genId() {
+  // 소수점 없는 정수 고유 id (같은 ms 안에서 여러 번 호출돼도 충돌 방지)
+  _genIdSeq = (_genIdSeq + 1) % 1000;
+  return Date.now() + _genIdSeq;
+}
+// 어떤 id 값이든 Firebase 키로 안전하게 쓸 수 있는 문자열로 변환 (레거시 소수점 id 포함)
+function safeKey(id) {
+  return String(id).replace(/[.#$\[\]/]/g, '_');
+}
+
 // ─── 배열 ↔ 객체(id 키 기반) 변환 헬퍼 ───
 // Firebase에는 배열이 아닌 { [id]: item } 형태의 객체로 저장 → 항목 단위 update() 가능
 // 대상: patients, caregivers, logs, attendance, reportLogs, members, memos, notices
 function arrToObjById(arr) {
   const obj = {};
   (arr || []).forEach(item => {
-    if(item && item.id != null) obj[String(item.id)] = cleanForFirebase(item);
+    if(item && item.id != null) obj[safeKey(item.id)] = cleanForFirebase(item);
   });
   return obj;
 }
@@ -1649,9 +1663,8 @@ function objToArrById(val) {
 }
 // 구버전 데이터 중 id가 없는 항목에 고유 id 부여 (logs/attendance/reportLogs 마이그레이션용)
 function ensureIds(arr) {
-  let seq = 0;
   (arr || []).forEach(item => {
-    if(item && item.id == null) item.id = Date.now() + (seq++ * 0.0001) + Math.random();
+    if(item && item.id == null) item.id = genId();
   });
   return arr;
 }
@@ -1689,7 +1702,7 @@ function buildSyncUpdates() {
     const pending = {};
     arr.forEach(item => {
       if(!item || item.id == null) return; // id 없는 항목은 스킵 (ensureIds로 사전 보정됨)
-      const id = String(item.id);
+      const id = safeKey(item.id); // Firebase 키 금지문자(.# $ [ ] /) 안전 치환
       curIds.add(id);
       const clean = cleanForFirebase(item);
       const str = JSON.stringify(clean);
@@ -1813,7 +1826,7 @@ function resyncLastSyncedSnapshot() {
   Object.keys(collections).forEach(colKey => {
     const map = {};
     (collections[colKey] || []).forEach(item => {
-      if(item && item.id != null) map[String(item.id)] = JSON.stringify(cleanForFirebase(item));
+      if(item && item.id != null) map[safeKey(item.id)] = JSON.stringify(cleanForFirebase(item));
     });
     newSynced[colKey] = map;
   });
@@ -3002,7 +3015,7 @@ function confirmEndPatient(id) {
     now2.toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit', hour12:false});
   const endMsg = buildEndReport(p, endDate, endTime); // 실제 종료일 전달
   reportLogs.unshift({
-    id:          Date.now()+Math.random(),
+    id:          genId(),
     patientId:   String(p.id),
     patientName: p.name,
     type:        'ended',
@@ -3398,7 +3411,7 @@ function bulkLogAll() {
 
   rooms.forEach(room => {
     logs.unshift({
-      id:          Date.now()+Math.random(),
+      id:          genId(),
       room,
       patientId:   selPt.id,
       patientName: selPt.name,
@@ -3426,7 +3439,7 @@ function copyForRoom(roomName) {
   if(!txt){toast('공고 내용이 없어요',true);return;}
   doCopy(txt);
   const now=new Date();
-  logs.unshift({id:Date.now()+Math.random(),room:roomName,patientId:selPt.id,patientName:selPt.name,
+  logs.unshift({id:genId(),room:roomName,patientId:selPt.id,patientName:selPt.name,
     time:now.toLocaleDateString('ko-KR')+' '+now.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false})});
   save();renderRooms();updateSidebar();
   toast(`✅ [${roomName}] 복사+기록 완료! 카카오톡 붙여넣기 하세요`);
@@ -3703,7 +3716,7 @@ function saveCg() {
     const now2 = new Date();
     const timeStr = now2.toLocaleDateString('ko-KR')+' '+now2.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
     reportLogs.unshift({
-      id:          Date.now()+Math.random(),
+      id:          genId(),
       patientId:   String(pt.id),
       patientName: pt.name,
       type:        'replace',
@@ -5231,7 +5244,7 @@ function saveReportLog() {
     existing.time = timeStr;
   } else {
     reportLogs.unshift({
-      id: Date.now()+Math.random(),
+      id: genId(),
       patientId:   String(selRptPt.id),
       patientName: selRptPt.name,
       type, time: timeStr, msg
@@ -5844,7 +5857,7 @@ function saveNoticeEntry() {
     const n = notices.find(x=>String(x.id)===String(editNoticeId));
     if(n) Object.assign(n, {title, content, level, updatedAt:todayStr()});
   } else {
-    notices.unshift({ id:Date.now()+Math.random(), title, content, level, createdAt:todayStr(), type:'manual' });
+    notices.unshift({ id:genId(), title, content, level, createdAt:todayStr(), type:'manual' });
   }
   save(); renderNotices();
   document.getElementById('notice-editor').style.display = 'none';
@@ -5872,7 +5885,7 @@ function saveAutoNotice(content, level) {
   // 오늘 날짜 자동알림 기존 것 제거 (중복 방지)
   notices = notices.filter(function(n){ return !(n.type==='auto' && n.createdAt===today); });
   notices.unshift({
-    id: Date.now()+Math.random(),
+    id: genId(),
     title: '',
     content: content,
     level: level,
@@ -6097,7 +6110,7 @@ function saveMemoEntry() {
     const m = memos.find(x=>String(x.id)===String(editMemoId));
     if(m) Object.assign(m, {date,author,content,patientId,caregiverId,updatedAt:todayStr()});
   } else {
-    memos.unshift({ id:Date.now()+Math.random(), date, author, content, patientId, caregiverId, createdAt:todayStr() });
+    memos.unshift({ id:genId(), date, author, content, patientId, caregiverId, createdAt:todayStr() });
   }
   save(); renderMemo();
   document.getElementById('memo-editor').style.display = 'none';
@@ -6360,7 +6373,7 @@ function editAttendance(cgId, overrideDate) {
   const useDate = overrideDate || getAttendDate() || todayStr();
   // 신버전(inDate) + 구버전(date) 모두 찾기
   let rec = attendance.find(a=>a.cgId===cgId&&(a.inDate===useDate||a.date===useDate));
-  if(!rec){ rec={id:Date.now()+Math.random(), cgId, inDate:useDate, inTime:'', outDate:useDate, outTime:''}; attendance.push(rec); }
+  if(!rec){ rec={id:genId(), cgId, inDate:useDate, inTime:'', outDate:useDate, outTime:''}; attendance.push(rec); }
   // 구버전이면 신버전으로 변환
   if(rec.date && !rec.inDate) { rec.inDate=rec.date; rec.outDate=rec.date; delete rec.date; }
 
@@ -6412,7 +6425,7 @@ function saveAttendance(cgId, origDate) {
 
   // 신버전 구조로 저장
   let rec = attendance.find(a=>a.cgId===cgId&&a.inDate===newInDate);
-  if(!rec){ rec={id:Date.now()+Math.random(), cgId, inDate:newInDate, inTime:'', outDate:'', outTime:''}; attendance.push(rec); }
+  if(!rec){ rec={id:genId(), cgId, inDate:newInDate, inTime:'', outDate:'', outTime:''}; attendance.push(rec); }
   rec.inDate  = newInDate;
   rec.inTime  = newInTime;
   rec.outDate = newOutDate;
@@ -6473,7 +6486,7 @@ function autoFillAttendance(cgId) {
     if(!existing) {
       if(isFirst) {
         attendance.push({
-          id:      Date.now()+Math.random(),
+          id:      genId(),
           cgId:    String(cgId),
           inDate:  dateStr,
           inTime:  cg.startTime || '',
@@ -6484,7 +6497,7 @@ function autoFillAttendance(cgId) {
         added++;
       } else {
         attendance.push({
-          id:      Date.now()+Math.random(),
+          id:      genId(),
           cgId:    String(cgId),
           inDate:  dateStr,
           inTime:  '00:00',
@@ -6529,7 +6542,7 @@ function checkIn(cgId) {
   const selDate = getAttendDate();
   const now = nowTimeStr();
   let rec = attendance.find(a=>a.cgId===cgId&&a.inDate===selDate);
-  if(!rec){ rec={id:Date.now()+Math.random(), cgId, inDate:selDate, inTime:'', outDate:'', outTime:''}; attendance.push(rec); }
+  if(!rec){ rec={id:genId(), cgId, inDate:selDate, inTime:'', outDate:'', outTime:''}; attendance.push(rec); }
   rec.inDate = selDate;
   rec.inTime = now;
   delete rec.auto; // 자동 기록 아님 표시
@@ -6882,7 +6895,7 @@ function checkAutoEnd() {
       newItems.forEach(({pt}) => {
         if(!pt) return;
         reportLogs.unshift({
-          id:          Date.now()+Math.random(),
+          id:          genId(),
           patientId:   String(pt.id),
           patientName: pt.name,
           type:        'ended',
@@ -7499,7 +7512,7 @@ function parseCSVFile(filename, text) {
         const pay=g(row,'간병비').replace(/[^0-9]/g,'');
         const diag=g(row,'질환');
         patients.unshift({
-          id:Date.now()+Math.random(),
+          id:genId(),
           createdAt:g(row,'날짜')||new Date().toLocaleString('ko-KR'),
           name, gender:g(row,'성별'), contact:g(row,'연락처'),
           hospital:g(row,'병원'),
@@ -7535,7 +7548,7 @@ function parseCSVFile(filename, text) {
           if(a) age=String(a);
         }
         caregivers.unshift({
-          id:Date.now()+Math.random(),
+          id:genId(),
           regDate:g(row,'날짜'), workStatus:g(row,'근무상태')||'대기중',
           name, ssn, age, gender:g(row,'성별'),
           pay:pay||'', phone:g(row,'연락처'),
