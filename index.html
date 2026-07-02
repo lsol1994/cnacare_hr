@@ -1078,6 +1078,12 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         알림 소리 켜기
       </label>
     </div>
+    <div class="hr"></div>
+    <div class="card-hd" style="margin-bottom:.5rem"><span class="dot"></span>📆 공휴일 목록 <span style="font-size:10px;font-weight:400;color:var(--gray);text-transform:none;letter-spacing:0">급여지급일이 주말/공휴일이면 다음 월요일로 자동 조정</span></div>
+    <div class="field">
+      <label>한 줄에 하나씩, "YYYY-MM-DD 공휴일명" 형식으로 입력 (연도가 바뀌면 여기서 갱신해주세요)</label>
+      <textarea id="cfg-holidays" style="min-height:140px;font-family:var(--mono,monospace);font-size:12px"></textarea>
+    </div>
     <button class="btn btn-teal" onclick="saveSettings()">저장</button>
   </div>
   <div class="card">
@@ -1468,6 +1474,11 @@ let logs       = JSON.parse(localStorage.getItem('cnc_logs')      || '[]');
 let attendance = JSON.parse(localStorage.getItem('cnc_attend')    || '[]');
 let reportLogs = JSON.parse(localStorage.getItem('cnc_rptlogs')   || '[]');
 let cfg        = JSON.parse(localStorage.getItem('cnc_cfg')       || '{"name":"씨앤에이케어간병협회","phone":"","sheetsUrl":"","remindInterval":15,"insuranceDays":3,"sound":true,"bankName":"","bankAccount":"","bankHolder":""}');
+// 기본 공휴일 목록 (관리자가 설정 화면에서 매년 갱신 가능) — 없을 때만 채워넣음
+function defaultHolidays() {
+  return ["2026-01-01 신정","2026-02-16 설날연휴","2026-02-17 설날","2026-02-18 설날연휴","2026-03-01 삼일절","2026-03-02 대체공휴일(삼일절)","2026-05-05 어린이날","2026-05-24 부처님오신날","2026-05-25 대체공휴일(부처님오신날)","2026-06-03 지방선거일","2026-06-06 현충일","2026-07-17 제헌절","2026-08-15 광복절","2026-08-17 대체공휴일(광복절)","2026-09-24 추석연휴","2026-09-25 추석","2026-09-26 추석연휴","2026-10-03 개천절","2026-10-05 대체공휴일(개천절)","2026-10-09 한글날","2026-12-25 성탄절"];
+}
+if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays();
 let members    = JSON.parse(localStorage.getItem('cnc_members')   || '[]');
 let memos      = JSON.parse(localStorage.getItem('cnc_memos')     || '[]');
 let notices    = JSON.parse(localStorage.getItem('cnc_notices')   || '[]');
@@ -2000,7 +2011,11 @@ function attachFirebaseListener() {
       members = mergeIdCollection(members, fbMembers);
       localStorage.setItem('cnc_members', JSON.stringify(members));
     }
-    if(d.cfg && typeof d.cfg === 'object') { cfg = d.cfg; localStorage.setItem('cnc_cfg', JSON.stringify(cfg)); }
+    if(d.cfg && typeof d.cfg === 'object') {
+      cfg = d.cfg;
+      if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays(); // 예전 cfg 호환
+      localStorage.setItem('cnc_cfg', JSON.stringify(cfg));
+    }
     if(fbMemos.length > 0) {
       memos = mergeIdCollection(memos, fbMemos);
       localStorage.setItem('cnc_memos', JSON.stringify(memos));
@@ -4762,6 +4777,8 @@ function loadSettings() {
   if(im) im.value = cfg.insuranceMemo || 'KB2025개인간병인배상책임보험(3천)/2025-3561946-1';
   const snd = document.getElementById('cfg-sound');
   if(snd) snd.checked = cfg.sound !== false;
+  const hol = document.getElementById('cfg-holidays');
+  if(hol) hol.value = (cfg.holidays||[]).join('\n');
 }
 function saveSettings() {
   cfg.name        = document.getElementById('cfg-name').value.trim()||'씨앤에이케어간병협회';
@@ -4774,6 +4791,10 @@ function saveSettings() {
   cfg.insuranceDays  = parseInt(document.getElementById('cfg-insurance-days')?.value ?? 3);
   cfg.insuranceMemo  = document.getElementById('cfg-insurance-memo')?.value.trim() || 'KB2025개인간병인배상책임보험(3천)/2025-3561946-1';
   cfg.sound = document.getElementById('cfg-sound')?.checked !== false;
+  const holEl = document.getElementById('cfg-holidays');
+  if(holEl) {
+    cfg.holidays = holEl.value.split('\n').map(l=>l.trim()).filter(Boolean);
+  }
   save(); startRemind(); toast('설정 저장됐어요');
 }
 
@@ -5677,9 +5698,9 @@ function showCalDetail(dateStr) {
       var bdColor = p.isReserve ? '#E65100' : 'var(--amber)';
       var pt = cg.patientId ? patients.find(function(pt){return String(pt.id)===String(cg.patientId);}) : null;
       var ptStr = pt ? ' (' + pt.name + ')' : '';
-      var reserveStr = p.isReserve ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">마감일: ' + (p.payDate||p.endDate) + '</div>' : '';
+      var reserveStr = p.isReserve ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">원래 지급일: ' + (p.payDate||p.endDate) + '</div>' : '';
       parts.push('<div style="padding:10px 12px;border-left:3px solid ' + bdColor + ';margin-bottom:8px;background:' + bgColor + ';border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:' + bdColor + ';margin-bottom:3px">💰 ' + p.label + (p.isReserve?' [예약이체]':'') + '</div>'
+        + '<div style="font-size:11px;font-weight:700;color:' + bdColor + ';margin-bottom:3px">💰 ' + p.label + (p.isReserve?' [주말·공휴일 조정]':'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
         + reserveStr
         + '</div>');
@@ -5946,7 +5967,7 @@ function checkAllRemind() {
       if(p.date !== today) return;
       const pt = patients.find(pt=>String(pt.id)===String(cg.patientId));
       const ptName = pt ? ' ('+pt.name+')' : '';
-      if(p.isReserve) alerts.push('💰 '+cg.name+' '+p.label+' [예약이체] ('+(p.payDate||p.endDate)+' 마감)');
+      if(p.isReserve) alerts.push('💰 '+cg.name+' '+p.label+' [주말·공휴일 조정] (원래 '+(p.payDate||p.endDate)+')');
       else alerts.push('💰 '+cg.name+' '+p.label+' 지급일'+ptName);
     });
   });
@@ -5988,7 +6009,7 @@ function checkAllRemind() {
       if(p.date !== today) return;
       const pt = patients.find(pt=>String(pt.id)===String(cg.patientId));
       const ptName = pt ? ' (<b>'+pt.name+'</b>)' : '';
-      if(p.isReserve) alertsHtml.push('💰 <b>'+cg.name+'</b> '+p.label+' <span style="color:var(--amber)">[예약이체]</span> ('+(p.payDate||p.endDate)+' 마감)');
+      if(p.isReserve) alertsHtml.push('💰 <b>'+cg.name+'</b> '+p.label+' <span style="color:var(--amber)">[주말·공휴일 조정]</span> (원래 '+(p.payDate||p.endDate)+')');
       else alertsHtml.push('💰 <b>'+cg.name+'</b> '+p.label+' 지급일'+ptName);
     });
   });
@@ -6011,7 +6032,7 @@ function checkPayRemind(testMode) {
       calcPayDates(cg).filter(p=>p.date>=today).slice(0,2).forEach(p=>{
         const isToday = p.date===today;
         const prefix  = !isToday?`📅 ${p.date} `:'';
-        if(p.isReserve) alerts.push(`${prefix}💰 <b>${cg.name}</b> ${p.label} [예약이체] (${p.payDate||p.endDate} 마감)`);
+        if(p.isReserve) alerts.push(`${prefix}💰 <b>${cg.name}</b> ${p.label} [주말·공휴일 조정] (원래 ${p.payDate||p.endDate})`);
         else alerts.push(`${prefix}💰 <b>${cg.name}</b> ${p.label} 지급일`);
       });
     });
@@ -6186,7 +6207,8 @@ function initMemoPage() {
 
 // 규칙:
 // - 8일 이상: 시작일+8일 다음날이 첫 주급일, 이후 매주 같은 요일
-// - 7일 이하: 마감일 당일 지급 (주말이면 전 금요일 예약이체)
+// - 7일 이하: 마감일 당일 지급
+// - 지급 예정일이 주말(토/일) 또는 공휴일(설정 → 공휴일 목록)이면 다음주 월요일로 조정
 function calcPayDates(cg) {
   if(!cg.startDate) return [];
   const results = [];
@@ -6204,18 +6226,15 @@ function calcPayDates(cg) {
   }
 
   if(totalDays !== null && totalDays <= 6) {
-    // 6일 이하 단기: 마감일 당일 지급
+    // 6일 이하 단기: 마감일 당일 지급 (주말/공휴일이면 다음주 월요일로 조정)
     const payDate = parseLocalDate(cg.endDate);
     if(!payDate) return [];
-    const dow = payDate.getDay();
-    if(dow === 0 || dow === 6) {
-      // 주말 → 전 금요일 예약이체
-      const fri = new Date(payDate);
-      fri.setDate(fri.getDate() - (dow === 6 ? 1 : 2));
-      results.push({ date: toLocalDateStr(fri), label: '단기 급여', isReserve: true, endDate: toLocalDateStr(payDate) });
-    } else {
-      results.push({ date: toLocalDateStr(payDate), label: '단기 급여', isReserve: false, endDate: toLocalDateStr(payDate) });
-    }
+    const adjusted = adjustPayDateToMonday(payDate);
+    const wasAdjusted = toLocalDateStr(adjusted) !== toLocalDateStr(payDate);
+    results.push({
+      date: toLocalDateStr(adjusted), label: '단기 급여',
+      isReserve: wasAdjusted, endDate: toLocalDateStr(payDate)
+    });
   } else {
     // 7일 이상: 시작일 + 7일부터 매주 같은 요일 지급
     // 예: 6/8(월) 시작 → 6/15(월) 첫 주급, 6/22(월) 2주차...
@@ -6229,15 +6248,10 @@ function calcPayDates(cg) {
     let week = 1;
     while(cur <= maxDate) {
       const dateStr = toLocalDateStr(cur);
-      const dow = cur.getDay();
-      const isReserve = dow === 0 || dow === 6;
-      let remindDate = dateStr;
-      if(isReserve) {
-        const fri = new Date(cur);
-        fri.setDate(fri.getDate() - (dow === 6 ? 1 : 2));
-        remindDate = toLocalDateStr(fri);
-      }
-      results.push({ date: remindDate, payDate: dateStr, label: `${week}주차 주급`, isReserve, week });
+      const adjusted = adjustPayDateToMonday(cur);
+      const adjustedStr = toLocalDateStr(adjusted);
+      const wasAdjusted = adjustedStr !== dateStr;
+      results.push({ date: adjustedStr, payDate: dateStr, label: `${week}주차 주급`, isReserve: wasAdjusted, week });
       cur.setDate(cur.getDate() + 7);
       week++;
     }
@@ -6266,6 +6280,29 @@ function toLocalDateStr(d) {
 }
 
 function todayStr() { return toLocalDateStr(new Date()); }
+
+// 설정에 등록된 공휴일 목록에 해당 날짜가 있는지 확인 ("YYYY-MM-DD 공휴일명" 형식에서 날짜만 비교)
+function isHolidayDate(dateStr) {
+  if(!dateStr) return false;
+  return (cfg.holidays||[]).some(h => String(h).trim().split(/\s+/)[0] === dateStr);
+}
+
+// 급여지급일이 주말(토/일) 또는 공휴일이면 다음 영업일로 이동
+// (주말이면 보통 월요일이 되고, 그 월요일마저 공휴일이면 화요일... 식으로 하루씩 순차 이동)
+function adjustPayDateToMonday(date) {
+  let d = new Date(date);
+  let guard = 0;
+  while(guard < 14) {
+    const dow = d.getDay(); // 0=일 ~ 6=토
+    const isWeekend = dow === 0 || dow === 6;
+    const isHoliday = isHolidayDate(toLocalDateStr(d));
+    if(!isWeekend && !isHoliday) break;
+    d.setDate(d.getDate() + 1); // 하루씩 다음날로 이동하며 재확인
+    guard++;
+  }
+  return d;
+}
+
 function nowTimeStr() {
   const n=new Date();
   return n.getHours().toString().padStart(2,'0')+':'+n.getMinutes().toString().padStart(2,'0');
