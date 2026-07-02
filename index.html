@@ -559,12 +559,12 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         <div class="field"><label>몸무게 (kg)</label><input type="number" id="p-weight" placeholder="60"></div>
       </div>
       <div class="g2" style="margin-top:.5rem">
-        <label class="ck-wrap"><input type="checkbox" id="p-diaper"> 기저귀 착용</label>
-        <label class="ck-wrap"><input type="checkbox" id="p-move"> 거동 가능</label>
+        <label class="ck-wrap"><input type="checkbox" id="p-diaper" onchange="updateNPPreview()"> 기저귀 착용</label>
+        <label class="ck-wrap"><input type="checkbox" id="p-move" onchange="updateNPPreview()"> 거동 가능</label>
       </div>
       <div class="field" style="margin-top:.875rem">
         <label>상세 증상 <span style="font-size:10px;font-weight:400;color:var(--gray)">(공고에 그대로 표시)</span></label>
-        <textarea id="p-extra" placeholder="예: 산소호흡기 사용 중, 낙상 위험 높음, 치매 초기&#10;복수의 상태를 쉼표로 구분하거나 줄바꿈으로 입력" style="min-height:80px"></textarea>
+        <textarea id="p-extra" placeholder="예: 산소호흡기 사용 중, 낙상 위험 높음, 치매 초기&#10;복수의 상태를 쉼표로 구분하거나 줄바꿈으로 입력" style="min-height:80px" oninput="updateNPPreview()"></textarea>
       </div>
     </div>
 
@@ -587,7 +587,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         <div class="field"><label>금액 (일급, 원)</label><input type="number" id="p-pay" placeholder="130000"></div>
       </div>
       <div class="field"><label>요청사항</label>
-        <textarea id="p-request" placeholder="예: 깔끔한 여자 간병사, 5일 병실 입실 예정"></textarea>
+        <textarea id="p-request" placeholder="예: 깔끔한 여자 간병사, 5일 병실 입실 예정" oninput="updateNPPreview()"></textarea>
       </div>
     </div>
   </div>
@@ -2327,6 +2327,7 @@ function getFormPatient() {
     height: document.getElementById('p-height').value,
     weight: document.getElementById('p-weight').value,
     cgGender:  (document.querySelector('input[name="p-cg-gender"]:checked')?.value || ''),
+    diaper: document.getElementById('p-diaper').checked,
     move: document.getElementById('p-move').checked,
     extra: document.getElementById('p-extra').value.trim(),
     startDate: document.getElementById('p-start-date').value,
