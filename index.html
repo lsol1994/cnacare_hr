@@ -2377,6 +2377,21 @@ function getDuration() {
   return sel.value;
 }
 
+// 사용기간 select에서 "직접 입력" 선택 시 텍스트 입력칸을 보여주고, 그 외엔 숨김
+function syncDuration(value) {
+  const inp = document.getElementById('p-duration');
+  if(!inp) return;
+  if(value === '__direct') {
+    inp.style.display = '';
+    inp.value = '';
+    inp.focus();
+  } else {
+    inp.style.display = 'none';
+    inp.value = '';
+  }
+  updateNPPreview();
+}
+
 function updateNPPreview() {
   const p = getFormPatient();
   document.getElementById('np-preview').value = buildPost(p);
