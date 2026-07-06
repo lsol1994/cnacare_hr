@@ -2974,11 +2974,24 @@ function changeStatus(id, status) {
     return;
   }
 
+  const wasEnded = p.status === '종료';
   p.status = status;
   if(status === '매칭완료') p.recruited = true;
-  save(); renderPatients(); updateSidebar();
-  openPatient(id);
-  toast(`상태 → "${status}"`);
+
+  if(wasEnded) {
+    // 종료 상태에서 되돌리는 경우: 예전 마감일/기간이 남아있으면
+    // checkAutoEnd()가 과거 날짜 그대로 감지해서 곧바로 다시 "종료"로 되돌려버림 → 미리 비워서 방지
+    p.endDate  = '';
+    p.endTime  = '';
+    p.duration = '';
+    save(); renderPatients(); updateSidebar();
+    openPatient(id);
+    toast(`상태 → "${status}" · 마감일이 지워졌어요. 새 사용기간/마감일을 다시 입력해주세요`, true);
+  } else {
+    save(); renderPatients(); updateSidebar();
+    openPatient(id);
+    toast(`상태 → "${status}"`);
+  }
 }
 
 function openEndPatientModal(id) {
@@ -3659,6 +3672,21 @@ function calcAge(ssn) {
   else disp.style.display='none';
 }
 
+// 주민번호로부터 생년월일 표시용 문자열 추출 (예: 1990.03.21)
+function birthFromSSN(ssn) {
+  if(!ssn) return '';
+  const clean = ssn.replace(/[-\s]/g,'');
+  if(clean.length < 7) return '';
+  const yy = parseInt(clean.substring(0,2));
+  const mm = parseInt(clean.substring(2,4));
+  const dd = parseInt(clean.substring(4,6));
+  const gc = parseInt(clean[6]);
+  if(isNaN(yy)||isNaN(mm)||isNaN(dd)||isNaN(gc)) return '';
+  if(mm<1||mm>12||dd<1||dd>31) return '';
+  const year = ssnToYear(yy, gc);
+  return year + '.' + String(mm).padStart(2,'0') + '.' + String(dd).padStart(2,'0');
+}
+
 function getCgData() {
   const ssnEl=document.getElementById('cg-ssn');
   const clean=ssnEl?ssnEl.value.replace(/[-\s]/g,''):'';
@@ -3864,6 +3892,7 @@ function renderCaregivers() {
       </div>
       <div class="pt-meta">
         <span>🏥 ${cg.hospital||'—'}</span>
+        ${birthFromSSN(cg.ssn)?`<span>🎂 ${birthFromSSN(cg.ssn)}</span>`:''}
         <span>📅 ${cg.startDate||'—'} ${cg.startTime||''} → ${cg.endDate||'—'} ${cg.endTime||''}</span>
         <span>📞 ${formatPhone(cg.phone)||'—'}</span>
         <span>💰 ${cg.pay?Number(cg.pay).toLocaleString()+'원/일':'—'}</span>
@@ -3924,6 +3953,7 @@ function openCgDetail(id) {
     <div class="g2" style="margin-bottom:.875rem">
       ${[
         ['이름',cg.name],['나이/성별',(cg.age||'—')+'세 '+cg.gender],
+        ['생년월일',birthFromSSN(cg.ssn)||'—'],
         ['연락처',cg.phone||'—'],['거주지',cg.region||'—'],
         ['근무상태',cg.workStatus||'—'],['일급',cg.pay?Number(cg.pay).toLocaleString()+'원':'—'],
         ['경력',cg.career||'—'],['특화분야',cg.specialty||'—'],
@@ -4753,7 +4783,9 @@ function cancelEarlyTerminate(cgId) {
   if(!confirm(`${cg.name} 종료를 취소하고 이전 상태로 복원할까요?`)) return;
 
   const snap    = cg.earlyEndSnapshot;
-  const ptId    = cg.earlyEndPatientId || (snap && snap.patientId) || '';
+  // 중도종료(강제)면 earlyEndPatientId/snapshot에서, 자연 마감(기간종료)이면 cg.patientId가
+  // 그대로 남아있으므로 그걸로 복원 (자연 마감은 별도 스냅샷이 없어 그동안 복원이 안 됐던 부분)
+  const ptId    = cg.earlyEndPatientId || (snap && snap.patientId) || cg.patientId || '';
 
   // ── 간병인 복원 ──
   cg.workStatus = '근무중';
@@ -4787,6 +4819,11 @@ function cancelEarlyTerminate(cgId) {
         pt.status        = '매칭완료';
         pt.recruited     = true;
         pt.caregiverName = cg.name;
+        // 자연 마감(기간종료) 취소인 경우 예전 마감일이 과거로 남아있으면
+        // checkAutoEnd()가 바로 다시 "종료"로 되돌려버리므로 비워서 방지 (새 마감일은 다시 입력 필요)
+        pt.endDate  = '';
+        pt.endTime  = '';
+        pt.duration = '';
         // recruitHistory에서 이 간병인이 prevCg인 항목 제거
         if(pt.recruitHistory && pt.recruitHistory.length) {
           pt.recruitHistory = pt.recruitHistory.filter(h => h.prevCg !== cg.name);
