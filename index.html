@@ -559,12 +559,12 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         <div class="field"><label>몸무게 (kg)</label><input type="number" id="p-weight" placeholder="60"></div>
       </div>
       <div class="g2" style="margin-top:.5rem">
-        <label class="ck-wrap"><input type="checkbox" id="p-diaper"> 기저귀 착용</label>
-        <label class="ck-wrap"><input type="checkbox" id="p-move"> 거동 가능</label>
+        <label class="ck-wrap"><input type="checkbox" id="p-diaper" onchange="updateNPPreview()"> 기저귀 착용</label>
+        <label class="ck-wrap"><input type="checkbox" id="p-move" onchange="updateNPPreview()"> 거동 가능</label>
       </div>
       <div class="field" style="margin-top:.875rem">
         <label>상세 증상 <span style="font-size:10px;font-weight:400;color:var(--gray)">(공고에 그대로 표시)</span></label>
-        <textarea id="p-extra" placeholder="예: 산소호흡기 사용 중, 낙상 위험 높음, 치매 초기&#10;복수의 상태를 쉼표로 구분하거나 줄바꿈으로 입력" style="min-height:80px"></textarea>
+        <textarea id="p-extra" placeholder="예: 산소호흡기 사용 중, 낙상 위험 높음, 치매 초기&#10;복수의 상태를 쉼표로 구분하거나 줄바꿈으로 입력" style="min-height:80px" oninput="updateNPPreview()"></textarea>
       </div>
     </div>
 
@@ -587,7 +587,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         <div class="field"><label>금액 (일급, 원)</label><input type="number" id="p-pay" placeholder="130000"></div>
       </div>
       <div class="field"><label>요청사항</label>
-        <textarea id="p-request" placeholder="예: 깔끔한 여자 간병사, 5일 병실 입실 예정"></textarea>
+        <textarea id="p-request" placeholder="예: 깔끔한 여자 간병사, 5일 병실 입실 예정" oninput="updateNPPreview()"></textarea>
       </div>
     </div>
   </div>
@@ -1078,6 +1078,12 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         알림 소리 켜기
       </label>
     </div>
+    <div class="hr"></div>
+    <div class="card-hd" style="margin-bottom:.5rem"><span class="dot"></span>📆 공휴일 목록 <span style="font-size:10px;font-weight:400;color:var(--gray);text-transform:none;letter-spacing:0">급여지급일이 주말/공휴일이면 다음 월요일로 자동 조정</span></div>
+    <div class="field">
+      <label>한 줄에 하나씩, "YYYY-MM-DD 공휴일명" 형식으로 입력 (연도가 바뀌면 여기서 갱신해주세요)</label>
+      <textarea id="cfg-holidays" style="min-height:140px;font-family:var(--mono,monospace);font-size:12px"></textarea>
+    </div>
     <button class="btn btn-teal" onclick="saveSettings()">저장</button>
   </div>
   <div class="card">
@@ -1269,6 +1275,19 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       </button>
     </div>
     <div id="extend-body"></div>
+  </div>
+</div>
+
+<!-- ══ 예정 교체 간병인 등록 모달 ══ -->
+<div class="overlay" id="replace-overlay" onclick="closeOverlay('replace-overlay',event)">
+  <div class="overlay-card" style="max-width:420px" onclick="event.stopPropagation()">
+    <div class="overlay-hd">
+      <h3 id="replace-title">🔜 예정 교체 간병인</h3>
+      <button class="btn btn-icon" onclick="closeOverlay('replace-overlay')">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="replace-body"></div>
   </div>
 </div>
 
@@ -1468,6 +1487,11 @@ let logs       = JSON.parse(localStorage.getItem('cnc_logs')      || '[]');
 let attendance = JSON.parse(localStorage.getItem('cnc_attend')    || '[]');
 let reportLogs = JSON.parse(localStorage.getItem('cnc_rptlogs')   || '[]');
 let cfg        = JSON.parse(localStorage.getItem('cnc_cfg')       || '{"name":"씨앤에이케어간병협회","phone":"","sheetsUrl":"","remindInterval":15,"insuranceDays":3,"sound":true,"bankName":"","bankAccount":"","bankHolder":""}');
+// 기본 공휴일 목록 (관리자가 설정 화면에서 매년 갱신 가능) — 없을 때만 채워넣음
+function defaultHolidays() {
+  return ["2026-01-01 신정","2026-02-16 설날연휴","2026-02-17 설날","2026-02-18 설날연휴","2026-03-01 삼일절","2026-03-02 대체공휴일(삼일절)","2026-05-05 어린이날","2026-05-24 부처님오신날","2026-05-25 대체공휴일(부처님오신날)","2026-06-03 지방선거일","2026-06-06 현충일","2026-07-17 제헌절","2026-08-15 광복절","2026-08-17 대체공휴일(광복절)","2026-09-24 추석연휴","2026-09-25 추석","2026-09-26 추석연휴","2026-10-03 개천절","2026-10-05 대체공휴일(개천절)","2026-10-09 한글날","2026-12-25 성탄절"];
+}
+if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays();
 let members    = JSON.parse(localStorage.getItem('cnc_members')   || '[]');
 let memos      = JSON.parse(localStorage.getItem('cnc_memos')     || '[]');
 let notices    = JSON.parse(localStorage.getItem('cnc_notices')   || '[]');
@@ -1482,6 +1506,14 @@ let rptType        = 'all';
 let selRptPt       = null;
 let _fbReady       = false;
 let _fbPause       = false;
+
+// ─── Firebase 부분 업데이트(update()) 를 위한 마지막 동기화 스냅샷 ───
+// id 키 컬렉션(patients/caregivers/logs/attendance/reportLogs/members/memos/notices):
+//   { 컬렉션명 → { id(String) → JSON 문자열 } }
+// id 없는 컬렉션(rooms/cfg): { 컬렉션명 → JSON 문자열 }
+// 비어있는 상태(최초 실행)에서는 save() 최초 1회가 전체 데이터를 update()로 올림
+let _lastSyncedById = { patients:{}, caregivers:{}, logs:{}, attendance:{}, reportLogs:{}, members:{}, memos:{}, notices:{} };
+let _lastSyncedMisc = {};
 
 // 현재 세션에서 앱을 통해 새로 추가된 ID (Firebase에 아직 없을 수 있음)
 // Firebase 콘솔에서 삭제된 항목과 구별하기 위해 사용
@@ -1619,8 +1651,128 @@ function cleanForFirebase(obj) {
   return obj;
 }
 
+// ─── id 생성/키 변환 헬퍼 ───
+// Firebase 키는 정수/일반 문자열이어야 하고 . # $ / [ ] 를 포함할 수 없음
+// (기존 코드 일부가 id: Date.now()+Math.random() 처럼 소수점 있는 id를 생성 → Firebase 키로 쓰면 오류 발생)
+let _genIdSeq = 0;
+function genId() {
+  // 소수점 없는 정수 고유 id (같은 ms 안에서 여러 번 호출돼도 충돌 방지)
+  _genIdSeq = (_genIdSeq + 1) % 1000;
+  return Date.now() + _genIdSeq;
+}
+// 어떤 id 값이든 Firebase 키로 안전하게 쓸 수 있는 문자열로 변환 (레거시 소수점 id 포함)
+function safeKey(id) {
+  return String(id).replace(/[.#$\[\]/]/g, '_');
+}
+
+// ─── 배열 ↔ 객체(id 키 기반) 변환 헬퍼 ───
+// Firebase에는 배열이 아닌 { [id]: item } 형태의 객체로 저장 → 항목 단위 update() 가능
+// 대상: patients, caregivers, logs, attendance, reportLogs, members, memos, notices
+function arrToObjById(arr) {
+  const obj = {};
+  (arr || []).forEach(item => {
+    if(item && item.id != null) obj[safeKey(item.id)] = cleanForFirebase(item);
+  });
+  return obj;
+}
+// Firebase에서 내려온 값(객체 또는 구버전 배열)을 배열로 복원 (최신 등록순 = id 내림차순)
+function objToArrById(val) {
+  if(!val) return [];
+  if(Array.isArray(val)) return val.filter(x=>x!=null); // 구버전 배열 데이터 호환
+  if(typeof val === 'object') {
+    return Object.keys(val).map(k=>val[k]).filter(x=>x!=null)
+      .sort((a,b)=>Number(b.id)-Number(a.id));
+  }
+  return [];
+}
+// 구버전 데이터 중 id가 없는 항목에 고유 id 부여 (logs/attendance/reportLogs 마이그레이션용)
+function ensureIds(arr) {
+  (arr || []).forEach(item => {
+    if(item && item.id == null) item.id = genId();
+  });
+  return arr;
+}
+
 // ─── 저장 ───
 let _saveTimer = null;
+
+// id 키 기반 부분 업데이트 대상 컬렉션 (항목마다 고유 id를 가짐)
+function getIdKeyedCollections() {
+  return {
+    patients:   patients,
+    caregivers: caregivers,
+    logs:       logs,
+    attendance: attendance,
+    reportLogs: reportLogs,
+    members:    members,
+    memos:      memos,
+    notices:    notices
+  };
+}
+
+// 현재 상태와 마지막 동기화 스냅샷을 비교해 실제로 바뀐 부분만 update() payload로 구성
+function buildSyncUpdates() {
+  const updates    = {};
+  const pendingById = {}; // {컬렉션명: {id: str|null}}
+  const pendingMisc = {};
+  let hasChange = false;
+
+  // id 키 컬렉션들: 항목별 부분 비교 (변경/신규만 전송, 삭제된 id는 null)
+  const collections = getIdKeyedCollections();
+  Object.keys(collections).forEach(colKey => {
+    const arr = collections[colKey] || [];
+    const lastSynced = _lastSyncedById[colKey] || (_lastSyncedById[colKey] = {});
+    const curIds = new Set();
+    const pending = {};
+    arr.forEach(item => {
+      if(!item || item.id == null) return; // id 없는 항목은 스킵 (ensureIds로 사전 보정됨)
+      const id = safeKey(item.id); // Firebase 키 금지문자(.# $ [ ] /) 안전 치환
+      curIds.add(id);
+      const clean = cleanForFirebase(item);
+      const str = JSON.stringify(clean);
+      if(lastSynced[id] !== str) {
+        updates[colKey + '/' + id] = clean;
+        pending[id] = str;
+        hasChange = true;
+      }
+    });
+    Object.keys(lastSynced).forEach(id => {
+      if(!curIds.has(id)) {
+        updates[colKey + '/' + id] = null;
+        pending[id] = null;
+        hasChange = true;
+      }
+    });
+    pendingById[colKey] = pending;
+  });
+
+  // id 없는 컬렉션(rooms/cfg): 변경된 경우에만 통째로 update (컬렉션 단위 부분 업데이트)
+  const miscEntries = [['rooms', rooms], ['cfg', cfg]];
+  miscEntries.forEach(([key, val]) => {
+    const clean = cleanForFirebase(val);
+    const str = JSON.stringify(clean);
+    if(_lastSyncedMisc[key] !== str) {
+      updates[key] = clean;
+      pendingMisc[key] = str;
+      hasChange = true;
+    }
+  });
+
+  return { updates, pendingById, pendingMisc, hasChange };
+}
+
+// Firebase 저장 성공 후에만 스냅샷 확정 (실패 시 다음 save()에서 자동 재시도)
+function commitSyncSnapshot(pendingById, pendingMisc) {
+  Object.keys(pendingById).forEach(colKey => {
+    const lastSynced = _lastSyncedById[colKey] || (_lastSyncedById[colKey] = {});
+    const pending = pendingById[colKey];
+    Object.keys(pending).forEach(id => {
+      if(pending[id] === null) delete lastSynced[id];
+      else lastSynced[id] = pending[id];
+    });
+  });
+  Object.keys(pendingMisc).forEach(key => { _lastSyncedMisc[key] = pendingMisc[key]; });
+}
 
 function save() {
   // 1. 로컬스토리지 즉시 저장
@@ -1635,21 +1787,21 @@ function save() {
   localStorage.setItem('cnc_memos',     JSON.stringify(memos));
   localStorage.setItem('cnc_notices',   JSON.stringify(notices));
 
-  // 2. Firebase 저장 (300ms 디바운스)
+  // 2. Firebase 저장 (300ms 디바운스, update() 부분 업데이트만 전송)
   if(!db) { showSyncStatus('저장 중... (연결 대기)'); return; }
   if(_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     // 인증 확인 후 저장
     const doSave = () => {
+      const { updates, pendingById, pendingMisc, hasChange } = buildSyncUpdates();
+      if(!hasChange) { showSyncStatus('동기화됨'); return; } // 바뀐 게 없으면 네트워크 호출 생략
+
       _fbPause = true;
       db.ref('cnc').off();
       showSyncStatus('저장 중...');
-      const payload = cleanForFirebase({
-        patients, caregivers, rooms, logs,
-        attendance, reportLogs, cfg, members, memos, notices
-      });
-      db.ref('cnc').set(payload)
+      db.ref('cnc').update(updates)
         .then(() => {
+          commitSyncSnapshot(pendingById, pendingMisc);
           showSyncStatus('저장됨');
           // Firebase 쓰기 완료 후 충분히 대기 (구 스냅샷 수신 방지)
           setTimeout(() => {
@@ -1662,6 +1814,8 @@ function save() {
           console.warn('Firebase 저장 실패:', e);
           showSyncStatus('저장 실패 ⚠️');
           toast('⚠️ 데이터베이스 저장 실패! 네트워크를 확인해주세요', true);
+          // pendingById/pendingMisc를 커밋하지 않았으므로
+          // 다음 save() 호출 시 동일한 변경분이 자동으로 재시도됨
         });
     };
 
@@ -1687,6 +1841,26 @@ function save() {
 
 function saveMem() { save(); }
 
+
+// Firebase 병합 결과 반영 후 스냅샷을 현재 상태로 재정렬
+// (리스너에서 받은 데이터를 그대로 다시 save()가 재전송하는 걸 방지)
+function resyncLastSyncedSnapshot() {
+  const collections = getIdKeyedCollections();
+  const newSynced = {};
+  Object.keys(collections).forEach(colKey => {
+    const map = {};
+    (collections[colKey] || []).forEach(item => {
+      if(item && item.id != null) map[safeKey(item.id)] = JSON.stringify(cleanForFirebase(item));
+    });
+    newSynced[colKey] = map;
+  });
+  _lastSyncedById = newSynced;
+
+  _lastSyncedMisc = {
+    rooms: JSON.stringify(cleanForFirebase(rooms)),
+    cfg:   JSON.stringify(cleanForFirebase(cfg))
+  };
+}
 
 // ─── Firebase 실시간 리스너 ───
 function attachFirebaseListener() {
@@ -1716,13 +1890,32 @@ function attachFirebaseListener() {
       return [];
     }
 
-    const fbPatients   = fbToArr(d.patients);
-    const fbCaregivers = fbToArr(d.caregivers);
-    const fbRooms      = fbToArr(d.rooms);
-    const fbLogs       = fbToArr(d.logs);
-    const fbAttendance = fbToArr(d.attendance);
-    const fbReportLogs = fbToArr(d.reportLogs);
-    const fbMembers    = fbToArr(d.members);
+    const legacyPtArray  = Array.isArray(d.patients);   // 구버전(배열) 저장 형식 여부
+    const legacyCgArray  = Array.isArray(d.caregivers);
+    const legacyLogArray = Array.isArray(d.logs);
+    const legacyAttArray = Array.isArray(d.attendance);
+    const legacyRptArray = Array.isArray(d.reportLogs);
+    const legacyMemArray = Array.isArray(d.members);
+    const legacyMemoArray = Array.isArray(d.memos);
+    const legacyNotiArray = Array.isArray(d.notices);
+
+    const fbPatients   = objToArrById(d.patients);   // {id: item} 객체 → 배열 (구버전 배열 데이터도 호환)
+    const fbCaregivers = objToArrById(d.caregivers);
+    const fbRooms       = fbToArr(d.rooms);          // rooms는 id 개념이 없는 단순 배열
+    const fbLogs        = objToArrById(d.logs);
+    const fbAttendance  = objToArrById(d.attendance);
+    const fbReportLogs  = objToArrById(d.reportLogs);
+    const fbMembers     = objToArrById(d.members);
+    const fbMemos       = objToArrById(d.memos);
+    const fbNotices     = objToArrById(d.notices);
+
+    // id 있는 컬렉션 공용 병합: Firebase 우선 + 아직 동기화 안 된 로컬 신규 항목만 보존
+    function mergeIdCollection(localArr, fbArr) {
+      if(!fbArr || fbArr.length === 0) return localArr;
+      const fbIds = new Set(fbArr.map(x=>String(x.id)));
+      const localOnly = (localArr||[]).filter(x => x && x.id!=null && !fbIds.has(String(x.id)));
+      return [...fbArr, ...localOnly];
+    }
 
     if(fbPatients.length > 0) {
       // 삭제 보호: Firebase에서 실제로 사라진 것 확인 후에만 해제
@@ -1815,18 +2008,81 @@ function attachFirebaseListener() {
       localStorage.setItem('cnc_cg', JSON.stringify(caregivers));
     }
     if(fbAttendance.length > 0) {
-      attendance = fbAttendance.length >= attendance.length ? fbAttendance : attendance;
+      attendance = mergeIdCollection(attendance, fbAttendance);
       localStorage.setItem('cnc_attend', JSON.stringify(attendance));
     }
-    if(fbRooms.length > 0)      { rooms      = fbRooms;      localStorage.setItem('cnc_rooms',   JSON.stringify(rooms)); }
-    if(fbLogs.length > 0)       { logs       = fbLogs;       localStorage.setItem('cnc_logs',    JSON.stringify(logs)); }
-    if(fbReportLogs.length > 0) { reportLogs = fbReportLogs; localStorage.setItem('cnc_rptlogs', JSON.stringify(reportLogs)); }
-    if(fbMembers.length > 0)    { members    = fbMembers;    localStorage.setItem('cnc_members', JSON.stringify(members)); }
-    if(d.cfg && typeof d.cfg === 'object') { cfg = d.cfg; localStorage.setItem('cnc_cfg', JSON.stringify(cfg)); }
-    const fbMemos = fbToArr(d.memos);
-    if(fbMemos.length > 0) { memos = fbMemos; localStorage.setItem('cnc_memos', JSON.stringify(memos)); }
-    const fbNotices = fbToArr(d.notices);
-    if(fbNotices.length > 0) { notices = fbNotices; localStorage.setItem('cnc_notices', JSON.stringify(notices)); }
+    if(fbRooms.length > 0) { rooms = fbRooms; localStorage.setItem('cnc_rooms', JSON.stringify(rooms)); }
+    if(fbLogs.length > 0) {
+      logs = mergeIdCollection(logs, fbLogs);
+      localStorage.setItem('cnc_logs', JSON.stringify(logs));
+    }
+    if(fbReportLogs.length > 0) {
+      reportLogs = mergeIdCollection(reportLogs, fbReportLogs);
+      localStorage.setItem('cnc_rptlogs', JSON.stringify(reportLogs));
+    }
+    if(fbMembers.length > 0) {
+      members = mergeIdCollection(members, fbMembers);
+      localStorage.setItem('cnc_members', JSON.stringify(members));
+    }
+    if(d.cfg && typeof d.cfg === 'object') {
+      cfg = d.cfg;
+      if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays(); // 예전 cfg 호환
+      localStorage.setItem('cnc_cfg', JSON.stringify(cfg));
+    }
+    if(fbMemos.length > 0) {
+      memos = mergeIdCollection(memos, fbMemos);
+      localStorage.setItem('cnc_memos', JSON.stringify(memos));
+    }
+    if(fbNotices.length > 0) {
+      notices = mergeIdCollection(notices, fbNotices);
+      localStorage.setItem('cnc_notices', JSON.stringify(notices));
+    }
+
+    // 구버전 배열 구조 감지 시 1회 자동 마이그레이션 (id 키 객체로 안전 변환)
+    // → 이후 save()의 부분 update()가 옛 배열 인덱스 키와 섞이지 않도록 함
+    // logs/attendance/reportLogs는 구버전에 id가 없을 수 있어 ensureIds로 먼저 id 부여 후 마이그레이션
+    if(legacyPtArray && patients.length) {
+      db.ref('cnc/patients').set(arrToObjById(patients))
+        .catch(e => console.warn('환자 데이터 구조 마이그레이션 실패:', e));
+    }
+    if(legacyCgArray && caregivers.length) {
+      db.ref('cnc/caregivers').set(arrToObjById(caregivers))
+        .catch(e => console.warn('간병인 데이터 구조 마이그레이션 실패:', e));
+    }
+    if(legacyLogArray && logs.length) {
+      ensureIds(logs);
+      localStorage.setItem('cnc_logs', JSON.stringify(logs));
+      db.ref('cnc/logs').set(arrToObjById(logs))
+        .catch(e => console.warn('발송기록 구조 마이그레이션 실패:', e));
+    }
+    if(legacyAttArray && attendance.length) {
+      ensureIds(attendance);
+      localStorage.setItem('cnc_attend', JSON.stringify(attendance));
+      db.ref('cnc/attendance').set(arrToObjById(attendance))
+        .catch(e => console.warn('출퇴근기록 구조 마이그레이션 실패:', e));
+    }
+    if(legacyRptArray && reportLogs.length) {
+      ensureIds(reportLogs);
+      localStorage.setItem('cnc_rptlogs', JSON.stringify(reportLogs));
+      db.ref('cnc/reportLogs').set(arrToObjById(reportLogs))
+        .catch(e => console.warn('업체보고 구조 마이그레이션 실패:', e));
+    }
+    if(legacyMemArray && members.length) {
+      db.ref('cnc/members').set(arrToObjById(members))
+        .catch(e => console.warn('협회간병인 구조 마이그레이션 실패:', e));
+    }
+    if(legacyMemoArray && memos.length) {
+      db.ref('cnc/memos').set(arrToObjById(memos))
+        .catch(e => console.warn('업무일지 구조 마이그레이션 실패:', e));
+    }
+    if(legacyNotiArray && notices.length) {
+      db.ref('cnc/notices').set(arrToObjById(notices))
+        .catch(e => console.warn('공지사항 구조 마이그레이션 실패:', e));
+    }
+
+    // 방금 반영된(병합 완료된) 현재 상태를 동기화 스냅샷으로 확정
+    // → 다음 save() 호출 시 여기서 받은 데이터를 다시 불필요하게 재전송하지 않음
+    resyncLastSyncedSnapshot();
 
     if(!_fbReady) {
       _fbReady = true;
@@ -1864,13 +2120,13 @@ function startFirebaseSync() {
     }
     try {
       const firebaseConfig = {
-        apiKey:            "AIzaSyAp4hkcCzchjECghxoWfP7JYH8aJgVpYZk",
-        authDomain:        "cna-care-29312.firebaseapp.com",
-        databaseURL:       "https://cna-care-29312-default-rtdb.asia-southeast1.firebasedatabase.app",
-        projectId:         "cna-care-29312",
-        storageBucket:     "cna-care-29312.firebasestorage.app",
-        messagingSenderId: "682938308807",
-        appId:             "1:682938308807:web:6de27f04f77f2d08ca46e2"
+        apiKey:            "AIzaSyBwR3Jlk1s_OTzbkcvwanPd65E3cPfNQ9o",
+        authDomain:        "cnacare-hr.firebaseapp.com",
+        databaseURL:       "https://cnacare-hr-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId:         "cnacare-hr",
+        storageBucket:     "cnacare-hr.firebasestorage.app",
+        messagingSenderId: "282782814034",
+        appId:             "1:282782814034:web:28eb45f3442adca36b348b"
       };
       if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 
@@ -2099,6 +2355,7 @@ function getFormPatient() {
     height: document.getElementById('p-height').value,
     weight: document.getElementById('p-weight').value,
     cgGender:  (document.querySelector('input[name="p-cg-gender"]:checked')?.value || ''),
+    diaper: document.getElementById('p-diaper').checked,
     move: document.getElementById('p-move').checked,
     extra: document.getElementById('p-extra').value.trim(),
     startDate: document.getElementById('p-start-date').value,
@@ -2238,7 +2495,6 @@ function ptRowHTML(p) {
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
         ${stBadge(p.status)}
         ${p.recruitInfo ? `<span class="badge b-amber" style="font-size:10px">🔄 재모집중</span>` : ''}
-        ${p.pendingReplace ? `<span class="badge" style="font-size:10px;background:var(--blue);color:#fff">🔄 대체구인중</span>` : ''}
         ${ptDdayBadge(p)}
       </div>
     </div>
@@ -2383,6 +2639,23 @@ function openPatient(id) {
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:6px">🔗 매칭 간병인</div>
     <div style="font-size:12px;color:var(--gray-lt);padding:6px 0">아직 매칭된 간병인이 없어요</div>`}
+    ${p.status==='매칭완료' && p.recruitInfo ? `
+    <div class="hr"></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--amber);margin-bottom:8px">🔜 연장 후 예약 교체 진행중</div>
+    <div style="background:var(--amber-lt);border-radius:var(--rsm);padding:10px 14px;margin-bottom:8px;font-size:12px;color:#92400e">
+      새 간병인 시작 예정일: <b>${p.recruitInfo.startDate||'—'} ${p.recruitInfo.startTime||''}</b><br>
+      (기존 간병인 근무 종료 후 자동으로 교체돼요)
+    </div>
+    ${p.pendingReplacement ? `
+    <div style="background:var(--green-lt);border-radius:var(--rsm);padding:10px 14px;display:flex;align-items:center;gap:12px">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700">🔜 ${p.pendingReplacement.name} <span style="font-size:11px;font-weight:400;color:var(--gray)">${p.pendingReplacement.age?p.pendingReplacement.age+'세':''} ${p.pendingReplacement.gender||''}</span></div>
+        <div style="font-size:11px;color:var(--gray);margin-top:2px">${formatPhone(p.pendingReplacement.phone)||''}</div>
+      </div>
+      <button class="btn btn-sm" onclick="openReplacementForm('${p.id}')">수정</button>
+    </div>` : `
+    <button class="btn btn-teal btn-sm" onclick="openReplacementForm('${p.id}')">🔜 예정 교체 간병인 등록</button>`}
+    ` : ''}
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:6px">발송 기록 (${pLogs.length}건)</div>
     <div style="max-height:140px;overflow-y:auto;font-size:12px">
@@ -2422,28 +2695,7 @@ function openPatient(id) {
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--teal);margin-bottom:6px">📝 메모</div>
     <textarea id="pt-memo-area" rows="3" placeholder="이 환자에 대한 메모를 남겨주세요..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--rsm);font-size:13px;line-height:1.7;resize:vertical;font-family:var(--sans);margin-bottom:6px">${p.memo||''}</textarea>
-    <button class="btn btn-teal btn-sm" onclick="savePtMemoFromModal('${p.id}')">메모 저장</button>
-    ${p.pendingReplace ? `
-    <div class="hr"></div>
-    <div style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:8px">🔄 대체 간병인 정보 <span style="font-size:10px;font-weight:400;color:var(--gray)">(기존 간병인 마감 시 자동 교체)</span></div>
-    <div class="g2" style="margin-bottom:8px">
-      <div class="field" style="margin-bottom:0"><label style="font-size:11px">이름</label>
-        <input type="text" id="pending-cg-name" value="${p.pendingCg&&p.pendingCg.name||''}" placeholder="대체 간병인 이름">
-      </div>
-      <div class="field" style="margin-bottom:0"><label style="font-size:11px">연락처</label>
-        <input type="text" id="pending-cg-phone" value="${p.pendingCg&&p.pendingCg.phone||''}" placeholder="010-0000-0000">
-      </div>
-      <div class="field" style="margin-bottom:0"><label style="font-size:11px">시작일</label>
-        <input type="date" id="pending-cg-startDate" value="${p.pendingCg&&p.pendingCg.startDate||p.recruitInfo&&p.recruitInfo.startDate||''}">
-      </div>
-      <div class="field" style="margin-bottom:0"><label style="font-size:11px">시작시간</label>
-        <input type="time" id="pending-cg-startTime" value="${p.pendingCg&&p.pendingCg.startTime||p.recruitInfo&&p.recruitInfo.startTime||''}">
-      </div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="savePendingCg('${p.id}')">대체 간병인 저장</button>
-      ${p.pendingCg&&p.pendingCg.name ? `<button class="btn btn-teal btn-sm" onclick="applyPendingCg('${p.id}')">✅ 지금 교체 적용</button>` : ''}
-    </div>` : ''}`;
+    <button class="btn btn-teal btn-sm" onclick="savePtMemoFromModal('${p.id}')">메모 저장</button>`;
   document.getElementById('pt-overlay').classList.add('open');
 }
 
@@ -2777,11 +3029,10 @@ function confirmEndPatient(id) {
   if(!p) { toast('환자를 찾을 수 없어요', true); return; }
 
   // 상태 변경
-  p.status       = '종료';
-  p.recruited    = true;
-  p.endDate      = endDate;
-  p.endTime      = endTime;
-  p.caregiverName = ''; // 간병인 연결 해제
+  p.status    = '종료';
+  p.recruited = true;
+  p.endDate   = endDate;
+  p.endTime   = endTime;
   if(endReason) p.endReason = endReason;
 
   // 실제 종료일로 duration 재계산 (예: 7일 예정 → 실제 4일 종료 → 4일로 변경)
@@ -2810,6 +3061,7 @@ function confirmEndPatient(id) {
     now2.toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit', hour12:false});
   const endMsg = buildEndReport(p, endDate, endTime); // 실제 종료일 전달
   reportLogs.unshift({
+    id:          genId(),
     patientId:   String(p.id),
     patientName: p.name,
     type:        'ended',
@@ -2844,15 +3096,14 @@ function deletePatient(id) {
 // ─── SEND PAGE ───
 function renderSend() {
   const active   = patients.filter(p=>p.status==='모집중'&&!p.recruitInfo);
-  const recruit  = patients.filter(p=>
-    (p.status==='모집중'&&p.recruitInfo) ||
-    (p.pendingReplace&&p.recruitInfo)  // 매칭완료지만 대체 구인 중
-  );
+  // 재모집: 일반 재모집(모집중) + 연장 후 예약 교체(매칭완료 상태로 기존 간병인 근무 중, 다음 간병인만 별도 구인)
+  const recruit  = patients.filter(p=>p.recruitInfo&&(p.status==='모집중'||p.status==='매칭완료'));
   const el = document.getElementById('send-pt-list');
 
   function ptCard(p, isRecruit) {
     const checked = selectedPtIds.has(String(p.id));
     const isSelected = selPt && selPt.id === p.id;
+    const isScheduled = isRecruit && p.status === '매칭완료'; // 연장 후 예약 교체 (기존 간병인 근무 중)
     return `<div class="pt-row" style="cursor:pointer;${isSelected?'border-color:var(--teal);box-shadow:0 0 0 3px rgba(11,122,110,.1)':''}" onclick="selectSendPt('${p.id}')">
       <div class="pt-top">
         <div style="display:flex;align-items:flex-start;gap:8px">
@@ -2860,12 +3111,12 @@ function renderSend() {
           <div>
             <div class="pt-name">${p.name}<span>${p.age||''}세 ${p.gender}</span></div>
             <div style="font-size:11px;color:var(--gray)">${p.hospital}</div>
-            ${isRecruit&&p.recruitInfo?`<div style="font-size:10px;color:var(--amber);margin-top:2px">🔄 ${p.recruitInfo.startDate} ~ ${p.recruitInfo.endDate||'—'} (${p.recruitInfo.duration||'?'})</div>`:''}
+            ${isRecruit&&p.recruitInfo?`<div style="font-size:10px;color:var(--amber);margin-top:2px">🔄 ${p.recruitInfo.startDate} ~ ${p.recruitInfo.endDate||'—'} (${p.recruitInfo.duration||'?'})${isScheduled?' · 기존 간병인 근무중':''}</div>`:''}
           </div>
         </div>
         <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
           ${stBadge(p.status)}
-          ${isRecruit?'<span class="badge b-amber" style="font-size:10px">재모집</span>':''}
+          ${isScheduled?'<span class="badge b-amber" style="font-size:10px">예약교체</span>':(isRecruit?'<span class="badge b-amber" style="font-size:10px">재모집</span>':'')}
         </div>
       </div>
     </div>`;
@@ -2994,7 +3245,7 @@ function updateSendSelectedUI() {
 }
 
 function toggleAllSendPt() {
-  const allPts = patients.filter(p=>p.status==='모집중');
+  const allPts = patients.filter(p=>p.status==='모집중'||(p.recruitInfo&&p.status==='매칭완료'));
   const allIds = allPts.map(p=>String(p.id));
   const allSelected = allIds.every(id=>selectedPtIds.has(id));
   if(allSelected) {
@@ -3208,6 +3459,7 @@ function bulkLogAll() {
 
   rooms.forEach(room => {
     logs.unshift({
+      id:          genId(),
       room,
       patientId:   selPt.id,
       patientName: selPt.name,
@@ -3235,7 +3487,7 @@ function copyForRoom(roomName) {
   if(!txt){toast('공고 내용이 없어요',true);return;}
   doCopy(txt);
   const now=new Date();
-  logs.unshift({room:roomName,patientId:selPt.id,patientName:selPt.name,
+  logs.unshift({id:genId(),room:roomName,patientId:selPt.id,patientName:selPt.name,
     time:now.toLocaleDateString('ko-KR')+' '+now.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false})});
   save();renderRooms();updateSidebar();
   toast(`✅ [${roomName}] 복사+기록 완료! 카카오톡 붙여넣기 하세요`);
@@ -3512,6 +3764,7 @@ function saveCg() {
     const now2 = new Date();
     const timeStr = now2.toLocaleDateString('ko-KR')+' '+now2.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
     reportLogs.unshift({
+      id:          genId(),
       patientId:   String(pt.id),
       patientName: pt.name,
       type:        'replace',
@@ -3740,93 +3993,6 @@ function openCgDetail(id) {
     <textarea id="cg-memo-area" rows="3" placeholder="이 간병인에 대한 메모를 남겨주세요..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:var(--rsm);font-size:13px;line-height:1.7;resize:vertical;font-family:var(--sans);margin-bottom:6px">${cg.memo||''}</textarea>
     <button class="btn btn-teal btn-sm" onclick="saveCgMemoFromModal('${cg.id}')">메모 저장</button>`;
   document.getElementById('cg-overlay').classList.add('open');
-}
-
-// ─── 대체 간병인 관리 ───
-function savePendingCg(ptId) {
-  const p = patients.find(x=>String(x.id)===String(ptId));
-  if(!p) return;
-  p.pendingCg = {
-    name:      (document.getElementById('pending-cg-name')?.value||'').trim(),
-    phone:     (document.getElementById('pending-cg-phone')?.value||'').trim(),
-    startDate: document.getElementById('pending-cg-startDate')?.value||'',
-    startTime: document.getElementById('pending-cg-startTime')?.value||''
-  };
-  markPtEdited(ptId);
-  save();
-  openPatient(ptId); // 모달 새로고침
-  toast('✅ 대체 간병인 정보 저장됐어요');
-}
-
-// 기존 간병인 마감 → 대체 간병인으로 즉시 교체
-function applyPendingCg(ptId) {
-  const p  = patients.find(x=>String(x.id)===String(ptId));
-  if(!p||!p.pendingCg||!p.pendingCg.name) return;
-  if(!confirm(`"${p.pendingCg.name}"으로 간병인을 교체하시겠어요?\n기존 간병인은 종료 처리됩니다.`)) return;
-
-  // 기존 간병인 종료
-  const oldCg = caregivers.find(c=>String(c.patientId)===String(ptId)&&c.workStatus!=='종료');
-  if(oldCg) {
-    oldCg.workStatus = '종료';
-    oldCg.endDate    = todayStr();
-    recalcDuration(oldCg, todayStr());
-    saveToAssignHistory(oldCg);
-    oldCg.patientId  = '';
-  }
-
-  // 대체 간병인을 새 레코드로 등록 (또는 기존 동명 간병인 재배정)
-  const existing = caregivers.find(c=>c.name===p.pendingCg.name&&c.workStatus==='종료');
-  if(existing) {
-    // 기존 종료 레코드 재활성화
-    existing.workStatus = '대기중';
-    existing.patientId  = String(ptId);
-    existing.startDate  = p.pendingCg.startDate || todayStr();
-    existing.startTime  = p.pendingCg.startTime || '';
-    existing.endDate    = p.endDate || '';
-    existing.endTime    = p.endTime || '';
-    delete existing.earlyEndPatientId;
-    delete existing.earlyEndSnapshot;
-  } else {
-    // 새 레코드 생성
-    const newCg = {
-      id:         Date.now(),
-      name:       p.pendingCg.name,
-      phone:      p.pendingCg.phone || '',
-      startDate:  p.pendingCg.startDate || todayStr(),
-      startTime:  p.pendingCg.startTime || '',
-      endDate:    p.endDate || '',
-      endTime:    p.endTime || '',
-      workStatus: '대기중',
-      patientId:  String(ptId),
-      hospital:   p.hospital || ''
-    };
-    caregivers.unshift(newCg);
-    _newLocalCgIds.add(String(newCg.id));
-  }
-
-  // 환자 업데이트
-  p.caregiverName  = p.pendingCg.name;
-  p.status         = '매칭완료';
-  p.pendingReplace = false;
-  delete p.recruitInfo;
-  delete p.pendingCg;
-
-  markPtEdited(ptId);
-  save();
-  closeOverlay('pt-overlay');
-  renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
-  toast('✅ 대체 간병인 교체 완료!');
-}
-
-// checkAutoEnd에서 기존 간병인 종료 시 대체 간병인 자동 교체
-function checkPendingCgSwitch() {
-  const today = todayStr();
-  patients.filter(p=>p.pendingReplace&&p.pendingCg&&p.pendingCg.name).forEach(p=>{
-    const cg = caregivers.find(c=>String(c.patientId)===String(p.id));
-    // 기존 간병인이 종료됐거나 마감일이 지났으면 자동 교체
-    const cgEnded = !cg || cg.workStatus==='종료' || (cg.endDate && cg.endDate<=today);
-    if(cgEnded) applyPendingCg(String(p.id));
-  });
 }
 
 // ─── 모달에서 메모 저장 ───
@@ -4181,7 +4347,7 @@ function openExtendPatient(ptId) {
     + '<div class="field"><label>간병인 변경</label>'
     + '<select id="ext-cg-change" style="font-size:13px;padding:8px;border:1px solid var(--border);border-radius:var(--rsm);width:100%">'
     + sameOpt
-    + '<option value="new">🔄 다른 간병인으로 교체 (기존 간병인 유지 + 대체 구인)</option></select></div>'
+    + '<option value="new">🔄 다른 간병인으로 교체 (기존 간병인 마감일부터 새 간병인 구인)</option></select></div>'
     + '<div style="display:flex;gap:8px;margin-top:1rem">'
     + '<button class="btn btn-teal" style="flex:1;justify-content:center" onclick="confirmExtend(&quot;' + ptIdEsc + '&quot;)">연장 확정</button>'
     + '<button class="btn" onclick="closeOverlay(&quot;extend-overlay&quot;)">취소</button></div>';
@@ -4216,35 +4382,92 @@ function confirmExtend(ptId) {
     save(); closeOverlay('extend-overlay'); renderPatients(); renderCaregivers();
     toast('✅ '+p.name+' 연장됐어요 → '+newEndDate+' '+newEndTime);
   } else {
-    // 다른 간병인으로 교체 → 기존 간병인은 마감일까지 유지
-    // 새 간병인 시작일 = 기존 간병인 마감일/시간
-    const cgEndDate = cg ? cg.endDate : '';
-    const cgEndTime = cg ? cg.endTime : '';
-
-    p.endDate  = newEndDate;
-    p.endTime  = newEndTime;
-    if(days !== null && days >= 0) p.duration = days + '일';
-    // 환자 상태는 매칭완료 유지 (기존 간병인 계속 근무)
-    p.pendingReplace = true; // 대체 간병인 구인 중 표시
-
-    // 새 간병인의 서비스 시작일 = 기존 간병인 마감일
-    const replaceDays = (cgEndDate && newEndDate) ? (() => {
-      const d1 = parseLocalDate(cgEndDate);
-      const d2 = parseLocalDate(newEndDate);
-      return d1 && d2 ? Math.round((d2-d1)/86400000) : null;
-    })() : null;
-
+    // 예약 교체: 기존 간병인은 그대로 자기 마감일까지 근무 계속 (건드리지 않음)
+    // 환자는 계속 "매칭완료" 상태 유지 (기존 간병인이 계속 매칭 간병인으로 표시됨)
+    // 새 간병인 구인공고만 "기존 간병인 마감일/마감시간"을 시작일시로 별도 진행
+    var repStart     = cg ? (cg.endDate||'') : '';
+    var repStartTime = cg ? (cg.endTime||'') : '';
+    if(!repStart) {
+      toast('교체할 새 간병인을 구하려면 먼저 기존 간병인의 마감일을 등록해주세요', true);
+      return;
+    }
+    var repDays = Math.round((parseLocalDate(newEndDate)-parseLocalDate(repStart))/86400000);
+    if(repDays < 0) {
+      toast('새 마감일이 기존 간병인 마감일보다 빠를 수 없어요', true);
+      return;
+    }
+    p.endDate = newEndDate; p.endTime = newEndTime;
+    if(days!==null&&days>=0) p.duration = days+'일';
     p.recruitInfo = {
-      startDate: cgEndDate  || todayStr(),
-      startTime: cgEndTime  || '',
-      endDate:   newEndDate,
-      duration:  replaceDays !== null && replaceDays >= 0 ? replaceDays + '일' : '',
-      reason:    '연장 후 간병인 교체 대기'
+      startDate: repStart, startTime: repStartTime, endDate: newEndDate,
+      duration: repDays+'일', reason: '연장 후 간병인 교체(예약)'
     };
-
+    // p.status/caregiverName/recruited는 그대로 둠 → 기존 간병인이 계속 매칭 간병인으로 표시됨
     save(); closeOverlay('extend-overlay'); renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
-    toast('✅ ' + p.name + ' 연장됐어요. 기존 간병인 유지 + 대체 간병인 구인 중!');
+    toast('✅ '+p.name+' 연장됐어요. 기존 간병인은 '+repStart+'까지 근무하고, 이후 교체할 간병인 공고를 올려주세요.');
   }
+}
+
+// ── 예정 교체 간병인 정보 입력/수정 (기존 간병인 근무 종료 시 자동 인계) ──
+function openReplacementForm(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  if(!p) return;
+  const rep = p.pendingReplacement || {};
+  document.getElementById('replace-title').textContent = '🔜 ' + p.name + ' - 예정 교체 간병인';
+  const riHtml = p.recruitInfo
+    ? '<div style="background:var(--amber-lt);border-radius:var(--rsm);padding:8px 12px;margin-bottom:.875rem;font-size:12px;color:#92400e">'
+      + '🔄 새 간병인 시작일: <b>' + (p.recruitInfo.startDate||'—') + ' ' + (p.recruitInfo.startTime||'') + '</b>'
+      + '</div>'
+    : '';
+  document.getElementById('replace-body').innerHTML = riHtml
+    + '<div class="g2">'
+    + '<div class="field"><label>이름</label><input type="text" id="rep-name" value="' + (rep.name||'') + '"></div>'
+    + '<div class="field"><label>나이</label><input type="number" id="rep-age" value="' + (rep.age||'') + '"></div>'
+    + '</div><div class="g2">'
+    + '<div class="field"><label>성별</label><select id="rep-gender"><option value="">선택</option><option value="여자"' + (rep.gender==='여자'?' selected':'') + '>여자</option><option value="남자"' + (rep.gender==='남자'?' selected':'') + '>남자</option></select></div>'
+    + '<div class="field"><label>연락처</label><input type="tel" id="rep-phone" value="' + (rep.phone||'') + '"></div>'
+    + '</div>'
+    + '<div class="field"><label>경력</label><input type="text" id="rep-career" value="' + (rep.career||'') + '"></div>'
+    + '<div class="g3">'
+    + '<div class="field"><label>은행명</label><input type="text" id="rep-bankName" value="' + (rep.bankName||'') + '"></div>'
+    + '<div class="field"><label>계좌번호</label><input type="text" id="rep-bankAccount" value="' + (rep.bankAccount||'') + '"></div>'
+    + '<div class="field"><label>예금주</label><input type="text" id="rep-bankHolder" value="' + (rep.bankHolder||'') + '"></div>'
+    + '</div>'
+    + '<div class="field"><label>메모</label><textarea id="rep-note">' + (rep.note||'') + '</textarea></div>'
+    + '<div style="display:flex;gap:8px;margin-top:1rem">'
+    + '<button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveReplacementInfo(&quot;' + String(ptId).replace(/'/g,"\\'") + '&quot;)">저장</button>'
+    + (p.pendingReplacement ? '<button class="btn btn-red" onclick="clearPendingReplacement(&quot;' + String(ptId).replace(/'/g,"\\'") + '&quot;)">취소</button>' : '')
+    + '<button class="btn" onclick="closeOverlay(&quot;replace-overlay&quot;)">닫기</button></div>';
+  document.getElementById('replace-overlay').classList.add('open');
+}
+
+function saveReplacementInfo(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  if(!p) return;
+  const name = document.getElementById('rep-name').value.trim();
+  if(!name) { toast('이름을 입력해주세요', true); return; }
+  p.pendingReplacement = {
+    name,
+    age: document.getElementById('rep-age').value.trim(),
+    gender: document.getElementById('rep-gender').value,
+    phone: document.getElementById('rep-phone').value.trim(),
+    career: document.getElementById('rep-career').value.trim(),
+    bankName: document.getElementById('rep-bankName').value.trim(),
+    bankAccount: document.getElementById('rep-bankAccount').value.trim(),
+    bankHolder: document.getElementById('rep-bankHolder').value.trim(),
+    note: document.getElementById('rep-note').value.trim()
+  };
+  save(); closeOverlay('replace-overlay'); openPatient(ptId);
+  toast('✅ 예정 교체 간병인 정보가 저장됐어요. 기존 간병인 근무 종료 시 자동으로 인계돼요.');
+}
+
+function clearPendingReplacement(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  if(!p) return;
+  if(!confirm('예정된 교체 간병인 정보를 삭제할까요?')) return;
+  delete p.pendingReplacement;
+  save(); closeOverlay('replace-overlay'); openPatient(ptId);
+  toast('삭제됐어요');
 }
 
 function toggleReassignSelect(cgId) {
@@ -4436,8 +4659,13 @@ function confirmEarlyTerminate(cgId) {
       pt.endTime       = endTime;
       pt.caregiverName = '';
       if(reason) pt.endReason = reason;
+      delete pt.pendingReplacement; // 혹시 예약해둔 대체 간병인이 있었다면 정리 (완전종료 선택했으므로)
       recalcDuration(pt, endDate); // 실제 종료일로 duration 재계산
       sendSheets({type:'updatePatient', name:pt.name, startDate:pt.startDate, caregiverName:'', status:'종료'});
+    } else if(pt.pendingReplacement) {
+      // 이미 예약해둔 대체 간병인이 있으면 → 바로 인계 (환자는 계속 매칭완료 상태 유지, 재모집 절차 불필요)
+      promotePendingReplacement(pt, endDate, endTime || cg.endTime || '');
+      sendSheets({type:'updatePatient', name:pt.name, startDate:pt.startDate, caregiverName:pt.caregiverName, status:'매칭완료'});
     } else {
       // 재모집: 환자 모집중 복귀
       // 원래 마감일 보존 (중도종료 전)
@@ -4663,6 +4891,8 @@ function loadSettings() {
   if(im) im.value = cfg.insuranceMemo || 'KB2025개인간병인배상책임보험(3천)/2025-3561946-1';
   const snd = document.getElementById('cfg-sound');
   if(snd) snd.checked = cfg.sound !== false;
+  const hol = document.getElementById('cfg-holidays');
+  if(hol) hol.value = (cfg.holidays||[]).join('\n');
 }
 function saveSettings() {
   cfg.name        = document.getElementById('cfg-name').value.trim()||'씨앤에이케어간병협회';
@@ -4675,6 +4905,10 @@ function saveSettings() {
   cfg.insuranceDays  = parseInt(document.getElementById('cfg-insurance-days')?.value ?? 3);
   cfg.insuranceMemo  = document.getElementById('cfg-insurance-memo')?.value.trim() || 'KB2025개인간병인배상책임보험(3천)/2025-3561946-1';
   cfg.sound = document.getElementById('cfg-sound')?.checked !== false;
+  const holEl = document.getElementById('cfg-holidays');
+  if(holEl) {
+    cfg.holidays = holEl.value.split('\n').map(l=>l.trim()).filter(Boolean);
+  }
   save(); startRemind(); toast('설정 저장됐어요');
 }
 
@@ -5146,6 +5380,7 @@ function saveReportLog() {
     existing.time = timeStr;
   } else {
     reportLogs.unshift({
+      id: genId(),
       patientId:   String(selRptPt.id),
       patientName: selRptPt.name,
       type, time: timeStr, msg
@@ -5577,9 +5812,9 @@ function showCalDetail(dateStr) {
       var bdColor = p.isReserve ? '#E65100' : 'var(--amber)';
       var pt = cg.patientId ? patients.find(function(pt){return String(pt.id)===String(cg.patientId);}) : null;
       var ptStr = pt ? ' (' + pt.name + ')' : '';
-      var reserveStr = p.isReserve ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">마감일: ' + (p.payDate||p.endDate) + '</div>' : '';
+      var reserveStr = p.isReserve ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">원래 지급일: ' + (p.payDate||p.endDate) + '</div>' : '';
       parts.push('<div style="padding:10px 12px;border-left:3px solid ' + bdColor + ';margin-bottom:8px;background:' + bgColor + ';border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:' + bdColor + ';margin-bottom:3px">💰 ' + p.label + (p.isReserve?' [예약이체]':'') + '</div>'
+        + '<div style="font-size:11px;font-weight:700;color:' + bdColor + ';margin-bottom:3px">💰 ' + p.label + (p.isReserve?' [주말·공휴일 조정]':'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
         + reserveStr
         + '</div>');
@@ -5758,7 +5993,7 @@ function saveNoticeEntry() {
     const n = notices.find(x=>String(x.id)===String(editNoticeId));
     if(n) Object.assign(n, {title, content, level, updatedAt:todayStr()});
   } else {
-    notices.unshift({ id:Date.now()+Math.random(), title, content, level, createdAt:todayStr(), type:'manual' });
+    notices.unshift({ id:genId(), title, content, level, createdAt:todayStr(), type:'manual' });
   }
   save(); renderNotices();
   document.getElementById('notice-editor').style.display = 'none';
@@ -5786,7 +6021,7 @@ function saveAutoNotice(content, level) {
   // 오늘 날짜 자동알림 기존 것 제거 (중복 방지)
   notices = notices.filter(function(n){ return !(n.type==='auto' && n.createdAt===today); });
   notices.unshift({
-    id: Date.now()+Math.random(),
+    id: genId(),
     title: '',
     content: content,
     level: level,
@@ -5846,7 +6081,7 @@ function checkAllRemind() {
       if(p.date !== today) return;
       const pt = patients.find(pt=>String(pt.id)===String(cg.patientId));
       const ptName = pt ? ' ('+pt.name+')' : '';
-      if(p.isReserve) alerts.push('💰 '+cg.name+' '+p.label+' [예약이체] ('+(p.payDate||p.endDate)+' 마감)');
+      if(p.isReserve) alerts.push('💰 '+cg.name+' '+p.label+' [주말·공휴일 조정] (원래 '+(p.payDate||p.endDate)+')');
       else alerts.push('💰 '+cg.name+' '+p.label+' 지급일'+ptName);
     });
   });
@@ -5888,7 +6123,7 @@ function checkAllRemind() {
       if(p.date !== today) return;
       const pt = patients.find(pt=>String(pt.id)===String(cg.patientId));
       const ptName = pt ? ' (<b>'+pt.name+'</b>)' : '';
-      if(p.isReserve) alertsHtml.push('💰 <b>'+cg.name+'</b> '+p.label+' <span style="color:var(--amber)">[예약이체]</span> ('+(p.payDate||p.endDate)+' 마감)');
+      if(p.isReserve) alertsHtml.push('💰 <b>'+cg.name+'</b> '+p.label+' <span style="color:var(--amber)">[주말·공휴일 조정]</span> (원래 '+(p.payDate||p.endDate)+')');
       else alertsHtml.push('💰 <b>'+cg.name+'</b> '+p.label+' 지급일'+ptName);
     });
   });
@@ -5911,7 +6146,7 @@ function checkPayRemind(testMode) {
       calcPayDates(cg).filter(p=>p.date>=today).slice(0,2).forEach(p=>{
         const isToday = p.date===today;
         const prefix  = !isToday?`📅 ${p.date} `:'';
-        if(p.isReserve) alerts.push(`${prefix}💰 <b>${cg.name}</b> ${p.label} [예약이체] (${p.payDate||p.endDate} 마감)`);
+        if(p.isReserve) alerts.push(`${prefix}💰 <b>${cg.name}</b> ${p.label} [주말·공휴일 조정] (원래 ${p.payDate||p.endDate})`);
         else alerts.push(`${prefix}💰 <b>${cg.name}</b> ${p.label} 지급일`);
       });
     });
@@ -6011,7 +6246,7 @@ function saveMemoEntry() {
     const m = memos.find(x=>String(x.id)===String(editMemoId));
     if(m) Object.assign(m, {date,author,content,patientId,caregiverId,updatedAt:todayStr()});
   } else {
-    memos.unshift({ id:Date.now()+Math.random(), date, author, content, patientId, caregiverId, createdAt:todayStr() });
+    memos.unshift({ id:genId(), date, author, content, patientId, caregiverId, createdAt:todayStr() });
   }
   save(); renderMemo();
   document.getElementById('memo-editor').style.display = 'none';
@@ -6086,7 +6321,8 @@ function initMemoPage() {
 
 // 규칙:
 // - 8일 이상: 시작일+8일 다음날이 첫 주급일, 이후 매주 같은 요일
-// - 7일 이하: 마감일 당일 지급 (주말이면 전 금요일 예약이체)
+// - 7일 이하: 마감일 당일 지급
+// - 지급 예정일이 주말(토/일) 또는 공휴일(설정 → 공휴일 목록)이면 다음주 월요일로 조정
 function calcPayDates(cg) {
   if(!cg.startDate) return [];
   const results = [];
@@ -6104,18 +6340,15 @@ function calcPayDates(cg) {
   }
 
   if(totalDays !== null && totalDays <= 6) {
-    // 6일 이하 단기: 마감일 당일 지급
+    // 6일 이하 단기: 마감일 당일 지급 (주말/공휴일이면 다음주 월요일로 조정)
     const payDate = parseLocalDate(cg.endDate);
     if(!payDate) return [];
-    const dow = payDate.getDay();
-    if(dow === 0 || dow === 6) {
-      // 주말 → 전 금요일 예약이체
-      const fri = new Date(payDate);
-      fri.setDate(fri.getDate() - (dow === 6 ? 1 : 2));
-      results.push({ date: toLocalDateStr(fri), label: '단기 급여', isReserve: true, endDate: toLocalDateStr(payDate) });
-    } else {
-      results.push({ date: toLocalDateStr(payDate), label: '단기 급여', isReserve: false, endDate: toLocalDateStr(payDate) });
-    }
+    const adjusted = adjustPayDateToMonday(payDate);
+    const wasAdjusted = toLocalDateStr(adjusted) !== toLocalDateStr(payDate);
+    results.push({
+      date: toLocalDateStr(adjusted), label: '단기 급여',
+      isReserve: wasAdjusted, endDate: toLocalDateStr(payDate)
+    });
   } else {
     // 7일 이상: 시작일 + 7일부터 매주 같은 요일 지급
     // 예: 6/8(월) 시작 → 6/15(월) 첫 주급, 6/22(월) 2주차...
@@ -6129,15 +6362,10 @@ function calcPayDates(cg) {
     let week = 1;
     while(cur <= maxDate) {
       const dateStr = toLocalDateStr(cur);
-      const dow = cur.getDay();
-      const isReserve = dow === 0 || dow === 6;
-      let remindDate = dateStr;
-      if(isReserve) {
-        const fri = new Date(cur);
-        fri.setDate(fri.getDate() - (dow === 6 ? 1 : 2));
-        remindDate = toLocalDateStr(fri);
-      }
-      results.push({ date: remindDate, payDate: dateStr, label: `${week}주차 주급`, isReserve, week });
+      const adjusted = adjustPayDateToMonday(cur);
+      const adjustedStr = toLocalDateStr(adjusted);
+      const wasAdjusted = adjustedStr !== dateStr;
+      results.push({ date: adjustedStr, payDate: dateStr, label: `${week}주차 주급`, isReserve: wasAdjusted, week });
       cur.setDate(cur.getDate() + 7);
       week++;
     }
@@ -6166,6 +6394,29 @@ function toLocalDateStr(d) {
 }
 
 function todayStr() { return toLocalDateStr(new Date()); }
+
+// 설정에 등록된 공휴일 목록에 해당 날짜가 있는지 확인 ("YYYY-MM-DD 공휴일명" 형식에서 날짜만 비교)
+function isHolidayDate(dateStr) {
+  if(!dateStr) return false;
+  return (cfg.holidays||[]).some(h => String(h).trim().split(/\s+/)[0] === dateStr);
+}
+
+// 급여지급일이 주말(토/일) 또는 공휴일이면 다음 영업일로 이동
+// (주말이면 보통 월요일이 되고, 그 월요일마저 공휴일이면 화요일... 식으로 하루씩 순차 이동)
+function adjustPayDateToMonday(date) {
+  let d = new Date(date);
+  let guard = 0;
+  while(guard < 14) {
+    const dow = d.getDay(); // 0=일 ~ 6=토
+    const isWeekend = dow === 0 || dow === 6;
+    const isHoliday = isHolidayDate(toLocalDateStr(d));
+    if(!isWeekend && !isHoliday) break;
+    d.setDate(d.getDate() + 1); // 하루씩 다음날로 이동하며 재확인
+    guard++;
+  }
+  return d;
+}
+
 function nowTimeStr() {
   const n=new Date();
   return n.getHours().toString().padStart(2,'0')+':'+n.getMinutes().toString().padStart(2,'0');
@@ -6274,7 +6525,7 @@ function editAttendance(cgId, overrideDate) {
   const useDate = overrideDate || getAttendDate() || todayStr();
   // 신버전(inDate) + 구버전(date) 모두 찾기
   let rec = attendance.find(a=>a.cgId===cgId&&(a.inDate===useDate||a.date===useDate));
-  if(!rec){ rec={cgId, inDate:useDate, inTime:'', outDate:useDate, outTime:''}; attendance.push(rec); }
+  if(!rec){ rec={id:genId(), cgId, inDate:useDate, inTime:'', outDate:useDate, outTime:''}; attendance.push(rec); }
   // 구버전이면 신버전으로 변환
   if(rec.date && !rec.inDate) { rec.inDate=rec.date; rec.outDate=rec.date; delete rec.date; }
 
@@ -6326,7 +6577,7 @@ function saveAttendance(cgId, origDate) {
 
   // 신버전 구조로 저장
   let rec = attendance.find(a=>a.cgId===cgId&&a.inDate===newInDate);
-  if(!rec){ rec={cgId, inDate:newInDate, inTime:'', outDate:'', outTime:''}; attendance.push(rec); }
+  if(!rec){ rec={id:genId(), cgId, inDate:newInDate, inTime:'', outDate:'', outTime:''}; attendance.push(rec); }
   rec.inDate  = newInDate;
   rec.inTime  = newInTime;
   rec.outDate = newOutDate;
@@ -6387,6 +6638,7 @@ function autoFillAttendance(cgId) {
     if(!existing) {
       if(isFirst) {
         attendance.push({
+          id:      genId(),
           cgId:    String(cgId),
           inDate:  dateStr,
           inTime:  cg.startTime || '',
@@ -6397,6 +6649,7 @@ function autoFillAttendance(cgId) {
         added++;
       } else {
         attendance.push({
+          id:      genId(),
           cgId:    String(cgId),
           inDate:  dateStr,
           inTime:  '00:00',
@@ -6441,7 +6694,7 @@ function checkIn(cgId) {
   const selDate = getAttendDate();
   const now = nowTimeStr();
   let rec = attendance.find(a=>a.cgId===cgId&&a.inDate===selDate);
-  if(!rec){ rec={cgId, inDate:selDate, inTime:'', outDate:'', outTime:''}; attendance.push(rec); }
+  if(!rec){ rec={id:genId(), cgId, inDate:selDate, inTime:'', outDate:'', outTime:''}; attendance.push(rec); }
   rec.inDate = selDate;
   rec.inTime = now;
   delete rec.auto; // 자동 기록 아님 표시
@@ -6642,6 +6895,42 @@ function startRemind() {
 }
 
 // ─── 자동 종료 처리 ───
+// ── 연장 후 예약 교체: 기존 간병인 마감 시 예정된 대체 간병인으로 인계 ──
+// 환자는 계속 "매칭완료" 상태를 유지한 채, 새 간병인 정보로 매칭만 교체된다.
+function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
+  if(!pt || !pt.pendingReplacement) return false;
+  const rep = pt.pendingReplacement;
+  const prevCgName = pt.caregiverName || ''; // 인계 전 기존 간병인 이름 보존
+  const newCg = {
+    id: genId(),
+    patientId: String(pt.id),
+    regDate: todayStr(),
+    workStatus: '근무중', // 인계 시점 = 시작 시점이므로 바로 근무중 처리
+    name: rep.name||'', ssn: rep.ssn||'', age: rep.age||'', gender: rep.gender||'',
+    pay: rep.pay||pt.pay||'',
+    phone: rep.phone||'',
+    bankName: rep.bankName||'', bankAccount: rep.bankAccount||'', bankHolder: rep.bankHolder||'',
+    region: rep.region||'', hospital: pt.hospital||'',
+    startDate: outgoingEndDate||'', startTime: outgoingEndTime||'',
+    endDate: pt.endDate||'', endTime: pt.endTime||'',
+    career: rep.career||'', dayOff: rep.dayOff||'', specialty: rep.specialty||'',
+    accident: rep.accident||'', feedback: rep.note||''
+  };
+  caregivers.unshift(newCg);
+  pt.caregiverName = newCg.name;
+  pt.status    = '매칭완료';
+  pt.recruited = true;
+  if(!pt.recruitHistory) pt.recruitHistory = [];
+  pt.recruitHistory.push({
+    endDate: outgoingEndDate||'', recruitDate: outgoingEndDate||'',
+    reason: '연장 후 예약 교체', prevCg: prevCgName,
+    recordedAt: new Date().toLocaleDateString('ko-KR')
+  });
+  delete pt.pendingReplacement;
+  delete pt.recruitInfo;
+  return true;
+}
+
 function checkAutoStart() {
   // Firebase 데이터 로드 완료 전이면 스킵
   if(!_fbReady) return;
@@ -6725,14 +7014,35 @@ function checkAutoEnd() {
     changed = true;
 
     const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
+    let skipEndReport = false; // 예약 교체 인계/대체 미확보 재모집 전환은 실제 "환자 종료"가 아니므로 종료보고 제외
     if(pt && pt.status !== '종료') {
-      pt.endDate  = cg.endDate;
-      pt.endTime  = cg.endTime;
-      pt.status   = '종료';
-      pt.recruited = true;
-      changed = true;
+      if(pt.pendingReplacement) {
+        // 연장 후 예약 교체: 미리 등록해둔 대체 간병인으로 인계 (환자는 계속 매칭 상태 유지)
+        promotePendingReplacement(pt, cg.endDate, cg.endTime);
+        changed = true;
+        skipEndReport = true;
+      } else if(pt.endDate && cg.endDate && parseLocalDate(pt.endDate) > parseLocalDate(cg.endDate)) {
+        // 환자는 연장됐지만 대체 간병인을 아직 못 구한 상태 → 즉시 재모집으로 전환 (환자는 종료 처리하지 않음)
+        pt.status    = '모집중';
+        pt.recruited = false;
+        pt.caregiverName = '';
+        if(!pt.recruitInfo) {
+          pt.recruitInfo = {
+            startDate: cg.endDate, startTime: cg.endTime||'', endDate: pt.endDate,
+            duration: '', reason: '연장 후 간병인 교체(대체 미확보)'
+          };
+        }
+        changed = true;
+        skipEndReport = true;
+      } else {
+        pt.endDate  = cg.endDate;
+        pt.endTime  = cg.endTime;
+        pt.status   = '종료';
+        pt.recruited = true;
+        changed = true;
+      }
     }
-    endedItems.push({pt, cg});
+    if(!skipEndReport) endedItems.push({pt, cg});
   });
 
   // ② 환자 마감일 기준 자동 종료 (간병인 endDate 없는 경우)
@@ -6794,6 +7104,7 @@ function checkAutoEnd() {
       newItems.forEach(({pt}) => {
         if(!pt) return;
         reportLogs.unshift({
+          id:          genId(),
           patientId:   String(pt.id),
           patientName: pt.name,
           type:        'ended',
@@ -6836,9 +7147,6 @@ function checkAutoEnd() {
     if(activePage === 'page-report')    renderReport();
     updateSidebar();
   }
-
-  // 기존 간병인 종료 시 대체 간병인 자동 교체 체크
-  checkPendingCgSwitch();
 }
 
 function fireRemind() {
@@ -7413,7 +7721,7 @@ function parseCSVFile(filename, text) {
         const pay=g(row,'간병비').replace(/[^0-9]/g,'');
         const diag=g(row,'질환');
         patients.unshift({
-          id:Date.now()+Math.random(),
+          id:genId(),
           createdAt:g(row,'날짜')||new Date().toLocaleString('ko-KR'),
           name, gender:g(row,'성별'), contact:g(row,'연락처'),
           hospital:g(row,'병원'),
@@ -7449,7 +7757,7 @@ function parseCSVFile(filename, text) {
           if(a) age=String(a);
         }
         caregivers.unshift({
-          id:Date.now()+Math.random(),
+          id:genId(),
           regDate:g(row,'날짜'), workStatus:g(row,'근무상태')||'대기중',
           name, ssn, age, gender:g(row,'성별'),
           pay:pay||'', phone:g(row,'연락처'),
@@ -7515,7 +7823,7 @@ function autoMatch() {
     count++;
   });
 
-  // ③ 간병인-환자 patientId 연결 (중도종료 + 종료 간병인 제외)
+  // ③ 간병인-환자 patientId 연결 (중도종료 간병인 제외)
   patients.forEach(p => {
     if(p.status === '종료') return;
     if(!p.caregiverName) return;
@@ -7523,7 +7831,6 @@ function autoMatch() {
     const cg = caregivers.find(c =>
       c.name === cgName &&
       !isEarlyEnded(c) &&
-      c.workStatus !== '종료' &&
       (!c.patientId || c.patientId === String(p.id))
     );
     if(!cg) return;
@@ -7534,10 +7841,9 @@ function autoMatch() {
     count++;
   });
 
-  // ④ 반대 방향: 간병인 patientId → 환자 (중도종료 + 종료 간병인 완전 제외)
+  // ④ 반대 방향: 간병인 patientId → 환자 (중도종료 간병인 완전 제외)
   caregivers.forEach(c => {
     if(isEarlyEnded(c)) return;
-    if(c.workStatus === '종료') return; // 종료 간병인은 재매칭 금지
     if(!c.patientId) return;
     const pt = patients.find(p => String(p.id) === String(c.patientId));
     if(!pt) return;
