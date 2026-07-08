@@ -2925,9 +2925,9 @@ function savePatientEdit(id) {
     }
 
     // ② 마감일 동시 업데이트 (startDate + duration 기반)
-    // 단, 연장 후 예약교체가 진행 중이면 기존 간병인은 자기 마감일까지만 근무해야 하므로
-    // 환자의 연장된 마감일을 여기서 동기화하면 안 됨 (건드리지 않고 그대로 유지)
-    if(!p.pendingReplacement) {
+    // 단, 연장 후 예약교체가 진행 중이면(recruitInfo 설정 시점부터 실제 인계 전까지) 기존 간병인은
+    // 자기 마감일까지만 근무해야 하므로 환자의 연장된 마감일을 여기서 동기화하면 안 됨
+    if(!p.recruitInfo && !p.pendingReplacement) {
       let newEndDate = p.endDate || '';
       let newEndTime = p.endTime || p.startTime || '';
       if(!newEndDate && p.startDate && p.duration) {
@@ -6027,9 +6027,11 @@ function showCalDetail(dateStr) {
   });
 
   // 급여 지급일
+  var paidCgIdsToday = {};
   caregivers.filter(function(c){return !!c.startDate;}).forEach(function(cg) {
     calcPayDates(cg).forEach(function(p) {
       if(p.date !== dateStr) return;
+      paidCgIdsToday[String(cg.id)] = true;
       var bgColor = p.isReserve ? '#FFF3E0' : 'var(--amber-lt)';
       var bdColor = p.isReserve ? '#E65100' : 'var(--amber)';
       var pt = cg.patientId ? patients.find(function(pt){return String(pt.id)===String(cg.patientId);}) : null;
@@ -6042,6 +6044,21 @@ function showCalDetail(dateStr) {
         + reserveStr
         + '</div>' });
     });
+  });
+  // 당일 근무가 마감되는 간병인은 정규 급여 주기와 상관없이 자동으로 최종 정산 건 추가
+  // (교체/중도종료/기간마감 등 어떤 사유로 마감되든, 마감일 = 그날까지의 급여를 정산해야 하므로)
+  caregivers.forEach(function(cg) {
+    if(cg.endDate !== dateStr) return;
+    if(paidCgIdsToday[String(cg.id)]) return; // 이미 정규 급여 지급일로 잡혀있으면 중복 추가 안 함
+    if(!cg.pay) return;
+    var pt = cg.patientId ? patients.find(function(p){return String(p.id)===String(cg.patientId);}) : null;
+    var ptStr = pt ? ' (' + pt.name + ')' : '';
+    payEvents.push({ time: '', html:
+      '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 최종 정산 (근무 마감)</div>'
+      + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
+      + '<div style="font-size:11px;color:var(--gray);margin-top:2px">일급 ' + Number(cg.pay).toLocaleString() + '원 기준 · 마감일까지 정산 필요</div>'
+      + '</div>' });
   });
 
   // 시간대순 정렬 (시간 없는 항목은 맨 뒤로)
