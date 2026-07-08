@@ -5154,8 +5154,14 @@ function selectRptPtType(ptId, type) {
     const log = reportLogs.find(l=>String(l.patientId)===String(ptId)&&l.type==='ended');
     msg = log ? log.msg : buildEndReport(selRptPt);
   } else if(type==='replace') {
-    const log = reportLogs.find(l=>String(l.patientId)===String(ptId)&&l.type==='replace');
-    msg = log ? log.msg : buildReplaceReport(selRptPt, '', '');
+    // 항상 최신 정보/양식으로 새로 생성 (저장된 옛 로그를 그대로 재사용하지 않음)
+    const cgForReplace = findCgForPatient(selRptPt);
+    msg = buildReplaceReport(
+      selRptPt,
+      cgForReplace ? cgForReplace.startDate : selRptPt.startDate,
+      cgForReplace ? cgForReplace.startTime : selRptPt.startTime,
+      cgForReplace
+    );
   }
   const titleEl = document.getElementById('rpt-title-label');
   titleEl.textContent = type==='matched' ? `📋 제목: ${selRptPt.name} / ${selRptPt.hospital||''}`
@@ -5544,7 +5550,15 @@ function regenerateReport() {
   let msg = '';
   if(rptType === 'matched')  msg = buildMatchReport(selRptPt);
   else if(rptType === 'ended')   msg = buildEndReport(selRptPt);
-  else if(rptType === 'replace') msg = buildReplaceReport(selRptPt, '', '');
+  else if(rptType === 'replace') {
+    const cgForReplace = findCgForPatient(selRptPt);
+    msg = buildReplaceReport(
+      selRptPt,
+      cgForReplace ? cgForReplace.startDate : selRptPt.startDate,
+      cgForReplace ? cgForReplace.startTime : selRptPt.startTime,
+      cgForReplace
+    );
+  }
   else msg = buildMatchReport(selRptPt);
   document.getElementById('rpt-preview').value = msg;
   toast('✅ 현재 데이터로 재생성됐어요. 수정 후 저장하세요.');
