@@ -5257,30 +5257,35 @@ function buildReplaceReport(pt, newDate, newTime, newCg) {
 
   // 새 간병인 정보
   let cgName = '________';
-  let cgNationality = '';
-  let cgBirth = '';
+  let cgGender = '';
+  let cgAge = '';
+  let cgNationality = '국내';
   let cgPhone = '________';
 
   if(newCg) {
-    cgName = newCg.name || '________';
-    cgPhone = formatPhone(newCg.phone || '________');
+    cgName   = newCg.name || '________';
+    cgGender = newCg.gender || '';
+    cgAge    = newCg.age ? newCg.age+'세' : '';
+    cgPhone  = formatPhone(newCg.phone || '________');
     // 국적 판단 (주민번호 성별코드 5~8 = 외국인)
     if(newCg.ssn) {
-      const sv = newCg.ssn.replace(/[-\s]/g,'');
-      const gc = parseInt(sv[6]||0);
-      cgNationality = gc >= 5 ? '외국인' : '국내';
-      cgBirth = sv.substring(0,6); // 생년월일 6자리
+      const gc = parseInt((newCg.ssn.replace(/[-\s]/g,'')||'')[6]);
+      if(gc >= 5) cgNationality = '외국인';
     }
   }
 
-  const cgInfo = cgName + (cgNationality||cgBirth ? `(${cgNationality} ${cgBirth})`.trim() : '( / )');
+  const cgDetail = [cgGender, cgNationality, cgAge].filter(Boolean).join('/');
+  const cgInfo   = cgDetail ? `${cgName}(${cgDetail})` : cgName;
 
-  return `★씨앤에이케어★
-*교체환자: ${ptName}(${hospital})
-*간병인명: ${cgInfo}
-*연락처 : ${cgPhone}
-*도착일시 : ${arriveStr}
-*계좌번호: ${bankStr}`;
+  // 간병일당: 환자 간병비 그대로 (할인 적용 안 함)
+  const payStr = pt && pt.pay ? Number(pt.pay).toLocaleString()+'원' : '________';
+
+  return `교체환자: ${ptName}(${hospital})
+간병인: ${cgInfo}
+간병일당 : ${payStr}
+연락처 : ${cgPhone}
+도착일시 : ${arriveStr}
+계좌번호: ${bankStr}`;
 }
 
 // "일정" 표시용 날짜 포맷: 7/8(수) 18:00
