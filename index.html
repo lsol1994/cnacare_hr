@@ -3131,7 +3131,8 @@ function deletePatient(id) {
 function renderSend() {
   const active   = patients.filter(p=>p.status==='모집중'&&!p.recruitInfo);
   // 재모집: 일반 재모집(모집중) + 연장 후 예약 교체(매칭완료 상태로 기존 간병인 근무 중, 다음 간병인만 별도 구인)
-  const recruit  = patients.filter(p=>p.recruitInfo&&(p.status==='모집중'||p.status==='매칭완료'));
+  // 단, 예약 교체 간병인이 이미 등록됐으면(pendingReplacement) 더 이상 구할 필요 없으므로 발송 목록에서 제외
+  const recruit  = patients.filter(p=>p.recruitInfo && !p.pendingReplacement && (p.status==='모집중'||p.status==='매칭완료'));
   const el = document.getElementById('send-pt-list');
 
   function ptCard(p, isRecruit) {
@@ -3279,7 +3280,7 @@ function updateSendSelectedUI() {
 }
 
 function toggleAllSendPt() {
-  const allPts = patients.filter(p=>p.status==='모집중'||(p.recruitInfo&&p.status==='매칭완료'));
+  const allPts = patients.filter(p=>(p.status==='모집중'&&!p.pendingReplacement)||(p.recruitInfo&&!p.pendingReplacement&&p.status==='매칭완료'));
   const allIds = allPts.map(p=>String(p.id));
   const allSelected = allIds.every(id=>selectedPtIds.has(id));
   if(allSelected) {
@@ -5994,12 +5995,26 @@ function showCalDetail(dateStr) {
         + '</div>');
     }
     if(c.endDate === dateStr) {
+      // 연장 후 예약 교체가 걸려있는 경우: "이전 간병인" 라벨로 구분 표시
+      var isHandover = !!(pt && pt.pendingReplacement && pt.recruitInfo && pt.recruitInfo.startDate === c.endDate);
       parts.push('<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:var(--red-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">■ 간병인 근무 마감</div>'
+        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">' + (isHandover?'■ 간병 마감 (이전 간병인)':'■ 간병인 근무 마감') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + c.name + ptStr + '</div>'
-        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (c.endTime||'') + '</div>'
+        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (c.endTime||'') + (isHandover?' · 신규 간병인으로 교체':'') + '</div>'
         + '</div>');
     }
+  });
+
+  // 연장 후 예약 교체: 등록해둔 신규 간병인의 근무 시작(=이전 간병인 마감일)
+  patients.forEach(function(p) {
+    if(!p.pendingReplacement || !p.recruitInfo) return;
+    if(p.recruitInfo.startDate !== dateStr) return;
+    var rep = p.pendingReplacement;
+    parts.push('<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병인 근무 시작 (신규 간병인)</div>'
+      + '<div style="font-size:14px;font-weight:700">' + (rep.name||'') + ' (' + p.name + ')</div>'
+      + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (p.recruitInfo.startTime||'') + ' · 연장 후 예약 교체</div>'
+      + '</div>');
   });
 
   // 급여 지급일
