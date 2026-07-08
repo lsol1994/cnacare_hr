@@ -198,6 +198,12 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 .overlay.open .modal{transform:none}
 .modal-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem}
 .modal-title{font-size:17px;font-weight:900}
+/* overlay-card: .modal과 동일한 카드 스타일 (연장/예정교체 등 작은 모달용, 배경·테두리·그림자 누락 방지) */
+.overlay-card{background:var(--surface);border-radius:var(--r);padding:1.5rem;width:100%;max-width:580px;
+  max-height:90vh;overflow-y:auto;box-shadow:var(--sh-md);transform:translateY(8px);transition:transform .2s}
+.overlay.open .overlay-card{transform:none}
+.overlay-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem}
+.overlay-hd h3{font-size:17px;font-weight:900;margin:0}
 
 /* REMIND POPUP */
 #remind-popup{position:fixed;top:72px;right:1.5rem;z-index:600;
@@ -3799,9 +3805,10 @@ function saveCg() {
   renderCaregivers();
   updateSidebar();
 
-  // 교체 상황이면 교체보고 자동 생성 + 팝업
+  // 교체 상황이면 교체보고 자동 생성 + 매칭 안내 메시지까지 함께 팝업 (간병인 교체든 신규 매칭이든 항상 뜨도록)
   if(isReplace && pt) {
     const replaceMsg = buildReplaceReport(pt, cg.startDate, cg.startTime, cg);
+    const matchMsg   = buildMatchMessage(pt, cg);
 
     // 교체보고 로그 저장
     const now2 = new Date();
@@ -3817,26 +3824,27 @@ function saveCg() {
     });
     save();
 
-    // 팝업 알림
+    // 팝업 알림 (교체보고 + 매칭 안내 메시지 둘 다 표시)
     const popup = document.getElementById('remind-popup');
+    resetPopupButtons();
     document.getElementById('remind-popup-body').innerHTML =
-      `🔄 <strong>${pt.name}</strong> 교체보고가 자동 작성됐어요!\n\n` +
-      `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:6px;font-size:12px;white-space:pre-wrap;line-height:1.8">${replaceMsg}</div>`;
+      `🔄 <strong>${pt.name}</strong> 교체보고 + 매칭 안내 메시지가 자동 작성됐어요!\n\n` +
+      `<div style="font-size:11px;font-weight:700;margin-top:4px">📋 업체 교체보고</div>` +
+      `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:4px;font-size:12px;white-space:pre-wrap;line-height:1.8">${replaceMsg}</div>` +
+      `<div style="font-size:11px;font-weight:700;margin-top:10px">📋 ${cg.name} 님께 보낼 매칭 안내</div>` +
+      `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:4px;font-size:12px;white-space:pre-wrap;line-height:1.8">${matchMsg}</div>` +
+      `<div style="font-size:11px;margin-top:4px;opacity:.85">⚠️ 주소는 비어있어요 — 복사 후 직접 채워서 보내주세요</div>`;
     popup.style.display = 'block';
-
-    let copyBtn = document.getElementById('remind-copy-btn');
-    if(!copyBtn) {
-      copyBtn = document.createElement('button');
-      copyBtn.id = 'remind-copy-btn';
-      copyBtn.className = 'remind-close';
-      copyBtn.style.marginTop = '6px';
-      popup.appendChild(copyBtn);
-    }
-    copyBtn.textContent = '📋 교체보고 복사';
-    copyBtn.onclick = () => { doCopy(replaceMsg); toast('✅ 교체보고 복사됐어요!'); };
+    addPopupCopyBtn('remind-copy-btn',  '📋 교체보고 복사', replaceMsg);
+    addPopupCopyBtn('remind-copy-btn2', '📋 매칭 안내 메시지 복사', matchMsg);
     if(cfg.sound !== false) playBeep();
-    toast(`✅ 간병인 등록 완료! 교체보고가 자동 작성됐어요.`);
+    toast(`✅ 간병인 등록 완료! 교체보고 + 매칭 안내 메시지가 자동 작성됐어요.`);
   } // isReplace 블록 끝
+  else if(pt) {
+    // 일반 매칭(교체 아님): 간병인에게 보낼 매칭 안내 메시지 자동 작성 + 팝업
+    showMatchMessagePopup(pt, cg);
+    toast('✅ 간병인 등록 완료! 매칭 안내 메시지가 자동 작성됐어요.');
+  }
   else {
     toast('✅ 간병인 등록 완료! Sheets 3개 시트에 전송됐어요');
   }
@@ -3944,6 +3952,49 @@ function renderCaregivers() {
     </div>`).join('');
 }
 
+// remind-popup의 복사 버튼들을 깨끗이 정리 (이전 팝업에서 남은 버튼 잔존 방지)
+function resetPopupButtons() {
+  ['remind-copy-btn','remind-copy-btn2'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.remove();
+  });
+}
+function addPopupCopyBtn(id, label, msg) {
+  const popup = document.getElementById('remind-popup');
+  let btn = document.createElement('button');
+  btn.id = id;
+  btn.className = 'remind-close';
+  btn.style.marginTop = '6px';
+  btn.textContent = label;
+  btn.onclick = () => { doCopy(msg); toast('✅ 복사됐어요!'); };
+  popup.appendChild(btn);
+  return btn;
+}
+
+// 매칭 안내 메시지 팝업 표시 (공용 헬퍼) — 신규 매칭/교체/예약교체 인계 어디서든 재사용
+function showMatchMessagePopup(pt, cg) {
+  const matchMsg = buildMatchMessage(pt, cg);
+  const popup = document.getElementById('remind-popup');
+  resetPopupButtons();
+  document.getElementById('remind-popup-body').innerHTML =
+    `📋 <strong>${cg.name}</strong> 님께 보낼 매칭 안내 메시지예요.\n\n` +
+    `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:6px;font-size:12px;white-space:pre-wrap;line-height:1.8">${matchMsg}</div>` +
+    `<div style="font-size:11px;margin-top:6px;opacity:.85">⚠️ 주소는 비어있어요 — 복사 후 직접 채워서 보내주세요</div>`;
+  popup.style.display = 'block';
+  addPopupCopyBtn('remind-copy-btn', '📋 매칭 안내 메시지 복사', matchMsg);
+  if(cfg.sound !== false) playBeep();
+  return matchMsg;
+}
+
+// 매칭 안내 메시지 다시 보기/복사 (간병인 상세에서 언제든 재생성 가능)
+function showMatchMessage(cgId) {
+  const cg = caregivers.find(x=>String(x.id)===String(cgId));
+  if(!cg) return;
+  const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
+  if(!pt) { toast('매칭된 환자가 없어요', true); return; }
+  showMatchMessagePopup(pt, cg);
+}
+
 function openCgDetail(id) {
   const cg=caregivers.find(x=>String(x.id)===String(id));
   if(!cg){toast('간병인 정보를 찾을 수 없어요',true);return;}
@@ -3993,6 +4044,7 @@ function openCgDetail(id) {
     <div class="hr"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-teal btn-sm" onclick="closeOverlay('cg-overlay');editCg('${cg.id}')">수정</button>
+      ${pt?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="showMatchMessage('${cg.id}')">📋 매칭 안내 문자</button>`:''}
       ${cg.patientId&&cg.workStatus==='근무중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="closeOverlay('cg-overlay');openEarlyTerminate('${cg.id}')">중도종료</button>`:''}
       ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="cancelEarlyTerminate('${cg.id}')">↩ 종료취소</button>`:''}
       ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="closeOverlay('cg-overlay');setTimeout(()=>{const el=document.getElementById('reassign-select-${cg.id}');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'center'});}},200)">🔄 재배정</button>`:''}
@@ -4473,6 +4525,7 @@ function openReplacementForm(ptId) {
     + '<div class="field"><label>연락처</label><input type="tel" id="rep-phone" value="' + (rep.phone||'') + '"></div>'
     + '</div>'
     + '<div class="field"><label>경력</label><input type="text" id="rep-career" value="' + (rep.career||'') + '"></div>'
+    + '<div class="field"><label>주민번호 <span style="font-size:10px;font-weight:400;color:var(--gray)">(교체보고 국적/생년월일용, 선택)</span></label><input type="text" id="rep-ssn" value="' + (rep.ssn||'') + '" placeholder="000000-0000000"></div>'
     + '<div class="g3">'
     + '<div class="field"><label>은행명</label><input type="text" id="rep-bankName" value="' + (rep.bankName||'') + '"></div>'
     + '<div class="field"><label>계좌번호</label><input type="text" id="rep-bankAccount" value="' + (rep.bankAccount||'') + '"></div>'
@@ -4497,13 +4550,51 @@ function saveReplacementInfo(ptId) {
     gender: document.getElementById('rep-gender').value,
     phone: document.getElementById('rep-phone').value.trim(),
     career: document.getElementById('rep-career').value.trim(),
+    ssn: document.getElementById('rep-ssn').value.trim(),
     bankName: document.getElementById('rep-bankName').value.trim(),
     bankAccount: document.getElementById('rep-bankAccount').value.trim(),
     bankHolder: document.getElementById('rep-bankHolder').value.trim(),
     note: document.getElementById('rep-note').value.trim()
   };
-  save(); closeOverlay('replace-overlay'); openPatient(ptId);
-  toast('✅ 예정 교체 간병인 정보가 저장됐어요. 기존 간병인 근무 종료 시 자동으로 인계돼요.');
+  save();
+
+  // 예정 교체 간병인 등록 시 업체보고 - 교체보고 자동 작성
+  const arriveDate = p.recruitInfo ? p.recruitInfo.startDate : '';
+  const arriveTime = p.recruitInfo ? p.recruitInfo.startTime : '';
+  const replaceMsg = buildReplaceReport(p, arriveDate, arriveTime, p.pendingReplacement);
+  const now2 = new Date();
+  const timeStr = now2.toLocaleDateString('ko-KR')+' '+now2.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
+  reportLogs.unshift({
+    id:          genId(),
+    patientId:   String(p.id),
+    patientName: p.name,
+    type:        'replace',
+    time:        timeStr,
+    msg:         replaceMsg,
+    auto:        true
+  });
+  save();
+
+  closeOverlay('replace-overlay'); openPatient(ptId);
+
+  // 팝업 알림 (기존 교체보고 자동생성과 동일한 UX)
+  const popup = document.getElementById('remind-popup');
+  document.getElementById('remind-popup-body').innerHTML =
+    `🔄 <strong>${p.name}</strong> 교체보고가 자동 작성됐어요!\n\n` +
+    `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:6px;font-size:12px;white-space:pre-wrap;line-height:1.8">${replaceMsg}</div>`;
+  popup.style.display = 'block';
+  let copyBtn = document.getElementById('remind-copy-btn');
+  if(!copyBtn) {
+    copyBtn = document.createElement('button');
+    copyBtn.id = 'remind-copy-btn';
+    copyBtn.className = 'remind-close';
+    copyBtn.style.marginTop = '6px';
+    popup.appendChild(copyBtn);
+  }
+  copyBtn.textContent = '📋 교체보고 복사';
+  copyBtn.onclick = () => { doCopy(replaceMsg); toast('✅ 교체보고 복사됐어요!'); };
+  if(cfg.sound !== false) playBeep();
+  toast('✅ 예정 교체 간병인 정보 저장 + 교체보고 자동 작성됐어요.');
 }
 
 function clearPendingReplacement(ptId) {
@@ -5190,6 +5281,42 @@ function buildReplaceReport(pt, newDate, newTime, newCg) {
 *연락처 : ${cgPhone}
 *도착일시 : ${arriveStr}
 *계좌번호: ${bankStr}`;
+}
+
+// "일정" 표시용 날짜 포맷: 7/8(수) 18:00
+function formatSchedule(dateStr, timeStr) {
+  const d = parseLocalDate(dateStr);
+  if(!d) return dateStr ? (dateStr + (timeStr?' '+timeStr:'')) : '________';
+  const days = ['일','월','화','수','목','금','토'];
+  const month = d.getMonth()+1;
+  const day   = d.getDate();
+  const dow   = days[d.getDay()];
+  return `${month}/${day}(${dow})` + (timeStr ? ' '+timeStr : '');
+}
+
+// 간병인 매칭 시 간병인에게 보내는 안내 메시지 (일정/기간/병원/환자/보호자연락처는 환자 정보 기준, 간병비는 환자 금액-5,000원)
+function buildMatchMessage(pt, cg) {
+  const schedule = formatSchedule(pt?.startDate || cg?.startDate, pt?.startTime || cg?.startTime || '');
+  const duration = pt?.duration || '________';
+  const hospital = (pt?.hospital||'') + (pt?.room ? ' '+pt.room : '') || '________';
+  const ptName   = pt?.name || '________';
+  const guardianPhone = formatPhone(pt?.contact) || '________';
+  const basePay  = pt?.pay ? Number(pt.pay) : (cg?.pay ? Number(cg.pay)+5000 : 0);
+  const cgPay    = basePay ? Math.max(0, basePay - 5000) : 0;
+  const payStr   = cgPay ? cgPay.toLocaleString()+'원' : '________';
+
+  return `안녕하세요, 선생님.
+씨앤에이케어협회입니다.
+*통장사본(또는 계좌번호) 보내주시면 바로 매칭완료 처리 하겠습니다!
+일정: ${schedule}
+기간: ${duration}
+병원 : ${hospital}
+주소 : 
+환자 : ${ptName}
+환자 보호자 연락처 : ${guardianPhone}
+간병비(일당) : ${payStr} (식사제공안됨)
+도착 하신 후 씨앤에이케어 협회로 연락 부탁드립니다^^
+감사합니다!`;
 }
 
 // ─── 수정본 스마트 업데이트 ───
@@ -6950,7 +7077,7 @@ function startRemind() {
 // ── 연장 후 예약 교체: 기존 간병인 마감 시 예정된 대체 간병인으로 인계 ──
 // 환자는 계속 "매칭완료" 상태를 유지한 채, 새 간병인 정보로 매칭만 교체된다.
 function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
-  if(!pt || !pt.pendingReplacement) return false;
+  if(!pt || !pt.pendingReplacement) return null;
   const rep = pt.pendingReplacement;
   const prevCgName = pt.caregiverName || ''; // 인계 전 기존 간병인 이름 보존
   const newCg = {
@@ -6959,7 +7086,7 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
     regDate: todayStr(),
     workStatus: '근무중', // 인계 시점 = 시작 시점이므로 바로 근무중 처리
     name: rep.name||'', ssn: rep.ssn||'', age: rep.age||'', gender: rep.gender||'',
-    pay: rep.pay||pt.pay||'',
+    pay: rep.pay || (pt.pay ? String(Math.max(0, Number(pt.pay)-5000)) : ''),
     phone: rep.phone||'',
     bankName: rep.bankName||'', bankAccount: rep.bankAccount||'', bankHolder: rep.bankHolder||'',
     region: rep.region||'', hospital: pt.hospital||'',
@@ -6980,7 +7107,7 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
   });
   delete pt.pendingReplacement;
   delete pt.recruitInfo;
-  return true;
+  return newCg;
 }
 
 function checkAutoStart() {
@@ -7037,6 +7164,7 @@ function checkAutoEnd() {
   const now = new Date();
   let changed = false;
   const endedItems = []; // 종료된 항목 {pt, cg}
+  const promotedItems = []; // 연장 후 예약 교체로 인계된 항목 {pt, newCg}
 
   // ── 마감 시각 계산 헬퍼 ──
   // 서비스 종료: endDate + endTime (간병인/환자에 저장된 실제 마감시각)
@@ -7070,7 +7198,8 @@ function checkAutoEnd() {
     if(pt && pt.status !== '종료') {
       if(pt.pendingReplacement) {
         // 연장 후 예약 교체: 미리 등록해둔 대체 간병인으로 인계 (환자는 계속 매칭 상태 유지)
-        promotePendingReplacement(pt, cg.endDate, cg.endTime);
+        const newCg = promotePendingReplacement(pt, cg.endDate, cg.endTime);
+        if(newCg) promotedItems.push({pt, newCg});
         changed = true;
         skipEndReport = true;
       } else if(pt.endDate && cg.endDate && parseLocalDate(pt.endDate) > parseLocalDate(cg.endDate)) {
@@ -7188,6 +7317,13 @@ function checkAutoEnd() {
 
       if(cfg.sound !== false) playBeep();
       }
+  }
+
+  // 연장 후 예약 교체로 새 간병인에게 인계된 경우 → 매칭 안내 메시지 자동 팝업
+  // (여러 건이 한 번에 인계되면 마지막 건이 팝업에 표시됨)
+  if(promotedItems.length > 0) {
+    const last = promotedItems[promotedItems.length - 1];
+    showMatchMessagePopup(last.pt, last.newCg);
   }
 
   if(changed) {
