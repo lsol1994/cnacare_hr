@@ -2925,26 +2925,30 @@ function savePatientEdit(id) {
     }
 
     // ② 마감일 동시 업데이트 (startDate + duration 기반)
-    let newEndDate = p.endDate || '';
-    let newEndTime = p.endTime || p.startTime || '';
-    if(!newEndDate && p.startDate && p.duration) {
-      const days = parseDurationDays(p.duration);
-      if(days) {
-        const d = parseLocalDate(p.startDate);
-        if(d) {
-          d.setDate(d.getDate() + days);
-          newEndDate = toLocalDateStr(d);
-          newEndTime = p.startTime || '';
+    // 단, 연장 후 예약교체가 진행 중이면 기존 간병인은 자기 마감일까지만 근무해야 하므로
+    // 환자의 연장된 마감일을 여기서 동기화하면 안 됨 (건드리지 않고 그대로 유지)
+    if(!p.pendingReplacement) {
+      let newEndDate = p.endDate || '';
+      let newEndTime = p.endTime || p.startTime || '';
+      if(!newEndDate && p.startDate && p.duration) {
+        const days = parseDurationDays(p.duration);
+        if(days) {
+          const d = parseLocalDate(p.startDate);
+          if(d) {
+            d.setDate(d.getDate() + days);
+            newEndDate = toLocalDateStr(d);
+            newEndTime = p.startTime || '';
+          }
         }
       }
-    }
-    if(newEndDate) {
-      matched.forEach(c=>{
-        c.endDate = newEndDate;
-        c.endTime = newEndTime;
-        c.startDate = p.startDate || c.startDate;
-        c.startTime = p.startTime || c.startTime;
-      });
+      if(newEndDate) {
+        matched.forEach(c=>{
+          c.endDate = newEndDate;
+          c.endTime = newEndTime;
+          c.startDate = p.startDate || c.startDate;
+          c.startTime = p.startTime || c.startTime;
+        });
+      }
     }
 
     toast(`✅ 환자 정보 수정 + 간병인 정보 동시 업데이트됐어요`);
@@ -5953,19 +5957,22 @@ function showCalDetail(dateStr) {
   var bodyEl = document.getElementById('cal-detail-body');
   if(!bodyEl) return;
 
-  var parts = [];
+  var startEvents = []; // {time, html}
+  var endEvents   = [];
+  var payEvents   = [];
 
-  // 환자 시작일
+  // 환자 시작일 / 마감일
   patients.forEach(function(p) {
     var cg = caregivers.find(function(c){ return String(c.patientId)===String(p.id); });
     var cgStr = cg ? ' / 간병인: ' + cg.name : '';
     if(p.startDate === dateStr) {
-      parts.push('<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병 시작</div>'
+      startEvents.push({ time: p.startTime||'', html:
+        '<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+        + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병 시작' + (p.startTime?' · '+p.startTime:'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + p.name + '</div>'
         + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (p.hospital||'') + (p.room?' ('+p.room+')':'') + cgStr + '</div>'
-        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (p.startTime||'') + (p.duration?' · '+p.duration:'') + '</div>'
-        + '</div>');
+        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (p.duration?p.duration:'') + '</div>'
+        + '</div>' });
     }
     // 마감일
     var endDate = p.endDate;
@@ -5974,12 +5981,12 @@ function showCalDetail(dateStr) {
       if(days) { var dd=parseLocalDate(p.startDate); if(dd){dd.setDate(dd.getDate()+days);endDate=toLocalDateStr(dd);} }
     }
     if(endDate === dateStr) {
-      parts.push('<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:var(--red-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">■ 간병 마감' + (!p.endDate?' (예상)':'') + '</div>'
+      endEvents.push({ time: p.endTime||'', html:
+        '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:var(--red-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">■ 간병 마감' + (!p.endDate?' (예상)':'') + (p.endTime?' · '+p.endTime:'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + p.name + '</div>'
         + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (p.hospital||'') + cgStr + '</div>'
-        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (p.endTime||'') + '</div>'
-        + '</div>');
+        + '</div>' });
     }
   });
 
@@ -5988,20 +5995,21 @@ function showCalDetail(dateStr) {
     var pt = c.patientId ? patients.find(function(p){return String(p.id)===String(c.patientId);}) : null;
     var ptStr = pt ? ' (' + pt.name + ')' : '';
     if(c.startDate === dateStr) {
-      parts.push('<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병인 근무 시작</div>'
+      startEvents.push({ time: c.startTime||'', html:
+        '<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+        + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병인 근무 시작' + (c.startTime?' · '+c.startTime:'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + c.name + ptStr + '</div>'
-        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (c.startTime||'') + '</div>'
-        + '</div>');
+        + '</div>' });
     }
     if(c.endDate === dateStr) {
       // 연장 후 예약 교체가 걸려있는 경우: "이전 간병인" 라벨로 구분 표시
       var isHandover = !!(pt && pt.pendingReplacement && pt.recruitInfo && pt.recruitInfo.startDate === c.endDate);
-      parts.push('<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:var(--red-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">' + (isHandover?'■ 간병 마감 (이전 간병인)':'■ 간병인 근무 마감') + '</div>'
+      endEvents.push({ time: c.endTime||'', html:
+        '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:var(--red-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">' + (isHandover?'■ 간병 마감 (이전 간병인)':'■ 간병인 근무 마감') + (c.endTime?' · '+c.endTime:'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + c.name + ptStr + '</div>'
-        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (c.endTime||'') + (isHandover?' · 신규 간병인으로 교체':'') + '</div>'
-        + '</div>');
+        + (isHandover?'<div style="font-size:11px;color:var(--gray);margin-top:2px">신규 간병인으로 교체</div>':'')
+        + '</div>' });
     }
   });
 
@@ -6010,11 +6018,12 @@ function showCalDetail(dateStr) {
     if(!p.pendingReplacement || !p.recruitInfo) return;
     if(p.recruitInfo.startDate !== dateStr) return;
     var rep = p.pendingReplacement;
-    parts.push('<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-      + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병인 근무 시작 (신규 간병인)</div>'
+    startEvents.push({ time: p.recruitInfo.startTime||'', html:
+      '<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병인 근무 시작 (신규 간병인)' + (p.recruitInfo.startTime?' · '+p.recruitInfo.startTime:'') + '</div>'
       + '<div style="font-size:14px;font-weight:700">' + (rep.name||'') + ' (' + p.name + ')</div>'
-      + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (p.recruitInfo.startTime||'') + ' · 연장 후 예약 교체</div>'
-      + '</div>');
+      + '<div style="font-size:11px;color:var(--gray);margin-top:2px">연장 후 예약 교체</div>'
+      + '</div>' });
   });
 
   // 급여 지급일
@@ -6026,16 +6035,36 @@ function showCalDetail(dateStr) {
       var pt = cg.patientId ? patients.find(function(pt){return String(pt.id)===String(cg.patientId);}) : null;
       var ptStr = pt ? ' (' + pt.name + ')' : '';
       var reserveStr = p.isReserve ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">원래 지급일: ' + (p.payDate||p.endDate) + '</div>' : '';
-      parts.push('<div style="padding:10px 12px;border-left:3px solid ' + bdColor + ';margin-bottom:8px;background:' + bgColor + ';border-radius:0 var(--rsm) var(--rsm) 0">'
+      payEvents.push({ time: '', html:
+        '<div style="padding:10px 12px;border-left:3px solid ' + bdColor + ';margin-bottom:8px;background:' + bgColor + ';border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="font-size:11px;font-weight:700;color:' + bdColor + ';margin-bottom:3px">💰 ' + p.label + (p.isReserve?' [주말·공휴일 조정]':'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
         + reserveStr
-        + '</div>');
+        + '</div>' });
     });
   });
 
-  bodyEl.innerHTML = parts.length
-    ? parts.join('')
+  // 시간대순 정렬 (시간 없는 항목은 맨 뒤로)
+  function sortByTime(arr) {
+    return arr.slice().sort(function(a,b){
+      return (a.time || '99:99').localeCompare(b.time || '99:99');
+    });
+  }
+  startEvents = sortByTime(startEvents);
+  endEvents   = sortByTime(endEvents);
+
+  function sectionHtml(title, events) {
+    if(!events.length) return '';
+    return '<div style="font-size:11px;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.4px;margin:12px 0 6px;padding-left:2px">' + title + ' (' + events.length + '건)</div>'
+      + events.map(function(e){ return e.html; }).join('');
+  }
+
+  var sectionsHtml = sectionHtml('▶ 간병 시작', startEvents)
+    + sectionHtml('■ 간병 마감', endEvents)
+    + sectionHtml('💰 급여 지급', payEvents);
+
+  bodyEl.innerHTML = (startEvents.length + endEvents.length + payEvents.length) > 0
+    ? sectionsHtml
     : '<div style="padding:2rem;text-align:center;color:var(--gray);font-size:13px">이날 일정이 없어요 😊</div>';
 }
 
