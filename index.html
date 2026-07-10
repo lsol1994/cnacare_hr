@@ -6697,7 +6697,7 @@ function calcPayDates(cg) {
     results.push({
       date: toLocalDateStr(adjusted), label: '단기 급여',
       isReserve: wasAdjusted, endDate: toLocalDateStr(payDate),
-      amount: payPerDay * totalDays // 간병비(일급) × 일한기간
+      amount: calcTotalPayAmount(cg) || (payPerDay * totalDays) // 정산액과 일치시켜 최종정산 이중계산 방지
     });
   } else {
     // 7일 이상: 시작일 + 7일부터 매주 같은 요일 지급
