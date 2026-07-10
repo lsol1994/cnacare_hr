@@ -5867,6 +5867,38 @@ function ptDdayBadge(p) {
 // ─── 시작일/마감일 리마인드 ───
 // ─── 총 간병비 계산 ───
 // 24시간 기준: startDate+startTime ~ endDate+endTime
+// calcTotalPay와 동일한 계산(일급×일수 + OT)이지만 표시용 문자열이 아닌 순수 숫자를 반환 (급여 정산 계산용)
+function calcTotalPayAmount(cg) {
+  if(!cg.pay || !cg.startDate || !cg.endDate) return 0;
+  const payPerDay = Number(cg.pay);
+  if(!payPerDay) return 0;
+
+  const OT_PER_HOUR    = 10000;
+  const DAY_THRESHOLD  = 10;
+
+  const [sh=8,sm=0] = (cg.startTime||'08:00').split(':').map(Number);
+  const [eh=8,em=0] = (cg.endTime  ||'08:00').split(':').map(Number);
+  const startMs = parseLocalDate(cg.startDate).getTime() + (sh*60+sm)*60000;
+  const endMs   = parseLocalDate(cg.endDate).getTime()   + (eh*60+em)*60000;
+  if(isNaN(startMs)||isNaN(endMs)||endMs<=startMs) return 0;
+
+  const totalMin  = Math.round((endMs - startMs) / 60000);
+  const fullDays  = Math.floor(totalMin / (24*60));
+  const remainMin = totalMin % (24*60);
+  const remainH   = remainMin / 60;
+
+  let days, otHour;
+  if(remainH >= DAY_THRESHOLD) {
+    days = fullDays + 1;
+    otHour = 0;
+  } else {
+    days = fullDays;
+    otHour = Math.floor(remainMin / 60);
+  }
+
+  return (payPerDay * days) + (otHour * OT_PER_HOUR);
+}
+
 function calcTotalPay(cg) {
   if(!cg.pay || !cg.startDate || !cg.endDate) return '';
   const payPerDay = Number(cg.pay);
@@ -6067,6 +6099,9 @@ function showCalDetail(dateStr) {
   // 급여 지급일
   var paidCgIdsToday = {};
   caregivers.filter(function(c){return !!c.startDate;}).forEach(function(cg) {
+    var bankStr = (cg.bankName||cg.bankAccount)
+      ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
+      : '';
     calcPayDates(cg).forEach(function(p) {
       if(p.date !== dateStr) return;
       paidCgIdsToday[String(cg.id)] = true;
@@ -6075,27 +6110,42 @@ function showCalDetail(dateStr) {
       var pt = cg.patientId ? patients.find(function(pt){return String(pt.id)===String(cg.patientId);}) : null;
       var ptStr = pt ? ' (' + pt.name + ')' : '';
       var reserveStr = p.isReserve ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">원래 지급일: ' + (p.payDate||p.endDate) + '</div>' : '';
+      var amountStr = p.amount ? '<div style="font-size:15px;font-weight:900;color:'+bdColor+';margin-top:4px">' + p.amount.toLocaleString() + '원</div>' : '';
+      var bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
       payEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid ' + bdColor + ';margin-bottom:8px;background:' + bgColor + ';border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="font-size:11px;font-weight:700;color:' + bdColor + ';margin-bottom:3px">💰 ' + p.label + (p.isReserve?' [주말·공휴일 조정]':'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
+        + amountStr
+        + bankHtml
         + reserveStr
         + '</div>' });
     });
   });
   // 당일 근무가 마감되는 간병인은 정규 급여 주기와 상관없이 자동으로 최종 정산 건 추가
   // (교체/중도종료/기간마감 등 어떤 사유로 마감되든, 마감일 = 그날까지의 급여를 정산해야 하므로)
+  // 최종정산 금액 = 총 급여(calcTotalPayAmount) - 지금까지 정규 주급으로 이미 지급된 금액
   caregivers.forEach(function(cg) {
     if(cg.endDate !== dateStr) return;
     if(paidCgIdsToday[String(cg.id)]) return; // 이미 정규 급여 지급일로 잡혀있으면 중복 추가 안 함
     if(!cg.pay) return;
+    var totalOwed  = calcTotalPayAmount(cg);
+    var alreadyPaid = calcPayDates(cg).reduce(function(sum,p){ return sum + (p.amount||0); }, 0);
+    var settleAmount = totalOwed - alreadyPaid;
+    if(settleAmount <= 0) return; // 이미 다 지급된 상태면 표시 안 함
     var pt = cg.patientId ? patients.find(function(p){return String(p.id)===String(cg.patientId);}) : null;
     var ptStr = pt ? ' (' + pt.name + ')' : '';
+    var bankStr = (cg.bankName||cg.bankAccount)
+      ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
+      : '';
+    var bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
     payEvents.push({ time: '', html:
       '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
       + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 최종 정산 (근무 마감)</div>'
       + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
-      + '<div style="font-size:11px;color:var(--gray);margin-top:2px">일급 ' + Number(cg.pay).toLocaleString() + '원 기준 · 마감일까지 정산 필요</div>'
+      + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + settleAmount.toLocaleString() + '원</div>'
+      + '<div style="font-size:11px;color:var(--gray);margin-top:2px">총 급여 ' + totalOwed.toLocaleString() + '원 − 기지급 ' + alreadyPaid.toLocaleString() + '원</div>'
+      + bankHtml
       + '</div>' });
   });
 
@@ -6636,6 +6686,8 @@ function calcPayDates(cg) {
     if(pt && pt.duration) totalDays = parseDurationDays(pt.duration);
   }
 
+  const payPerDay = Number(cg.pay) || 0;
+
   if(totalDays !== null && totalDays <= 6) {
     // 6일 이하 단기: 마감일 당일 지급 (주말/공휴일이면 다음주 월요일로 조정)
     const payDate = parseLocalDate(cg.endDate);
@@ -6644,7 +6696,8 @@ function calcPayDates(cg) {
     const wasAdjusted = toLocalDateStr(adjusted) !== toLocalDateStr(payDate);
     results.push({
       date: toLocalDateStr(adjusted), label: '단기 급여',
-      isReserve: wasAdjusted, endDate: toLocalDateStr(payDate)
+      isReserve: wasAdjusted, endDate: toLocalDateStr(payDate),
+      amount: payPerDay * totalDays // 간병비(일급) × 일한기간
     });
   } else {
     // 7일 이상: 시작일 + 7일부터 매주 같은 요일 지급
@@ -6662,7 +6715,9 @@ function calcPayDates(cg) {
       const adjusted = adjustPayDateToMonday(cur);
       const adjustedStr = toLocalDateStr(adjusted);
       const wasAdjusted = adjustedStr !== dateStr;
-      results.push({ date: adjustedStr, payDate: dateStr, label: `${week}주차 주급`, isReserve: wasAdjusted, week });
+      results.push({ date: adjustedStr, payDate: dateStr, label: `${week}주차 주급`, isReserve: wasAdjusted, week,
+        amount: payPerDay * 7 // 간병비(일급) × 7일치
+      });
       cur.setDate(cur.getDate() + 7);
       week++;
     }
