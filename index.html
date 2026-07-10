@@ -1518,7 +1518,17 @@ let _fbPause       = false;
 //   { 컬렉션명 → { id(String) → JSON 문자열 } }
 // id 없는 컬렉션(rooms/cfg): { 컬렉션명 → JSON 문자열 }
 // 비어있는 상태(최초 실행)에서는 save() 최초 1회가 전체 데이터를 update()로 올림
-let _lastSyncedById = { patients:{}, caregivers:{}, logs:{}, attendance:{}, reportLogs:{}, members:{}, memos:{}, notices:{} };
+let _lastSyncedById = (function() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('cnc_lastSyncedById') || 'null');
+    if(saved && typeof saved === 'object') return saved;
+  } catch(e) {}
+  return { patients:{}, caregivers:{}, logs:{}, attendance:{}, reportLogs:{}, members:{}, memos:{}, notices:{} };
+})();
+// _lastSyncedById를 localStorage에도 저장 (새로고침/재접속해도 "이미 동기화된 적 있음" 기록이 유지되도록)
+function persistLastSyncedSnapshot() {
+  try { localStorage.setItem('cnc_lastSyncedById', JSON.stringify(_lastSyncedById)); } catch(e) {}
+}
 let _lastSyncedMisc = {};
 
 // 현재 세션에서 앱을 통해 새로 추가된 ID (Firebase에 아직 없을 수 있음)
@@ -1778,6 +1788,7 @@ function commitSyncSnapshot(pendingById, pendingMisc) {
     });
   });
   Object.keys(pendingMisc).forEach(key => { _lastSyncedMisc[key] = pendingMisc[key]; });
+  persistLastSyncedSnapshot();
 }
 
 function save() {
@@ -1866,6 +1877,7 @@ function resyncLastSyncedSnapshot() {
     rooms: JSON.stringify(cleanForFirebase(rooms)),
     cfg:   JSON.stringify(cleanForFirebase(cfg))
   };
+  persistLastSyncedSnapshot();
 }
 
 // ─── Firebase 실시간 리스너 ───
@@ -1950,21 +1962,15 @@ function attachFirebaseListener() {
         return dp;
       }).filter(Boolean);
 
-      if(filteredFbPt.length >= patients.length) {
-        patients = mergePatients(filteredFbPt);
-      } else {
-        // 로컬에만 있는 항목 중 현재 세션에서 실제로 추가한 것만 보존
-        // (Firebase 콘솔에서 삭제된 항목은 복원하지 않음)
-        const newPts = patients.filter(lp =>
-          !filteredFbPt.find(dp=>String(dp.id)===String(lp.id)) &&
-          _newLocalPtIds.has(String(lp.id))  // ← 세션 내 신규만 보호
-        );
-        patients = newPts.length > 0
-          ? [...mergePatients(filteredFbPt), ...newPts]
-          : mergePatients(filteredFbPt);
-      }
-      // Firebase에 올라간 항목은 신규 보호 목록에서 제거
-      filteredFbPt.forEach(dp => _newLocalPtIds.delete(String(dp.id)));
+      // id 정확 대조: "Firebase에 한 번도 동기화된 적 없는" 로컬 항목만 신규로 보존.
+      // 이미 동기화된 적 있는데 지금 Firebase에 없다면 = 다른 기기에서 삭제된 것 → 로컬에서도 제거.
+      // (배열 길이 비교 방식은 다른 변경과 우연히 겹치면 삭제가 되살아나는 오류가 있어 폐기)
+      const syncedPtIds = new Set(Object.keys(_lastSyncedById.patients || {}));
+      const localOnlyPt = patients.filter(lp => {
+        const id = String(lp.id);
+        return !filteredFbPt.find(dp=>String(dp.id)===id) && !syncedPtIds.has(id);
+      });
+      patients = [...mergePatients(filteredFbPt), ...localOnlyPt];
       localStorage.setItem('cnc_patients', JSON.stringify(patients));
     }
     if(fbCaregivers.length > 0) {
@@ -1998,18 +2004,14 @@ function attachFirebaseListener() {
         }).filter(Boolean);
       }
 
-      if(filteredFb.length >= caregivers.length) {
-        caregivers = mergeCg(filteredFb);
-      } else {
-        const newCgs = caregivers.filter(lc =>
-          !filteredFb.find(dc=>String(dc.id)===String(lc.id)) &&
-          _newLocalCgIds.has(String(lc.id))  // ← 세션 내 신규만 보호
-        );
-        caregivers = newCgs.length > 0
-          ? [...mergeCg(filteredFb), ...newCgs]
-          : mergeCg(filteredFb);
-      }
-      // Firebase에 올라간 항목은 신규 보호 목록에서 제거
+      // id 정확 대조 (환자와 동일한 방식) — 이미 동기화된 적 있는 항목이 사라졌으면 삭제로 인정
+      const syncedCgIds = new Set(Object.keys(_lastSyncedById.caregivers || {}));
+      const localOnlyCg = caregivers.filter(lc => {
+        const id = String(lc.id);
+        return !filteredFb.find(dc=>String(dc.id)===id) && !syncedCgIds.has(id);
+      });
+      caregivers = [...mergeCg(filteredFb), ...localOnlyCg];
+      // Firebase에 올라간 항목은 신규 보호 목록에서 제거 (레거시 정리용, 병합 판단에는 더이상 미사용)
       filteredFb.forEach(dc => _newLocalCgIds.delete(String(dc.id)));
       localStorage.setItem('cnc_cg', JSON.stringify(caregivers));
     }
@@ -6125,10 +6127,17 @@ function showCalDetail(dateStr) {
   // 당일 근무가 마감되는 간병인은 정규 급여 주기와 상관없이 자동으로 최종 정산 건 추가
   // (교체/중도종료/기간마감 등 어떤 사유로 마감되든, 마감일 = 그날까지의 급여를 정산해야 하므로)
   // 최종정산 금액 = 총 급여(calcTotalPayAmount) - 지금까지 정규 주급으로 이미 지급된 금액
+  // 지급일도 주급/단기와 동일하게 주말·공휴일이면 다음 영업일로 조정
   caregivers.forEach(function(cg) {
-    if(cg.endDate !== dateStr) return;
+    if(!cg.endDate) return;
+    var rawEndDate = parseLocalDate(cg.endDate);
+    if(!rawEndDate) return;
+    var adjusted = adjustPayDateToMonday(rawEndDate);
+    var adjustedStr = toLocalDateStr(adjusted);
+    if(adjustedStr !== dateStr) return;
     if(paidCgIdsToday[String(cg.id)]) return; // 이미 정규 급여 지급일로 잡혀있으면 중복 추가 안 함
     if(!cg.pay) return;
+    var wasAdjusted = adjustedStr !== cg.endDate;
     var totalOwed  = calcTotalPayAmount(cg);
     var alreadyPaid = calcPayDates(cg).reduce(function(sum,p){ return sum + (p.amount||0); }, 0);
     var settleAmount = totalOwed - alreadyPaid;
@@ -6139,13 +6148,15 @@ function showCalDetail(dateStr) {
       ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
       : '';
     var bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
+    var reserveStr = wasAdjusted ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">원래 마감일: ' + cg.endDate + '</div>' : '';
     payEvents.push({ time: '', html:
       '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-      + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 최종 정산 (근무 마감)</div>'
+      + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 최종 정산 (근무 마감)' + (wasAdjusted?' [주말·공휴일 조정]':'') + '</div>'
       + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
       + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + settleAmount.toLocaleString() + '원</div>'
       + '<div style="font-size:11px;color:var(--gray);margin-top:2px">총 급여 ' + totalOwed.toLocaleString() + '원 − 기지급 ' + alreadyPaid.toLocaleString() + '원</div>'
       + bankHtml
+      + reserveStr
       + '</div>' });
   });
 
