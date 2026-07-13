@@ -1194,6 +1194,12 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="fixEarlyEndData()">
         🔧 중도종료 데이터 복구
       </button>
+      <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="autoFillAllAttendanceManual()">
+        📋 간병일지 자동생성 (전체)
+      </button>
+      <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="autoFillOneAttendanceManual()">
+        📋 간병일지 자동생성 (간병인 선택)
+      </button>
       <button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="deduplicateNotices()">
         🧹 중복 알림 정리
       </button>
@@ -3802,6 +3808,7 @@ function saveCg() {
   }
 
   save();
+  autoFillAttendance(String(cg.id)); // 간병 시작/마감 시간에 맞춰 간병일지 즉시 동기화
   sendSheets({type:'caregiver', ...cg});
   sendSheets({type:'journal', caregiverName:cg.name, phone:cg.phone||'', hospital:cg.hospital,
     startDate:cg.startDate, startTime:cg.startTime, endDate:cg.endDate, endTime:cg.endTime});
@@ -4489,7 +4496,9 @@ function confirmExtend(ptId) {
     if(days!==null&&days>=0) p.duration = days+'일';
     delete p.recruitInfo;
     if(cg){cg.endDate=newEndDate;cg.endTime=newEndTime;if(days!==null&&days>=0)cg.duration=days+'일';}
-    save(); closeOverlay('extend-overlay'); renderPatients(); renderCaregivers();
+    save();
+    if(cg) autoFillAttendance(String(cg.id)); // 마감시간 변경에 맞춰 간병일지 동기화
+    closeOverlay('extend-overlay'); renderPatients(); renderCaregivers();
     toast('✅ '+p.name+' 연장됐어요 → '+newEndDate+' '+newEndTime);
   } else {
     // 예약 교체: 기존 간병인은 그대로 자기 마감일까지 근무 계속 (건드리지 않음)
@@ -4868,6 +4877,7 @@ function confirmEarlyTerminate(cgId) {
   saveToAssignHistory(cg); // 근무 이력 저장
 
   save();
+  autoFillAttendance(String(cg.id)); // 중도종료 마감시간에 맞춰 간병일지 동기화
   closeOverlay('cg-overlay');
   renderCaregivers();
   renderPatients();
@@ -4945,6 +4955,7 @@ function cancelEarlyTerminate(cgId) {
   delete cg._snapshot; // 구버전 호환
 
   save();
+  autoFillAttendance(String(cg.id)); // 종료취소로 복원된 마감시간에 맞춰 간병일지 동기화
   closeOverlay('cg-overlay');
   renderCaregivers();
   renderPatients();
@@ -5470,6 +5481,28 @@ function buildEndReport(p, actualEndDate, actualEndTime) {
 // ── 날짜 포맷 변환 ──
 // ─── 중도종료 데이터 복구 ───
 // 종료된 간병인 중 earlyEndPatientId 없는 경우 recruitHistory로 환자 찾아서 복구
+// 설정 → 간병일지 자동생성 (전체 간병인)
+function autoFillAllAttendanceManual() {
+  let total = 0;
+  caregivers.filter(c=>c.startDate).forEach(c=>{ total += autoFillAttendance(String(c.id)); });
+  renderAttendance();
+  if(total > 0) toast(`✅ 전체 간병인 간병일지 ${total}건 자동 생성/수정됐어요`);
+  else toast('수정할 내용이 없어요 (이미 모두 최신 상태예요)');
+}
+
+// 설정 → 간병일지 자동생성 (간병인 이름으로 선택)
+function autoFillOneAttendanceManual() {
+  const name = prompt('간병일지를 자동생성/수정할 간병인 이름을 입력해주세요:');
+  if(!name || !name.trim()) return;
+  const matches = caregivers.filter(c => (c.name||'').trim() === name.trim());
+  if(matches.length === 0) { toast(`"${name}" 간병인을 찾을 수 없어요`, true); return; }
+  let total = 0;
+  matches.forEach(c => { total += autoFillAttendance(String(c.id)); });
+  renderAttendance();
+  if(total > 0) toast(`✅ ${name} 간병일지 ${total}건 자동 생성/수정됐어요`);
+  else toast(`${name} 간병일지는 이미 최신 상태예요`);
+}
+
 function fixEarlyEndData() {
   let fixed = 0;
 
@@ -6945,6 +6978,7 @@ function saveAttendance(cgId, origDate) {
   rec.inTime  = newInTime;
   rec.outDate = newOutDate;
   rec.outTime = newOutTime;
+  rec.auto    = false; // 담당자가 직접 수정 → 이후 자동 동기화가 덮어쓰지 않도록 보호
   // 구버전 date 필드 제거
   delete rec.date;
 
@@ -6965,12 +6999,12 @@ function autoSave() {
   showSyncStatus('자동저장 완료');
 }
 
-// ─── 출퇴근 자동 채우기 ───
-// 종료 시 마감일까지 포함해서 간병일지 채우기
-// ─── 간병일지 자동 채우기 (서비스 종료와 완전 분리) ───
-// 규칙: 간병일지는 서비스 시작일~마감일 사이 매일 출근 00:00 / 퇴근 23:59 고정
-// 서비스 시작시간/마감시간과 무관하게 간병일지는 항상 00:00~23:59
-// 단, 시작일 첫날은 실제 출근 체크 유지 (건드리지 않음)
+// ─── 출퇴근 자동 채우기 / 자동 동기화 ───
+// 규칙: 간병일지는 서비스 시작일~마감일 사이 매일 기록.
+// - 시작일 첫날: 실제 간병 시작시간을 항상 동기화 (변경되면 같이 수정)
+// - 마감일(실제 등록된 경우) 마지막날: 실제 간병 마감시간을 항상 동기화 (변경되면 같이 수정)
+// - 그 사이 날짜: 출근 00:00 / 퇴근 23:59 고정
+// - 단, 담당자가 출퇴근 기록을 수기로 직접 수정한 날(auto:false)은 자동 동기화가 덮어쓰지 않음
 function autoFillAttendanceUntilEnd(cgId, endDate) {
   return autoFillAttendance(cgId);
 }
@@ -6979,8 +7013,9 @@ function autoFillAttendance(cgId) {
   const cg = caregivers.find(c=>String(c.id)===String(cgId));
   if(!cg || !cg.startDate) return 0;
 
-  const today   = todayStr();
-  const endDate = cg.endDate || today;
+  const today    = todayStr();
+  const hasEnded = !!cg.endDate; // 실제 마감일/마감시간이 등록된 상태인지
+  const endDate  = cg.endDate || today;
 
   let added = 0;
   const cur = parseLocalDate(cg.startDate);
@@ -6992,6 +7027,7 @@ function autoFillAttendance(cgId) {
     if(dateStr > endDate) break;
 
     const isFirst = dateStr === cg.startDate;
+    const isLast  = hasEnded && dateStr === endDate;
 
     // 기존 기록 확인 (신/구버전 모두)
     const existing = attendance.find(a=>
@@ -6999,36 +7035,43 @@ function autoFillAttendance(cgId) {
     );
 
     if(!existing) {
-      if(isFirst) {
-        attendance.push({
-          id:      genId(),
-          cgId:    String(cgId),
-          inDate:  dateStr,
-          inTime:  cg.startTime || '',
-          outDate: dateStr,
-          outTime: '23:59',
-          auto:    true
-        });
-        added++;
-      } else {
-        attendance.push({
-          id:      genId(),
-          cgId:    String(cgId),
-          inDate:  dateStr,
-          inTime:  '00:00',
-          outDate: dateStr,
-          outTime: '23:59',
-          auto:    true
-        });
+      const inTime  = isFirst ? (cg.startTime || '') : '00:00';
+      const outTime = isLast ? (cg.endTime || '23:59') : '23:59';
+      const outDate = isLast ? (cg.endDate || dateStr) : dateStr;
+      attendance.push({
+        id:      genId(),
+        cgId:    String(cgId),
+        inDate:  dateStr,
+        inTime,
+        outDate,
+        outTime,
+        auto:    true
+      });
+      added++;
+    } else {
+      const isManual = existing.auto === false; // 담당자가 수기로 직접 수정한 기록은 보호
+      // 시작일: 간병 시작시간과 항상 동기화 (변경 감지 포함)
+      if(isFirst && !isManual && cg.startTime && existing.inTime !== cg.startTime) {
+        existing.inTime = cg.startTime;
         added++;
       }
-    } else {
-      if(existing.inTime && !existing.outTime) {
+      // 마감일(실제 등록된 경우): 간병 마감일시와 항상 동기화 (변경 감지 포함)
+      if(isLast && !isManual) {
+        const wantOutDate = cg.endDate || dateStr;
+        const wantOutTime = cg.endTime || '23:59';
+        if(existing.outDate !== wantOutDate || existing.outTime !== wantOutTime) {
+          existing.outDate = wantOutDate;
+          existing.outTime = wantOutTime;
+          added++;
+        }
+      }
+      // 그 외 빈 값 채우기 (기존 로직)
+      if(!isManual && existing.inTime && !existing.outTime) {
         existing.outDate = dateStr;
         existing.outTime = '23:59';
         added++;
       }
-      if(isFirst && !existing.inTime && cg.startTime) {
+      if(isFirst && !isManual && !existing.inTime && cg.startTime) {
         existing.inTime = cg.startTime;
         added++;
       }
@@ -7291,6 +7334,7 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
   });
   delete pt.pendingReplacement;
   delete pt.recruitInfo;
+  autoFillAttendance(String(newCg.id)); // 신규 인계 간병인 간병일지 자동생성
   return newCg;
 }
 
