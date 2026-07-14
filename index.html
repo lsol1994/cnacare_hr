@@ -2959,6 +2959,10 @@ function savePatientEdit(id) {
       }
     }
 
+    // 간병일지 동기화 + 캘린더(급여·지출내용) 새로고침
+    matched.forEach(c => autoFillAttendance(String(c.id)));
+    refreshCalendarIfOpen();
+
     toast(`✅ 환자 정보 수정 + 간병인 정보 동시 업데이트됐어요`);
   } else {
     toast('✅ 환자 정보가 수정됐어요');
@@ -3809,6 +3813,7 @@ function saveCg() {
 
   save();
   autoFillAttendance(String(cg.id)); // 간병 시작/마감 시간에 맞춰 간병일지 즉시 동기화
+  refreshCalendarIfOpen();
   sendSheets({type:'caregiver', ...cg});
   sendSheets({type:'journal', caregiverName:cg.name, phone:cg.phone||'', hospital:cg.hospital,
     startDate:cg.startDate, startTime:cg.startTime, endDate:cg.endDate, endTime:cg.endTime});
@@ -4115,7 +4120,11 @@ function openCgDetail(id) {
                   <span style="font-weight:700">${h.patientName}</span>
                   ${isActive?`<span style="font-size:10px;background:var(--teal);color:#fff;padding:1px 5px;border-radius:3px">${h.status}</span>`:''}
                 </div>
-                <span style="color:var(--gray);font-size:10px">${h.recordedAt||''}</span>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="color:var(--gray);font-size:10px">${h.recordedAt||''}</span>
+                  <button style="border:none;background:none;color:var(--gray);cursor:pointer;font-size:12px;padding:0 2px" onclick="openEditHistoryEntry('${cg.id}','${h.patientId}','${h.startDate}')" title="수정">✏️</button>
+                  <button style="border:none;background:none;color:var(--red);cursor:pointer;font-size:12px;padding:0 2px" onclick="deleteAssignHistoryEntry('${cg.id}','${h.patientId}','${h.startDate}')" title="삭제">✕</button>
+                </div>
               </div>
               <div style="color:var(--gray)">🏥 ${h.hospital||'—'}</div>
               <div style="color:var(--gray)">📅 ${h.startDate||'—'} ${h.startTime||''} ~ ${h.endDate?h.endDate+' '+(h.endTime||''):'(진행중)'}</div>
@@ -4151,6 +4160,60 @@ function saveCgMemoFromModal(cgId) {
   save();
   toast('✅ ' + cg.name + ' 메모 저장됐어요');
 }
+// 근무 이력 한 건 삭제 (중복/잘못된 기록 정리용)
+function deleteAssignHistoryEntry(cgId, patientId, startDate) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg || !cg.assignHistory) return;
+  if(!confirm('이 근무 이력을 삭제할까요?')) return;
+  cg.assignHistory = cg.assignHistory.filter(h => !(String(h.patientId)===String(patientId) && h.startDate===startDate));
+  save();
+  openCgDetail(cgId);
+  toast('삭제됐어요');
+}
+
+// 근무 이력 한 건 수정 폼 열기 (replace-overlay 재사용)
+function openEditHistoryEntry(cgId, patientId, startDate) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg || !cg.assignHistory) return;
+  const h = cg.assignHistory.find(x => String(x.patientId)===String(patientId) && x.startDate===startDate);
+  if(!h) return;
+
+  document.getElementById('replace-title').textContent = '✏️ 근무 이력 수정';
+  document.getElementById('replace-body').innerHTML =
+    '<div class="field"><label>환자명</label><input type="text" id="hist-patientName" value="' + (h.patientName||'') + '"></div>'
+    + '<div class="field"><label>병원</label><input type="text" id="hist-hospital" value="' + (h.hospital||'') + '"></div>'
+    + '<div class="g2">'
+    + '<div class="field"><label>시작일</label><input type="date" id="hist-startDate" value="' + (h.startDate||'') + '"></div>'
+    + '<div class="field"><label>시작시간</label><input type="time" id="hist-startTime" value="' + (h.startTime||'') + '"></div>'
+    + '</div><div class="g2">'
+    + '<div class="field"><label>종료일</label><input type="date" id="hist-endDate" value="' + (h.endDate||'') + '"></div>'
+    + '<div class="field"><label>종료시간</label><input type="time" id="hist-endTime" value="' + (h.endTime||'') + '"></div>'
+    + '</div>'
+    + '<div class="field"><label>일급</label><input type="number" id="hist-pay" value="' + (h.pay||'') + '"></div>'
+    + '<div style="display:flex;gap:8px;margin-top:1rem">'
+    + '<button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveHistoryEntryEdit(&quot;' + String(cgId).replace(/"/g,'&quot;') + '&quot;,&quot;' + String(patientId).replace(/"/g,'&quot;') + '&quot;,&quot;' + String(startDate).replace(/"/g,'&quot;') + '&quot;)">저장</button>'
+    + '<button class="btn" onclick="closeOverlay(&quot;replace-overlay&quot;)">취소</button></div>';
+  document.getElementById('replace-overlay').classList.add('open');
+}
+
+function saveHistoryEntryEdit(cgId, patientId, startDate) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg || !cg.assignHistory) return;
+  const h = cg.assignHistory.find(x => String(x.patientId)===String(patientId) && x.startDate===startDate);
+  if(!h) return;
+  h.patientName = document.getElementById('hist-patientName').value.trim();
+  h.hospital    = document.getElementById('hist-hospital').value.trim();
+  h.startDate   = document.getElementById('hist-startDate').value;
+  h.startTime   = document.getElementById('hist-startTime').value;
+  h.endDate     = document.getElementById('hist-endDate').value;
+  h.endTime     = document.getElementById('hist-endTime').value;
+  h.pay         = document.getElementById('hist-pay').value.trim();
+  save();
+  closeOverlay('replace-overlay');
+  openCgDetail(cgId);
+  toast('✅ 근무 이력이 수정됐어요');
+}
+
 // ─── 간병인 근무 이력 ───
 function saveToAssignHistory(cg, overridePatientId) {
   const ptId = overridePatientId || cg.patientId || cg.earlyEndPatientId;
@@ -4522,6 +4585,7 @@ function confirmExtend(ptId) {
     if(cg){cg.endDate=newEndDate;cg.endTime=newEndTime;if(days!==null&&days>=0)cg.duration=days+'일';}
     save();
     if(cg) autoFillAttendance(String(cg.id)); // 마감시간 변경에 맞춰 간병일지 동기화
+    refreshCalendarIfOpen();
     closeOverlay('extend-overlay'); renderPatients(); renderCaregivers();
     toast('✅ '+p.name+' 연장됐어요 → '+newEndDate+' '+newEndTime);
   } else {
@@ -4902,6 +4966,7 @@ function confirmEarlyTerminate(cgId) {
 
   save();
   autoFillAttendance(String(cg.id)); // 중도종료 마감시간에 맞춰 간병일지 동기화
+  refreshCalendarIfOpen();
   closeOverlay('cg-overlay');
   renderCaregivers();
   renderPatients();
@@ -4980,6 +5045,7 @@ function cancelEarlyTerminate(cgId) {
 
   save();
   autoFillAttendance(String(cg.id)); // 종료취소로 복원된 마감시간에 맞춰 간병일지 동기화
+  refreshCalendarIfOpen();
   closeOverlay('cg-overlay');
   renderCaregivers();
   renderPatients();
@@ -5510,6 +5576,7 @@ function autoFillAllAttendanceManual() {
   let total = 0;
   caregivers.filter(c=>c.startDate).forEach(c=>{ total += autoFillAttendance(String(c.id)); });
   renderAttendance();
+  refreshCalendarIfOpen();
   if(total > 0) toast(`✅ 전체 간병인 간병일지 ${total}건 자동 생성/수정됐어요`);
   else toast('수정할 내용이 없어요 (이미 모두 최신 상태예요)');
 }
@@ -5523,6 +5590,7 @@ function autoFillOneAttendanceManual() {
   let total = 0;
   matches.forEach(c => { total += autoFillAttendance(String(c.id)); });
   renderAttendance();
+  refreshCalendarIfOpen();
   if(total > 0) toast(`✅ ${name} 간병일지 ${total}건 자동 생성/수정됐어요`);
   else toast(`${name} 간병일지는 이미 최신 상태예요`);
 }
@@ -7120,6 +7188,12 @@ function autoSave() {
 // - 마감일(실제 등록된 경우) 마지막날: 실제 간병 마감시간을 항상 동기화 (변경되면 같이 수정)
 // - 그 사이 날짜: 출근 00:00 / 퇴근 23:59 고정
 // - 단, 담당자가 출퇴근 기록을 수기로 직접 수정한 날(auto:false)은 자동 동기화가 덮어쓰지 않음
+// 간병인/환자 마감일시가 바뀔 때마다 캘린더(급여·지출내용 포함)가 열려있으면 즉시 새로고침
+function refreshCalendarIfOpen() {
+  var activePage = document.querySelector('.page.act');
+  if(activePage && activePage.id === 'page-calendar') renderCalendar();
+}
+
 function autoFillAttendanceUntilEnd(cgId, endDate) {
   return autoFillAttendance(cgId);
 }
@@ -7164,7 +7238,7 @@ function autoFillAttendance(cgId) {
       });
       added++;
     } else {
-      const isManual = existing.auto === false; // 담당자가 수기로 직접 수정한 기록은 보호
+      const isManual = existing.auto !== true; // 수기 체크인/수정 기록(auto가 true가 아닌 모든 경우)은 보호
       // 시작일: 간병 시작시간과 항상 동기화 (변경 감지 포함)
       if(isFirst && !isManual && cg.startTime && existing.inTime !== cg.startTime) {
         existing.inTime = cg.startTime;
@@ -7205,7 +7279,7 @@ function autoFillAllAttendance() {
   caregivers.filter(c=>c.startDate).forEach(c=>{
     total += autoFillAttendance(String(c.id));
   });
-  if(total > 0) { save(); renderAttendance(); }
+  if(total > 0) { save(); renderAttendance(); refreshCalendarIfOpen(); }
   return total;
 }
 
@@ -7450,6 +7524,7 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
   delete pt.pendingReplacement;
   delete pt.recruitInfo;
   autoFillAttendance(String(newCg.id)); // 신규 인계 간병인 간병일지 자동생성
+  refreshCalendarIfOpen();
   return newCg;
 }
 
