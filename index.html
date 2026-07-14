@@ -2961,7 +2961,7 @@ function savePatientEdit(id) {
     }
 
     // 간병일지 동기화 + 캘린더(급여·지출내용) 새로고침
-    matched.forEach(c => autoFillAttendance(String(c.id)));
+    matched.forEach(c => { markCgEdited(c.id); autoFillAttendance(String(c.id)); }); // Firebase 덮어쓰기 방지 (10초)
     refreshCalendarIfOpen();
 
     toast(`✅ 환자 정보 수정 + 간병인 정보 동시 업데이트됐어요`);
@@ -3122,6 +3122,8 @@ function confirmEndPatient(id) {
   });
 
   // 저장 + UI 갱신
+  markPtEdited(p.id); // Firebase 덮어쓰기 방지 (10초)
+  if(cg) markCgEdited(cg.id);
   save();
   if(cg) autoFillAttendance(String(cg.id)); // 종료 시각에 맞춰 간병일지 동기화
   refreshCalendarIfOpen();
@@ -4586,6 +4588,8 @@ function confirmExtend(ptId) {
     if(days!==null&&days>=0) p.duration = days+'일';
     delete p.recruitInfo;
     if(cg){cg.endDate=newEndDate;cg.endTime=newEndTime;if(days!==null&&days>=0)cg.duration=days+'일';}
+    markPtEdited(p.id); // Firebase 덮어쓰기 방지 (10초)
+    if(cg) markCgEdited(cg.id);
     save();
     if(cg) autoFillAttendance(String(cg.id)); // 마감시간 변경에 맞춰 간병일지 동기화
     refreshCalendarIfOpen();
@@ -4613,6 +4617,7 @@ function confirmExtend(ptId) {
       duration: repDays+'일', reason: '연장 후 간병인 교체(예약)'
     };
     // p.status/caregiverName/recruited는 그대로 둠 → 기존 간병인이 계속 매칭 간병인으로 표시됨
+    markPtEdited(p.id); // Firebase 덮어쓰기 방지 (10초)
     save(); closeOverlay('extend-overlay'); renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
     toast('✅ '+p.name+' 연장됐어요. 기존 간병인은 '+repStart+'까지 근무하고, 이후 교체할 간병인 공고를 올려주세요.');
   }
@@ -4758,6 +4763,8 @@ function confirmReassign(cgId) {
   pt.caregiverName = cg.name;
   delete pt.recruitInfo;
 
+  markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
+  markPtEdited(pt.id);
   save();
   autoFillAttendance(String(cg.id)); // 재배정된 새 일정에 맞춰 간병일지 동기화
   refreshCalendarIfOpen();
@@ -4969,6 +4976,8 @@ function confirmEarlyTerminate(cgId) {
   recalcDuration(cg, endDate);
   saveToAssignHistory(cg); // 근무 이력 저장
 
+  markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
+  if(pt) markPtEdited(pt.id);
   save();
   autoFillAttendance(String(cg.id)); // 중도종료 마감시간에 맞춰 간병일지 동기화
   refreshCalendarIfOpen();
@@ -5048,6 +5057,7 @@ function cancelEarlyTerminate(cgId) {
   delete cg.earlyEndSnapshot;
   delete cg._snapshot; // 구버전 호환
 
+  markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
   save();
   autoFillAttendance(String(cg.id)); // 종료취소로 복원된 마감시간에 맞춰 간병일지 동기화
   refreshCalendarIfOpen();
@@ -7528,6 +7538,8 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
   });
   delete pt.pendingReplacement;
   delete pt.recruitInfo;
+  markCgEdited(newCg.id); // Firebase 덮어쓰기 방지 (10초)
+  markPtEdited(pt.id);
   autoFillAttendance(String(newCg.id)); // 신규 인계 간병인 간병일지 자동생성
   refreshCalendarIfOpen();
   return newCg;
