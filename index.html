@@ -1200,6 +1200,9 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="autoFillOneAttendanceManual()">
         📋 간병일지 자동생성 (간병인 선택)
       </button>
+      <button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="resyncAllCgEndTimesManual()">
+        🔄 간병인 마감일시 환자와 재동기화 (전체)
+      </button>
       <button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="deduplicateNotices()">
         🧹 중복 알림 정리
       </button>
@@ -4166,6 +4169,78 @@ function saveCgMemoFromModal(cgId) {
   toast('✅ ' + cg.name + ' 메모 저장됐어요');
 }
 // 근무 이력 한 건 삭제 (중복/잘못된 기록 정리용)
+// 간병인 마감일시 직접 수정 (환자 수정 경유 없이 그 지급건만 확실하게 고치고 싶을 때)
+function openQuickEditCgEndTime(cgId) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg) return;
+  document.getElementById('replace-title').textContent = '✏️ ' + cg.name + ' 마감일시 직접 수정';
+  document.getElementById('replace-body').innerHTML =
+    '<div style="font-size:12px;color:var(--gray);margin-bottom:.875rem">환자 정보를 거치지 않고 이 간병인의 마감일시만 바로 수정해요.</div>'
+    + '<div class="g2">'
+    + '<div class="field"><label>마감일</label><input type="date" id="qe-endDate" value="' + (cg.endDate||'') + '"></div>'
+    + '<div class="field"><label>마감시간</label><input type="time" id="qe-endTime" value="' + (cg.endTime||'') + '"></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:1rem">'
+    + '<button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveQuickEditCgEndTime(&quot;' + String(cgId).replace(/"/g,'&quot;') + '&quot;)">저장</button>'
+    + '<button class="btn" onclick="closeOverlay(&quot;replace-overlay&quot;)">취소</button></div>';
+  document.getElementById('replace-overlay').classList.add('open');
+}
+
+function saveQuickEditCgEndTime(cgId) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg) return;
+  const newEndDate = document.getElementById('qe-endDate').value;
+  const newEndTime = document.getElementById('qe-endTime').value;
+  if(!newEndDate) { toast('마감일을 입력해주세요', true); return; }
+
+  cg.endDate = newEndDate;
+  cg.endTime = newEndTime;
+  markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
+
+  // 연결된 환자도 같이 맞춰줌 (표시 일관성 유지)
+  const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
+  if(pt) {
+    pt.endDate = newEndDate;
+    pt.endTime = newEndTime;
+    markPtEdited(pt.id);
+  }
+
+  save();
+  autoFillAttendance(String(cg.id));
+  closeOverlay('replace-overlay');
+  renderCaregivers();
+  renderPatients();
+  refreshCalendarIfOpen();
+  toast(`✅ ${cg.name} 마감일시가 ${newEndDate} ${newEndTime||''}로 직접 수정됐어요`);
+}
+
+// 간병인 마감일시를 연결된 환자 정보와 강제 재동기화 (전체) — 예전 데이터/연결 오류로 안 맞는 경우 일괄 복구
+function resyncAllCgEndTimesManual() {
+  if(!confirm('모든 간병인의 마감일시를 연결된 환자 정보 기준으로 다시 맞출까요?\n(환자 정보가 더 최신이라고 가정하고 간병인 쪽을 맞춥니다)')) return;
+  let fixed = 0;
+  caregivers.forEach(cg => {
+    if(!cg.patientId) return;
+    const pt = patients.find(p=>String(p.id)===String(cg.patientId));
+    if(!pt || !pt.endDate) return;
+    if(cg.endDate !== pt.endDate || cg.endTime !== (pt.endTime||'')) {
+      cg.endDate = pt.endDate;
+      cg.endTime = pt.endTime || '';
+      markCgEdited(cg.id);
+      autoFillAttendance(String(cg.id));
+      fixed++;
+    }
+  });
+  if(fixed > 0) {
+    save();
+    renderCaregivers();
+    renderPatients();
+    refreshCalendarIfOpen();
+    toast(`✅ ${fixed}명 간병인 마감일시를 환자 정보와 재동기화했어요`);
+  } else {
+    toast('불일치하는 항목이 없어요 (이미 모두 일치)');
+  }
+}
+
 function deleteAssignHistoryEntry(cgId, patientId, startDate) {
   const cg = caregivers.find(c=>String(c.id)===String(cgId));
   if(!cg || !cg.assignHistory) return;
@@ -6219,7 +6294,10 @@ function showCalDetail(dateStr) {
       var isHandover = !!(pt && pt.pendingReplacement && pt.recruitInfo && pt.recruitInfo.startDate === c.endDate);
       endEvents.push({ time: c.endTime||'', html:
         '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:var(--red-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">' + (isHandover?'■ 간병 마감 (이전 간병인)':'■ 간병인 근무 마감') + (c.endTime?' · '+c.endTime:'') + '</div>'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'
+        + '<div style="font-size:11px;font-weight:700;color:var(--red)">' + (isHandover?'■ 간병 마감 (이전 간병인)':'■ 간병인 근무 마감') + (c.endTime?' · '+c.endTime:'') + '</div>'
+        + '<button class="btn btn-sm" style="padding:2px 8px;font-size:10px" onclick="openQuickEditCgEndTime(\'' + c.id + '\')">✏️ 마감시간 수정</button>'
+        + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + c.name + ptStr + '</div>'
         + (isHandover?'<div style="font-size:11px;color:var(--gray);margin-top:2px">신규 간병인으로 교체</div>':'')
         + '</div>' });
