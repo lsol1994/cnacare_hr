@@ -3122,6 +3122,8 @@ function confirmEndPatient(id) {
 
   // 저장 + UI 갱신
   save();
+  if(cg) autoFillAttendance(String(cg.id)); // 종료 시각에 맞춰 간병일지 동기화
+  refreshCalendarIfOpen();
   document.getElementById('pt-overlay').classList.remove('open');
   renderPatients();
   renderDashboard();
@@ -4756,6 +4758,8 @@ function confirmReassign(cgId) {
   delete pt.recruitInfo;
 
   save();
+  autoFillAttendance(String(cg.id)); // 재배정된 새 일정에 맞춰 간병일지 동기화
+  refreshCalendarIfOpen();
   renderCaregivers();
   renderPatients();
   renderDashboard();
