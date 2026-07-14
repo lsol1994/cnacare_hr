@@ -2116,6 +2116,7 @@ function attachFirebaseListener() {
         if(ap==='page-log')       renderLog();
         if(ap==='page-report')    renderReport();
         if(ap==='page-members')   renderMembers();
+        if(ap==='page-calendar')  renderCalendar();
         updateSidebar(); renderDashboard();
       } catch(e) { console.warn('렌더 오류:', e); }
       showSyncStatus('동기화됨');
@@ -7192,10 +7193,10 @@ function autoSave() {
 // - 마감일(실제 등록된 경우) 마지막날: 실제 간병 마감시간을 항상 동기화 (변경되면 같이 수정)
 // - 그 사이 날짜: 출근 00:00 / 퇴근 23:59 고정
 // - 단, 담당자가 출퇴근 기록을 수기로 직접 수정한 날(auto:false)은 자동 동기화가 덮어쓰지 않음
-// 간병인/환자 마감일시가 바뀔 때마다 캘린더(급여·지출내용 포함)가 열려있으면 즉시 새로고침
+// 간병인/환자 마감일시가 바뀔 때마다 캘린더(급여·지출내용 포함)를 항상 새로고침
+// (지금 캘린더 화면이 안 보이는 상태여도 안전 — 숨겨진 DOM만 갱신되고, 나중에 봤을 때 이미 최신 상태)
 function refreshCalendarIfOpen() {
-  var activePage = document.querySelector('.page.act');
-  if(activePage && activePage.id === 'page-calendar') renderCalendar();
+  if(document.getElementById('cal-date-input')) renderCalendar();
 }
 
 function autoFillAttendanceUntilEnd(cgId, endDate) {
