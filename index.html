@@ -6294,10 +6294,7 @@ function showCalDetail(dateStr) {
       var isHandover = !!(pt && pt.pendingReplacement && pt.recruitInfo && pt.recruitInfo.startDate === c.endDate);
       endEvents.push({ time: c.endTime||'', html:
         '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:var(--red-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--red)">' + (isHandover?'■ 간병 마감 (이전 간병인)':'■ 간병인 근무 마감') + (c.endTime?' · '+c.endTime:'') + '</div>'
-        + '<button class="btn btn-sm" style="padding:2px 8px;font-size:10px" onclick="openQuickEditCgEndTime(\'' + c.id + '\')">✏️ 마감시간 수정</button>'
-        + '</div>'
+        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">' + (isHandover?'■ 간병 마감 (이전 간병인)':'■ 간병인 근무 마감') + (c.endTime?' · '+c.endTime:'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + c.name + ptStr + '</div>'
         + (isHandover?'<div style="font-size:11px;color:var(--gray);margin-top:2px">신규 간병인으로 교체</div>':'')
         + '</div>' });
@@ -7030,7 +7027,10 @@ function buildExpenseMemo(cg, pt, payEntry) {
     const wkStart = parseLocalDate(cg.startDate);
     wkStart.setDate(wkStart.getDate() + (week-1)*7);
     rangeStart = toLocalDateStr(wkStart); rangeStartTime = cg.startTime;
-    rangeEnd   = payEntry.payDate || payEntry.date; rangeEndTime = cg.startTime;
+    rangeEnd   = payEntry.payDate || payEntry.date;
+    // 이 주차 지급일이 실제 간병 마감일과 같으면(=사실상 마지막 정산이면) 실제 마감시간을 그대로 사용,
+    // 아직 근무가 계속되는 중간 주차라면 매주 같은 시각(시작시간) 기준으로 표시
+    rangeEndTime = (cg.endDate && rangeEnd === cg.endDate) ? (cg.endTime || cg.startTime) : cg.startTime;
     totalDays  = 7;
     reasonLabel = payEntry.label;
     // 같은 간병인이 원래 사용기간을 넘어 연장된 부분(원래 마감일 이후)에 해당하는 주급만 "_연장" 추가
