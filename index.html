@@ -2959,6 +2959,7 @@ function savePatientEdit(id) {
           c.endTime = newEndTime;
           c.startDate = p.startDate || c.startDate;
           c.startTime = p.startTime || c.startTime;
+          recalcDuration(c, newEndDate); // 간병인 duration도 같이 재계산
         });
       }
     }
@@ -3830,10 +3831,21 @@ function saveCg() {
     if(pt) {
       // 중도종료 이력이 있으면 교체 상황
       isReplace = !!(pt.recruitHistory && pt.recruitHistory.length > 0);
+      // 예약교체가 이미 진행 중이었는지(=recruitInfo/pendingReplacement가 있었는지) 삭제 전에 미리 확인
+      const hadPendingReplacement = !!(pt.recruitInfo || pt.pendingReplacement);
       pt.caregiverName = cg.name;
       pt.status        = '매칭완료';
       pt.recruited     = true;
       delete pt.recruitInfo; // 재모집이 실제로 완료됐으므로 "재모집중" 표시 해제
+
+      // 간병인 마감일시를 항상 환자에도 동기화 (기존엔 환자에 마감일이 이미 있으면 무시했었음 →
+      // 그래서 간병인 쪽에서 마감일을 고치면 환자 쪽은 안 바뀌는 비대칭 문제가 있었음. 항상 동기화로 변경)
+      // 단, 예약교체가 이미 진행 중이었다면 환자의 연장된 일정을 건드리면 안 되므로 예외
+      if(cg.endDate && !hadPendingReplacement) {
+        pt.endTime = cg.endTime || '';
+        recalcDuration(pt, cg.endDate); // 환자 endDate + duration 동시 재계산
+      }
+      markPtEdited(pt.id); // Firebase 덮어쓰기 방지 (10초)
     }
   }
 
@@ -3844,15 +3856,13 @@ function saveCg() {
   sendSheets({type:'journal', caregiverName:cg.name, phone:cg.phone||'', hospital:cg.hospital,
     startDate:cg.startDate, startTime:cg.startTime, endDate:cg.endDate, endTime:cg.endTime});
   if(pt) {
-    // 환자에 endDate 없을 때만 간병인 것으로 채움 (환자 정보 우선)
-    if(cg.endDate && !pt.endDate) pt.endDate = cg.endDate;
-    if(cg.endTime && !pt.endTime) pt.endTime = cg.endTime;
     sendSheets({type:'updatePatient', name:pt.name, startDate:pt.startDate,
       caregiverName:cg.name, status:'매칭완료'});
   }
 
   closeOverlay('cg-overlay');
   renderCaregivers();
+  renderPatients();
   updateSidebar();
 
   // 교체 상황이면 교체보고 자동 생성 + 매칭 안내 메시지까지 함께 팝업 (간병인 교체든 신규 매칭이든 항상 뜨도록)
@@ -4191,15 +4201,30 @@ function saveCgMemoFromModal(cgId) {
 // 같은 환자에 기간이 겹치는 다른 간병인이 있는지 확인 (한 환자 = 한 간병인 원칙)
 function findOverlappingCaregiver(patientId, newCg, excludeCgId) {
   if(!patientId || !newCg.startDate) return null;
-  const newStart = newCg.startDate;
-  const newEnd   = newCg.endDate || '9999-12-31'; // 마감일 없으면 무기한 근무중으로 간주
+
+  // 날짜+시간을 합쳐서 정확한 시각(timestamp)으로 변환 (날짜만 비교하면 "같은 날 맞교체"까지 겹침으로 오판됨)
+  function toDateTime(dateStr, timeStr, fallbackTime) {
+    if(!dateStr) return null;
+    const [h=0, m=0] = (timeStr || fallbackTime).split(':').map(Number);
+    const d = parseLocalDate(dateStr);
+    if(!d) return null;
+    d.setHours(h, m, 0, 0);
+    return d.getTime();
+  }
+
+  const newStart = toDateTime(newCg.startDate, newCg.startTime, '00:00');
+  const newEnd    = newCg.endDate ? toDateTime(newCg.endDate, newCg.endTime, '23:59') : Infinity;
+  if(newStart == null) return null;
+
   return caregivers.find(c => {
     if(String(c.patientId) !== String(patientId)) return false;
     if(excludeCgId && String(c.id) === String(excludeCgId)) return false;
     if(!c.startDate) return false;
-    const otherStart = c.startDate;
-    const otherEnd   = c.endDate || '9999-12-31';
-    return newStart <= otherEnd && otherStart <= newEnd; // 구간 겹침 판정
+    const otherStart = toDateTime(c.startDate, c.startTime, '00:00');
+    const otherEnd    = c.endDate ? toDateTime(c.endDate, c.endTime, '23:59') : Infinity;
+    if(otherStart == null) return false;
+    // 겹침 판정: 엄격한 부등호(<) 사용 → 마감 시각과 시작 시각이 정확히 같은 "맞교체"는 겹침으로 안 봄
+    return newStart < otherEnd && otherStart < newEnd;
   }) || null;
 }
 
