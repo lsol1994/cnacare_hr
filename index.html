@@ -2527,7 +2527,7 @@ function ptRowHTML(p) {
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
         ${stBadge(p.status)}
-        ${p.recruitInfo ? `<span class="badge b-amber" style="font-size:10px">🔄 재모집중</span>` : ''}
+        ${p.recruitInfo && !p.pendingReplacement ? `<span class="badge b-amber" style="font-size:10px">🔄 재모집중</span>` : ''}
         ${ptDdayBadge(p)}
       </div>
     </div>
@@ -2535,7 +2535,7 @@ function ptRowHTML(p) {
       <span>🏥 <b>${p.hospital}</b>${p.room?` <span style="color:var(--gray);font-weight:400">(${p.room})</span>`:''}</span>
       <span>💊 ${p.diagnosis}</span>
       ${p.contact ? `<span>📞 <b>${formatPhone(p.contact)}</b></span>` : ''}
-      ${p.recruitHistory && p.recruitHistory.length ? `<span class="badge b-amber" style="font-size:10px">🔄 ${p.recruitHistory.length}차 재모집</span>` : ''}
+      ${p.recruitHistory && p.recruitHistory.length ? `<span class="badge b-amber" style="font-size:10px">🔄 교체(${p.recruitHistory.length}회)</span>` : ''}
     </div>
     ${p.memo ? `<div style="font-size:11px;color:var(--teal);background:var(--teal-lt);border-radius:var(--rsm);padding:5px 10px;margin-bottom:6px;white-space:pre-wrap;line-height:1.5">📝 ${p.memo}</div>` : ''}
     <!-- 시작일/마감일 한눈에 -->
@@ -3703,6 +3703,14 @@ function calcAge(ssn) {
   else disp.style.display='none';
 }
 
+// 예정 교체 간병인 등록 폼: 주민번호 입력 시 나이 입력칸 자동 채움
+function calcAgeForReplacementForm(ssn) {
+  const ageEl = document.getElementById('rep-age');
+  if(!ageEl) return;
+  const age = calcAgeFromSSN(ssn);
+  if(age) ageEl.value = age;
+}
+
 // 주민번호로부터 생년월일 표시용 문자열 추출 (예: 1990.03.21)
 function birthFromSSN(ssn) {
   if(!ssn) return '';
@@ -3796,6 +3804,15 @@ function saveCg() {
     }
   }
 
+  // ── 같은 환자에 기간이 겹치는 다른 간병인이 있는지 확인 (한 환자 = 한 간병인 원칙) ──
+  if(cg.patientId && cg.startDate) {
+    const conflictCg = findOverlappingCaregiver(cg.patientId, cg, editCgId);
+    if(conflictCg) {
+      showOverlapWarning(cg, conflictCg, targetPtForDup);
+      return; // 겹치는 동안은 등록/수정 차단
+    }
+  }
+
   if(editCgId){
     const idx=caregivers.findIndex(x=>String(x.id)===String(editCgId));
     if(idx>-1) caregivers[idx]=cg;
@@ -3816,6 +3833,7 @@ function saveCg() {
       pt.caregiverName = cg.name;
       pt.status        = '매칭완료';
       pt.recruited     = true;
+      delete pt.recruitInfo; // 재모집이 실제로 완료됐으므로 "재모집중" 표시 해제
     }
   }
 
@@ -4170,6 +4188,44 @@ function saveCgMemoFromModal(cgId) {
 }
 // 근무 이력 한 건 삭제 (중복/잘못된 기록 정리용)
 // 간병인 마감일시 직접 수정 (환자 수정 경유 없이 그 지급건만 확실하게 고치고 싶을 때)
+// 같은 환자에 기간이 겹치는 다른 간병인이 있는지 확인 (한 환자 = 한 간병인 원칙)
+function findOverlappingCaregiver(patientId, newCg, excludeCgId) {
+  if(!patientId || !newCg.startDate) return null;
+  const newStart = newCg.startDate;
+  const newEnd   = newCg.endDate || '9999-12-31'; // 마감일 없으면 무기한 근무중으로 간주
+  return caregivers.find(c => {
+    if(String(c.patientId) !== String(patientId)) return false;
+    if(excludeCgId && String(c.id) === String(excludeCgId)) return false;
+    if(!c.startDate) return false;
+    const otherStart = c.startDate;
+    const otherEnd   = c.endDate || '9999-12-31';
+    return newStart <= otherEnd && otherStart <= newEnd; // 구간 겹침 판정
+  }) || null;
+}
+
+// 기간 겹침 발견 시 안내 팝업 (환자 상세/간병인 카드와 동일한 카드 양식으로 표시)
+function showOverlapWarning(newCg, conflictCg, pt) {
+  const fmtRange = c => (c.startDate||'—') + ' ' + (c.startTime||'') + ' ~ ' + (c.endDate||'(진행중)') + ' ' + (c.endTime||'');
+  document.getElementById('replace-title').textContent = '⚠️ 간병 기간 겹침 발견';
+  document.getElementById('replace-body').innerHTML =
+    '<div style="font-size:12px;color:var(--gray);margin-bottom:.875rem">'
+    + '<b>' + (pt?pt.name:'이 환자') + '</b>에게 이미 기간이 겹치는 간병인이 등록되어 있어요.<br>'
+    + '한 환자에는 한 간병인만 매칭할 수 있어요 — 아래 기존 간병인의 일정을 먼저 수정해주세요.'
+    + '</div>'
+    + '<div class="pt-row" style="margin-bottom:8px">'
+    + '<div class="pt-top"><div><div class="pt-name">기존 등록: ' + conflictCg.name + '</div></div></div>'
+    + '<div class="pt-meta"><span>📅 ' + fmtRange(conflictCg) + '</span></div>'
+    + '</div>'
+    + '<div class="pt-row" style="margin-bottom:1rem;border-color:var(--teal);box-shadow:0 0 0 3px rgba(11,122,110,.1)">'
+    + '<div class="pt-top"><div><div class="pt-name">지금 등록하려는: ' + newCg.name + '</div></div></div>'
+    + '<div class="pt-meta"><span>📅 ' + fmtRange(newCg) + '</span></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px">'
+    + '<button class="btn btn-teal" style="flex:1;justify-content:center" onclick="closeOverlay(&quot;replace-overlay&quot;);closeOverlay(&quot;cg-overlay&quot;);editCg(&quot;' + conflictCg.id + '&quot;)">기존 간병인 수정하기</button>'
+    + '<button class="btn" onclick="closeOverlay(&quot;replace-overlay&quot;)">취소</button></div>';
+  document.getElementById('replace-overlay').classList.add('open');
+}
+
 function openQuickEditCgEndTime(cgId) {
   const cg = caregivers.find(c=>String(c.id)===String(cgId));
   if(!cg) return;
@@ -4718,7 +4774,7 @@ function openReplacementForm(ptId) {
     + '<div class="field"><label>연락처</label><input type="tel" id="rep-phone" value="' + (rep.phone||'') + '"></div>'
     + '</div>'
     + '<div class="field"><label>경력</label><input type="text" id="rep-career" value="' + (rep.career||'') + '"></div>'
-    + '<div class="field"><label>주민번호 <span style="font-size:10px;font-weight:400;color:var(--gray)">(교체보고 국적/생년월일용, 선택)</span></label><input type="text" id="rep-ssn" value="' + (rep.ssn||'') + '" placeholder="000000-0000000"></div>'
+    + '<div class="field"><label>주민번호 <span style="font-size:10px;font-weight:400;color:var(--gray)">(입력하면 나이 자동계산, 교체보고 국적/생년월일용, 선택)</span></label><input type="text" id="rep-ssn" value="' + (rep.ssn||'') + '" placeholder="000000-0000000" oninput="calcAgeForReplacementForm(this.value)"></div>'
     + '<div class="g3">'
     + '<div class="field"><label>은행명</label><input type="text" id="rep-bankName" value="' + (rep.bankName||'') + '"></div>'
     + '<div class="field"><label>계좌번호</label><input type="text" id="rep-bankAccount" value="' + (rep.bankAccount||'') + '"></div>'
