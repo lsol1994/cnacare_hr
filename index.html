@@ -4832,6 +4832,16 @@ function saveReplacementInfo(ptId) {
   };
   save();
 
+  // 이미 인계 예정 시각이 지났으면(기존 간병인이 먼저 자동종료된 경우 포함) 기다리지 않고 즉시 인계 처리
+  let promotedNow = null;
+  if(p.recruitInfo && p.recruitInfo.startDate) {
+    const handoverDt = calcEndDt(p.recruitInfo.startDate, p.recruitInfo.startTime);
+    if(handoverDt && new Date() >= handoverDt) {
+      promotedNow = promotePendingReplacement(p, p.recruitInfo.startDate, p.recruitInfo.startTime);
+      if(promotedNow) { save(); renderPatients(); renderCaregivers(); }
+    }
+  }
+
   // 예정 교체 간병인 등록 시 업체보고 - 교체보고 자동 작성
   const arriveDate = p.recruitInfo ? p.recruitInfo.startDate : '';
   const arriveTime = p.recruitInfo ? p.recruitInfo.startTime : '';
@@ -4868,7 +4878,11 @@ function saveReplacementInfo(ptId) {
   copyBtn.textContent = '📋 교체보고 복사';
   copyBtn.onclick = () => { doCopy(replaceMsg); toast('✅ 교체보고 복사됐어요!'); };
   if(cfg.sound !== false) playBeep();
-  toast('✅ 예정 교체 간병인 정보 저장 + 교체보고 자동 작성됐어요.');
+  if(promotedNow) {
+    toast(`✅ 예정 교체 간병인 정보 저장! 인계 예정 시각이 이미 지나서 ${promotedNow.name} 님으로 즉시 교체 처리됐어요.`);
+  } else {
+    toast('✅ 예정 교체 간병인 정보 저장 + 교체보고 자동 작성됐어요.');
+  }
 }
 
 function clearPendingReplacement(ptId) {
@@ -7763,25 +7777,25 @@ function checkAutoStart() {
   }
 }
 
+// ── 마감 시각 계산 헬퍼 (전역) ──
+// 서비스 종료: endDate + endTime (간병인/환자에 저장된 실제 마감시각)
+// 24시간 기준: 6/4 16:00 시작 + 2일 = 6/6 16:00 마감
+function calcEndDt(endDate, endTime) {
+  if(!endDate) return null;
+  // endTime 없으면 23:59
+  const [eh, em] = (endTime && endTime !== '' ? endTime : '23:59').split(':').map(Number);
+  const [y, mo, d] = endDate.split('-').map(Number);
+  if(!y || !mo || !d) return null;
+  const dt = new Date(y, mo-1, d, eh, em, 59, 0);
+  if(isNaN(dt.getTime())) return null;
+  return dt;
+}
+
 function checkAutoEnd() {
   const now = new Date();
   let changed = false;
   const endedItems = []; // 종료된 항목 {pt, cg}
   const promotedItems = []; // 연장 후 예약 교체로 인계된 항목 {pt, newCg}
-
-  // ── 마감 시각 계산 헬퍼 ──
-  // 서비스 종료: endDate + endTime (간병인/환자에 저장된 실제 마감시각)
-  // 24시간 기준: 6/4 16:00 시작 + 2일 = 6/6 16:00 마감
-  function calcEndDt(endDate, endTime) {
-    if(!endDate) return null;
-    // endTime 없으면 23:59
-    const [eh, em] = (endTime && endTime !== '' ? endTime : '23:59').split(':').map(Number);
-    const [y, mo, d] = endDate.split('-').map(Number);
-    if(!y || !mo || !d) return null;
-    const dt = new Date(y, mo-1, d, eh, em, 59, 0);
-    if(isNaN(dt.getTime())) return null;
-    return dt;
-  }
 
   // ① 간병인 마감일 기준 자동 종료
   caregivers.forEach(cg => {
@@ -7827,6 +7841,20 @@ function checkAutoEnd() {
       }
     }
     if(!skipEndReport) endedItems.push({pt, cg});
+  });
+
+  // ①-보완: 예정 교체 인계 시점이 이미 지났는데 아직 인계 안 된 경우 재확인.
+  // (기존 간병인이 먼저 자동종료된 "뒤에" 예정 교체 간병인을 등록한 경우, 위 ①번 루프는
+  //  이미 종료 처리된 간병인을 다시 훑지 않아서 인계를 놓칠 수 있음 — 그 케이스를 여기서 보완)
+  patients.forEach(pt => {
+    if(!pt.pendingReplacement || !pt.recruitInfo || !pt.recruitInfo.startDate) return;
+    const handoverDt = calcEndDt(pt.recruitInfo.startDate, pt.recruitInfo.startTime);
+    if(!handoverDt || now < handoverDt) return;
+    const newCg = promotePendingReplacement(pt, pt.recruitInfo.startDate, pt.recruitInfo.startTime);
+    if(newCg) {
+      promotedItems.push({pt, newCg});
+      changed = true;
+    }
   });
 
   // ② 환자 마감일 기준 자동 종료 (간병인 endDate 없는 경우)
