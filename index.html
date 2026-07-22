@@ -566,7 +566,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       </div>
       <div class="g2" style="margin-top:.5rem">
         <label class="ck-wrap"><input type="checkbox" id="p-diaper" onchange="updateNPPreview()"> 기저귀 착용</label>
-        <label class="ck-wrap"><input type="checkbox" id="p-move" onchange="updateNPPreview()"> 거동 가능</label>
+        <label class="ck-wrap"><input type="checkbox" id="p-move" onchange="updateNPPreview()"> 거동 불가</label>
       </div>
       <div class="field" style="margin-top:.875rem">
         <label>상세 증상 <span style="font-size:10px;font-weight:400;color:var(--gray)">(공고에 그대로 표시)</span></label>
@@ -2298,8 +2298,7 @@ function buildPost(p) {
   // 수술여부: '' (기타/공고미표시)이면 제외
   if(p.surgery && p.surgery !== '') stateParts.push(p.surgery);
   if(p.diaper) stateParts.push('기저귀 착용');
-  if(p.move) stateParts.push('거동 가능');
-  else stateParts.push('거동 불가');
+  if(!p.move) stateParts.push('거동 불가'); // 거동가능(기본값/특이사항 없음)인 경우는 공고에 아예 표시 안 함
   // 기타 특이사항 - [중도종료] 이력은 공고에서 제외
   if(p.extra) {
     const extraClean = p.extra.split('\n')
@@ -2374,7 +2373,7 @@ function getFormPatient() {
     weight: document.getElementById('p-weight').value,
     cgGender:  (document.querySelector('input[name="p-cg-gender"]:checked')?.value || ''),
     diaper: document.getElementById('p-diaper').checked,
-    move: document.getElementById('p-move').checked,
+    move: !document.getElementById('p-move').checked, // 체크박스는 "거동 불가" 표시이므로 반전해서 저장 (move=true는 거동가능을 의미)
     extra: document.getElementById('p-extra').value.trim(),
     startDate: document.getElementById('p-start-date').value,
     startTime: document.getElementById('p-start-time').value,
@@ -2781,7 +2780,7 @@ function editPatient(id) {
     </div>
     <div class="g2" style="margin-bottom:.75rem">
       <label class="ck-wrap"><input type="checkbox" id="ep-diaper" ${p.diaper?'checked':''}> 기저귀 착용</label>
-      <label class="ck-wrap"><input type="checkbox" id="ep-move" ${p.move?'checked':''}> 거동 가능</label>
+      <label class="ck-wrap"><input type="checkbox" id="ep-move" ${!p.move?'checked':''}> 거동 불가</label>
     </div>
     <div class="field"><label>기타 특이사항</label>
       <textarea id="ep-extra" style="min-height:55px">${p.extra||''}</textarea>
@@ -2887,7 +2886,7 @@ function savePatientEdit(id) {
   p.surgery   = document.getElementById('ep-surgery').value;
   p.cgGender  = document.querySelector('input[name="ep-cg-gender"]:checked')?.value || '';
   p.diaper    = document.getElementById('ep-diaper').checked;
-  p.move      = document.getElementById('ep-move').checked;
+  p.move      = !document.getElementById('ep-move').checked; // 체크박스는 "거동 불가" 표시이므로 반전해서 저장
   p.extra     = document.getElementById('ep-extra').value.trim();
   p.startDate = document.getElementById('ep-startDate').value;
   p.startTime = document.getElementById('ep-startTime').value;
