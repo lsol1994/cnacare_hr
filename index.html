@@ -7664,6 +7664,8 @@ function startRemind() {
   setInterval(checkAutoEnd, 60 * 1000);
   // 자동 근무시작 체크 1분마다
   setInterval(checkAutoStart, 60 * 1000);
+  // 간병인 입실 임박(10분 전) 체크 1분마다
+  setInterval(checkUpcomingArrivals, 60 * 1000);
   // 출퇴근 자동 채우기 1시간마다
   setInterval(autoFillAllAttendance, 60 * 60 * 1000);
   // 5분마다 자동저장
@@ -7672,6 +7674,7 @@ function startRemind() {
   setTimeout(checkInsuranceExpiry, 3000);
   setTimeout(checkAutoEnd, 2000);
   setTimeout(checkAutoStart, 2500);
+  setTimeout(checkUpcomingArrivals, 2700);
   setTimeout(checkAllRemind, 5000);  // 하루 1회 통합 알림 (앱 시작 시)
   setTimeout(autoFillAllAttendance, 7000);
 }
@@ -7977,6 +7980,39 @@ function fireRemind() {
   if(cfg.sound !== false) playBeep();
   if(Notification.permission==='granted'){
     new Notification('씨앤에이케어 리마인드',{body:`미구인 ${unrecruited.length}건 — ${names}`});
+  }
+}
+
+// 간병인 입실(근무 시작) 임박 알림 — 시작 10분 전에 미리 알려줘서 사전 안내 문자를 보낼 수 있게 함
+const _remindedArrivalIds = new Set(); // 같은 건을 반복해서 알리지 않기 위한 세션 내 기록
+function checkUpcomingArrivals() {
+  const now = new Date();
+  const upcoming = caregivers.filter(cg => {
+    if(cg.workStatus !== '대기중') return false;
+    if(!cg.startDate || !cg.startTime) return false;
+    if(_remindedArrivalIds.has(String(cg.id))) return false;
+    const [h, m] = cg.startTime.split(':').map(Number);
+    const startDt = parseLocalDate(cg.startDate);
+    if(!startDt) return false;
+    startDt.setHours(h, m, 0, 0);
+    const diffMin = (startDt - now) / 60000;
+    return diffMin > 0 && diffMin <= 10; // 10분 이내로 임박한 경우만
+  });
+  if(!upcoming.length) return;
+  upcoming.forEach(cg => _remindedArrivalIds.add(String(cg.id)));
+
+  const lines = upcoming.map(cg => {
+    const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
+    const ptInfo = pt ? ` — ${pt.name}(${pt.hospital||'—'})` : '';
+    return `${cg.name} (${cg.phone||'연락처 없음'}) · ${cg.startTime} 입실 예정${ptInfo}`;
+  }).join('\n');
+
+  const popup = document.getElementById('remind-popup');
+  document.getElementById('remind-popup-body').innerHTML = `🔔 입실 임박 (10분 이내)\n${lines}\n미리 안내 문자 보내주세요!`;
+  popup.style.display = 'block';
+  if(cfg.sound !== false) playBeep();
+  if(Notification.permission === 'granted') {
+    new Notification('씨앤에이케어 — 입실 임박', { body: lines });
   }
 }
 
