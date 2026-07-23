@@ -4920,6 +4920,13 @@ function confirmReassign(cgId) {
   cg.startTime  = pt.startTime || '';
   cg.endDate    = pt.endDate   || '';
   cg.endTime    = pt.endTime   || '';
+  // 환자의 마감일이 오늘보다 이전(예전 계획이 그대로 남아있는 경우 등)이면 무효화.
+  // 그대로 두면 재배정 직후 자동종료 점검 로직이 "이미 마감일 지남"으로 오판해서
+  // 근무 시작 전에 곧바로 다시 "종료"로 되돌려버리는 문제가 있었음.
+  if(cg.endDate && cg.endDate < todayStr()) {
+    cg.endDate = '';
+    cg.endTime = '';
+  }
   cg.pay        = pt.pay ? String(Math.max(0, Number(pt.pay)-5000)) : cg.pay;
   cg.hospital   = pt.hospital  || cg.hospital;
   delete cg.earlyEndPatientId;
@@ -4931,6 +4938,13 @@ function confirmReassign(cgId) {
   pt.recruited     = true;
   pt.caregiverName = cg.name;
   delete pt.recruitInfo;
+  // 환자 쪽에도 예전 계획의 과거 마감일이 그대로 남아있으면 같이 무효화 (위와 동일한 이유 —
+  // 자동종료 점검이 간병인뿐 아니라 환자의 마감일 기준으로도 별도로 검사하기 때문에,
+  // 여기를 안 지우면 간병인 쪽만 고쳐도 환자 쪽 값 때문에 다시 종료 처리됨)
+  if(pt.endDate && pt.endDate < todayStr()) {
+    pt.endDate = '';
+    pt.endTime = '';
+  }
 
   markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
   markPtEdited(pt.id);
