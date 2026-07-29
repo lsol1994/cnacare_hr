@@ -4739,6 +4739,9 @@ function confirmExtend(ptId) {
     if(!p._originalEndDate && cg && cg.endDate) p._originalEndDate = cg.endDate;
     else if(!p._originalEndDate && p.endDate) p._originalEndDate = p.endDate;
 
+    // 연장 보고 문구용: 덮어쓰기 전의 "이전 마감일" 보존
+    var oldEndDateForReport = (cg && cg.endDate) || p.endDate || '';
+
     p.endDate = newEndDate; p.endTime = newEndTime;
     if(days!==null&&days>=0) p.duration = days+'일';
     delete p.recruitInfo;
@@ -4750,6 +4753,7 @@ function confirmExtend(ptId) {
     refreshCalendarIfOpen();
     closeOverlay('extend-overlay'); renderPatients(); renderCaregivers();
     toast('✅ '+p.name+' 연장됐어요 → '+newEndDate+' '+newEndTime);
+    showExtendReportPopup(p, cg, oldEndDateForReport, newEndDate, newEndTime);
   } else {
     // 예약 교체: 기존 간병인은 그대로 자기 마감일까지 근무 계속 (건드리지 않음)
     // 환자는 계속 "매칭완료" 상태 유지 (기존 간병인이 계속 매칭 간병인으로 표시됨)
@@ -5565,6 +5569,51 @@ function findCgForPatient(p) {
 
 // ── 매칭 보고 메시지 생성 ──
 // ── 교체보고 메시지 생성 ──
+// 환자 연장(교체 없이 기존 간병인 계속) 시 자동 보고 문구 생성
+function buildExtendReport(pt, cg, oldEndDate, newEndDate, newEndTime) {
+  const ptName   = pt ? pt.name : '________';
+  const hospital = pt ? (pt.hospital||'') : '';
+  const cgName   = cg ? cg.name : ((pt && pt.caregiverName) || '________');
+
+  // 연장기간 = 새 마감일 - 이전 마감일 (일수 차이)
+  let extendDays = '';
+  if(oldEndDate && newEndDate) {
+    const oldD = parseLocalDate(oldEndDate);
+    const newD = parseLocalDate(newEndDate);
+    if(oldD && newD) extendDays = Math.round((newD - oldD) / 86400000);
+  }
+
+  // 변경된 종료일: "M/D H시" 형식 (분이 0이 아니면 "H시 M분")
+  let endStr = '________';
+  const endD = newEndDate ? parseLocalDate(newEndDate) : null;
+  if(endD) {
+    const [h, m] = (newEndTime||'').split(':').map(Number);
+    let timePart = '';
+    if(!isNaN(h)) timePart = ' ' + h + '시' + (m ? ' ' + m + '분' : '');
+    endStr = (endD.getMonth()+1) + '/' + endD.getDate() + timePart;
+  }
+
+  return `-환자명 : ${ptName}(${hospital})
+-간병인명 : ${cgName}
+-연장기간 : ${extendDays}일 
+-변경된 종료일 : ${endStr}
+간병은 교체없이 기존 간병인으로 계속 진행하기로 하였습니다.`;
+}
+
+// 연장(교체없음) 보고 팝업 표시
+function showExtendReportPopup(pt, cg, oldEndDate, newEndDate, newEndTime) {
+  const msg = buildExtendReport(pt, cg, oldEndDate, newEndDate, newEndTime);
+  const popup = document.getElementById('remind-popup');
+  resetPopupButtons();
+  document.getElementById('remind-popup-body').innerHTML =
+    `📋 <strong>${pt.name}</strong> 연장 보고 문구예요.\n\n` +
+    `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:6px;font-size:12px;white-space:pre-wrap;line-height:1.8">${msg}</div>`;
+  popup.style.display = 'block';
+  addPopupCopyBtn('remind-copy-btn', '📋 연장 보고 복사', msg);
+  if(cfg.sound !== false) playBeep();
+  return msg;
+}
+
 function buildReplaceReport(pt, newDate, newTime, newCg) {
   const ptName   = pt ? pt.name : '________';
   const hospital = pt ? (pt.hospital||'') : '';
@@ -6869,6 +6918,16 @@ function checkPayRemind(testMode) {
   }
 }
 
+// 업무일지 카드 숨김 상태 관리 (기본은 전체 내용 보임, 숨김 누르면 4줄까지만)
+const _collapsedMemoIds = new Set();
+function toggleMemoCollapse(id, event) {
+  if(event) event.stopPropagation(); // 카드 클릭(수정 모달 열기)으로 전파 방지
+  const key = String(id);
+  if(_collapsedMemoIds.has(key)) _collapsedMemoIds.delete(key);
+  else _collapsedMemoIds.add(key);
+  renderMemo();
+}
+
 function renderMemo() {
   const el = document.getElementById('memo-list');
   if(!el) return;
@@ -6888,18 +6947,27 @@ function renderMemo() {
     const dayStr = d ? `(${DAYS[d.getDay()]}요일)` : '';
     return `<div style="margin-bottom:1rem">
       <div style="font-size:11px;font-weight:700;color:var(--teal);padding:6px 0;border-bottom:2px solid var(--teal-lt);margin-bottom:6px">📅 ${date} ${dayStr}</div>
-      ${groups[date].map(m=>`
+      ${groups[date].map(m=>{
+        const fullContent = m.content || '';
+        const lines = fullContent.split('\n');
+        const needsToggle = lines.length > 4;
+        const isCollapsed = needsToggle && _collapsedMemoIds.has(String(m.id));
+        const displayContent = isCollapsed ? lines.slice(0,4).join('\n') + ' …' : fullContent;
+        const toggleLabel = isCollapsed ? '👁️ 더보기' : '🙈 숨기기';
+        return `
         <div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;margin-bottom:6px;cursor:pointer;border:1px solid var(--border)" onclick="editMemoEntry('${m.id}')">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
             <span style="font-size:12px;font-weight:700">${m.author||'작성자 없음'}</span>
-            <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
               ${m.patientId?`<span class="badge b-teal" style="font-size:10px">🏥 ${patients.find(p=>String(p.id)===String(m.patientId))?.name||'환자'}</span>`:''}
               ${m.caregiverId?`<span class="badge b-blue" style="font-size:10px">👤 ${caregivers.find(c=>String(c.id)===String(m.caregiverId))?.name||'간병인'}</span>`:''}
+              ${needsToggle?`<button class="btn btn-sm" style="padding:2px 8px;font-size:10px" onclick="toggleMemoCollapse('${m.id}', event)">${toggleLabel}</button>`:''}
             </div>
           </div>
-          <div style="font-size:12px;color:var(--gray);white-space:pre-wrap;line-height:1.6">${(m.content||'').slice(0,80)}${(m.content||'').length>80?'...':''}</div>
+          <div style="font-size:12px;color:var(--gray);white-space:pre-wrap;line-height:1.6">${displayContent}</div>
         </div>
-      `).join('')}
+      `;
+      }).join('')}
     </div>`;
   }).join('');
 }
