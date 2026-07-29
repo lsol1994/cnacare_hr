@@ -532,9 +532,11 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         </div>
         <div class="field"><label>연락처 (보호자)</label><input type="tel" id="p-contact" placeholder="010-0000-0000"></div>
       </div>
-      <div class="g2">
-        <div class="field"><label>병원명 + 가까운 전철역 <span class="req">*</span></label>
-          <input type="text" id="p-hospital" placeholder="예: 서울 일원동 삼성병원 / 일원역 5분"></div>
+      <div class="g3">
+        <div class="field"><label>병원명 <span class="req">*</span></label>
+          <input type="text" id="p-hospital" placeholder="예: 서울 일원동 삼성병원"></div>
+        <div class="field"><label>가까운 역 <span style="font-size:10px;font-weight:400;color:var(--gray)">(선택, 구인공고에 표시)</span></label>
+          <input type="text" id="p-station" placeholder="예: 일원역 5분"></div>
         <div class="field"><label>호실 <span style="font-size:10px;font-weight:400;color:var(--gray)">(내부관리용, 공고 미노출)</span></label>
           <input type="text" id="p-room" placeholder="예: 153동 33호"></div>
       </div>
@@ -2329,7 +2331,7 @@ function buildPost(p) {
 
   return `🚨[구인]🚨${titleGender}간병인 선생님 구합니다 🙏
 
-🏥 병원위치 : ${p.hospital || '—'}
+🏥 병원위치 : ${p.hospital || '—'}${p.station ? ' / '+p.station : ''}
 📅 간병시작일 : ${postStartDate || '—'}${days?' ('+days+')':''} ${p.startTime || ''}
 👤 환자분 : ${p.gender||''}${ageWeight?' / '+ageWeight:''} / ${state || '—'}
 💰 가격 : ${pay} / 식비포함
@@ -2348,7 +2350,7 @@ function getDayLabel(dateStr) {
 }
 
 // ─── LIVE PREVIEW ───
-const pFields=['p-name','p-age','p-gender','p-contact','p-hospital','p-diagnosis','p-surgery',
+const pFields=['p-name','p-age','p-gender','p-contact','p-hospital','p-station','p-diagnosis','p-surgery',
   'p-height','p-weight','p-diaper','p-move','p-extra','p-start-date','p-start-time','p-pay','p-request'];
 pFields.forEach(id=>{
   const el=document.getElementById(id);
@@ -2366,6 +2368,7 @@ function getFormPatient() {
     gender: document.getElementById('p-gender').value,
     contact: document.getElementById('p-contact').value.trim(),
     hospital: document.getElementById('p-hospital').value.trim(),
+    station: document.getElementById('p-station')?.value.trim() || '',
     room: document.getElementById('p-room')?.value.trim() || '',
     diagnosis: document.getElementById('p-diagnosis').value.trim(),
     surgery: document.getElementById('p-surgery').value,
@@ -2531,7 +2534,7 @@ function ptRowHTML(p) {
       </div>
     </div>
     <div class="pt-meta">
-      <span>🏥 <b>${p.hospital}</b>${p.room?` <span style="color:var(--gray);font-weight:400">(${p.room})</span>`:''}</span>
+      <span>🏥 <b>${p.hospital}</b>${p.station?` <span style="color:var(--gray);font-weight:400">· ${p.station}</span>`:''}${p.room?` <span style="color:var(--gray);font-weight:400">(${p.room})</span>`:''}</span>
       <span>💊 ${p.diagnosis}</span>
       ${p.contact ? `<span>📞 <b>${formatPhone(p.contact)}</b></span>` : ''}
       ${p.recruitHistory && p.recruitHistory.length ? `<span class="badge b-amber" style="font-size:10px">🔄 교체(${p.recruitHistory.length}회)</span>` : ''}
@@ -2640,7 +2643,8 @@ function openPatient(id) {
   document.getElementById('pt-modal-body').innerHTML=`
     <div class="g2" style="margin-bottom:.875rem">
       ${[['이름',p.name],['나이/성별',(p.age||'—')+'세 '+p.gender],
-         ['병원',p.hospital],['시작일',p.startDate+' '+p.startTime],
+         ['병원',p.hospital],['가까운 역',p.station||'—'],
+         ['시작일',p.startDate+' '+p.startTime],
          ['병증',p.diagnosis],['수술',p.surgery],
          ['기간',p.duration],['시급',p.pay?Number(p.pay).toLocaleString()+'원':'협의']
       ].map(([k,v])=>`<div style="background:var(--surface2);border-radius:var(--rsm);padding:8px 10px">
@@ -2755,9 +2759,12 @@ function editPatient(id) {
         <input type="tel" id="ep-contact" value="${p.contact||''}">
       </div>
     </div>
-    <div class="g2">
-      <div class="field"><label>병원명 + 가까운 전철역</label>
+    <div class="g3">
+      <div class="field"><label>병원명</label>
         <input type="text" id="ep-hospital" value="${p.hospital||''}">
+      </div>
+      <div class="field"><label>가까운 역 <span style="font-size:10px;font-weight:400;color:var(--gray)">(선택)</span></label>
+        <input type="text" id="ep-station" value="${p.station||''}" placeholder="예: 일원역 5분">
       </div>
       <div class="field"><label>호실 <span style="font-size:10px;font-weight:400;color:var(--gray)">(공고 미노출)</span></label>
         <input type="text" id="ep-room" value="${p.room||''}" placeholder="예: 153동 33호">
@@ -2881,6 +2888,7 @@ function savePatientEdit(id) {
   p.gender    = document.getElementById('ep-gender').value;
   p.contact   = document.getElementById('ep-contact').value.trim();
   p.hospital  = document.getElementById('ep-hospital').value.trim();
+  p.station   = document.getElementById('ep-station')?.value.trim() || '';
   p.room      = document.getElementById('ep-room')?.value.trim() || '';
   p.diagnosis = document.getElementById('ep-diagnosis').value.trim();
   p.surgery   = document.getElementById('ep-surgery').value;
@@ -5670,7 +5678,7 @@ function formatSchedule(dateStr, timeStr) {
 function buildMatchMessage(pt, cg) {
   const schedule = formatSchedule(pt?.startDate || cg?.startDate, pt?.startTime || cg?.startTime || '');
   const duration = pt?.duration || '________';
-  const hospital = (pt?.hospital||'') + (pt?.room ? ' '+pt.room : '') || '________';
+  const hospital = (pt?.hospital||'') + (pt?.station ? ' / '+pt.station : '') + (pt?.room ? ' '+pt.room : '') || '________';
   const ptName   = pt?.name || '________';
   const guardianPhone = formatPhone(pt?.contact) || '________';
   const basePay  = pt?.pay ? Number(pt.pay) : (cg?.pay ? Number(cg.pay)+5000 : 0);
