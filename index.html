@@ -2655,14 +2655,17 @@ function renderPatients() {
   let list = flt ? patients.filter(p=>p.status===flt) : [...patients];
   if(q) {
     const qNum = q.replace(/[^0-9]/g,''); // 숫자만
-    list = list.filter(p =>
-      (p.name||'').toLowerCase().includes(q) ||
-      (p.hospital||'').toLowerCase().includes(q) ||
-      (p.diagnosis||'').toLowerCase().includes(q) ||
-      (p.contact||'').toLowerCase().includes(q) ||
-      (qNum && (p.contact||'').replace(/[^0-9]/g,'').includes(qNum)) ||
-      (p.caregiverName||'').toLowerCase().includes(q)
-    );
+    list = list.filter(p => {
+      // 매칭된 간병인을 실시간으로 조회해서 이름 검색 (캐시된 caregiverName이 어긋나 있어도 항상 정확하게 잡히도록)
+      const matchedCg = caregivers.find(c=>String(c.patientId)===String(p.id));
+      return (p.name||'').toLowerCase().includes(q) ||
+        (p.hospital||'').toLowerCase().includes(q) ||
+        (p.diagnosis||'').toLowerCase().includes(q) ||
+        (p.contact||'').toLowerCase().includes(q) ||
+        (qNum && (p.contact||'').replace(/[^0-9]/g,'').includes(qNum)) ||
+        (p.caregiverName||'').toLowerCase().includes(q) ||
+        (matchedCg && (matchedCg.name||'').toLowerCase().includes(q));
+    });
   }
   // 정렬: 종료 환자 맨 뒤, 나머지는 서비스시작일 순
   list.sort((a, b) => {
@@ -2696,7 +2699,13 @@ function openPatient(id) {
   const p=patients.find(x=>String(x.id)===String(id));
   if(!p) return;
   document.getElementById('pt-modal-title').textContent=p.name+' 환자 상세';
-  const cg=caregivers.find(c=>c.patientId===String(p.id));
+  // 정상적으로 연결된(현재 매칭 중인) 간병인 우선 조회
+  const cg = caregivers.find(c=>String(c.patientId)===String(p.id));
+  // 종료된 환자인데 위에서 못 찾은 경우: 중도종료(완전종료)로 연결이 끊긴 마지막 담당 간병인을 대신 찾음
+  // (중도종료 시 cg.patientId는 비워지지만 cg.earlyEndPatientId에 보존되어 있음)
+  const lastCg = (!cg && p.status==='종료')
+    ? caregivers.find(c=>String(c.earlyEndPatientId)===String(p.id))
+    : null;
   const pLogs=logs.filter(l=>String(l.patientId)===String(p.id));
   document.getElementById('pt-modal-body').innerHTML=`
     <div class="g2" style="margin-bottom:.875rem">
@@ -2727,6 +2736,18 @@ function openPatient(id) {
         <div style="font-size:12px;color:var(--gray);margin-top:2px">${formatPhone(cg.phone)||''} ${cg.specialty?'· '+cg.specialty:''}</div>
       </div>
       <button class="btn btn-sm" style="border-color:var(--green);color:var(--green)" onclick="closeOverlay('pt-overlay');showPage('caregiver');setTimeout(()=>openCgDetail('${cg.id}'),100)">
+        간병인 상세 →
+      </button>
+    </div>` : lastCg ? `
+    <div class="hr"></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:8px">🔗 마지막 담당 간병인 <span style="font-weight:400;text-transform:none">(중도종료됨)</span></div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--rsm);padding:10px 14px;display:flex;align-items:center;gap:12px">
+      <div style="width:36px;height:36px;border-radius:50%;background:var(--gray-lt);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:700;flex-shrink:0">${lastCg.name[0]}</div>
+      <div style="flex:1">
+        <div style="font-size:14px;font-weight:700;color:var(--black)">${lastCg.name} <span style="font-size:12px;font-weight:400;color:var(--gray)">${lastCg.age?lastCg.age+'세':''} ${lastCg.gender||''}</span></div>
+        <div style="font-size:12px;color:var(--gray);margin-top:2px">${formatPhone(lastCg.phone)||''} ${lastCg.specialty?'· '+lastCg.specialty:''}</div>
+      </div>
+      <button class="btn btn-sm" style="border-color:var(--gray);color:var(--gray)" onclick="closeOverlay('pt-overlay');showPage('caregiver');setTimeout(()=>openCgDetail('${lastCg.id}'),100)">
         간병인 상세 →
       </button>
     </div>` : `
@@ -3987,14 +4008,17 @@ function renderCaregivers() {
   if(flt)  list = list.filter(c=>c.workStatus===flt);
   if(q) {
     const qNum = q.replace(/[^0-9]/g,'');
-    list = list.filter(c=>
-      (c.name||'').toLowerCase().includes(q) ||
-      (c.hospital||'').toLowerCase().includes(q) ||
-      (c.specialty||'').toLowerCase().includes(q) ||
-      (c.phone||'').toLowerCase().includes(q) ||
-      (qNum && (c.phone||'').replace(/[^0-9]/g,'').includes(qNum)) ||
-      (c.region||'').toLowerCase().includes(q)
-    );
+    list = list.filter(c=>{
+      // 매칭된 환자를 실시간으로 조회해서 이름 검색
+      const matchedPt = c.patientId ? patients.find(p=>String(p.id)===String(c.patientId)) : null;
+      return (c.name||'').toLowerCase().includes(q) ||
+        (c.hospital||'').toLowerCase().includes(q) ||
+        (c.specialty||'').toLowerCase().includes(q) ||
+        (c.phone||'').toLowerCase().includes(q) ||
+        (qNum && (c.phone||'').replace(/[^0-9]/g,'').includes(qNum)) ||
+        (c.region||'').toLowerCase().includes(q) ||
+        (matchedPt && (matchedPt.name||'').toLowerCase().includes(q));
+    });
   }
 
   // 정렬: 종료 간병인 맨 뒤, 나머지는 서비스시작일 순
