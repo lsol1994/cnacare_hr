@@ -2722,14 +2722,16 @@ function openPatient(id) {
   // 2순위: 과거 담당 이력(assignHistory)에 이 환자 기록이 남아있는 경우 (재배정으로 다른 환자에게 넘어간 경우 등)
   //        여러 명이 걸리면 그중 가장 최근에 마감된 사람을 선택
   let lastCg = null;
+  let lastCgSource = null; // 'earlyEnd' = 중도종료로 끊김 / 'history' = 재배정 등으로 넘어가 이력에만 남음
   if(!cg && p.status==='종료') {
     lastCg = caregivers.find(c=>String(c.earlyEndPatientId)===String(p.id));
+    if(lastCg) lastCgSource = 'earlyEnd';
     if(!lastCg) {
       const candidates = caregivers
         .filter(c=>(c.assignHistory||[]).some(h=>String(h.patientId)===String(p.id)))
         .map(c=>({ cg:c, entry:c.assignHistory.find(h=>String(h.patientId)===String(p.id)) }));
       candidates.sort((a,b)=>(b.entry.endDate||'').localeCompare(a.entry.endDate||''));
-      if(candidates.length) lastCg = candidates[0].cg;
+      if(candidates.length) { lastCg = candidates[0].cg; lastCgSource = 'history'; }
     }
   }
   const pLogs=logs.filter(l=>String(l.patientId)===String(p.id));
@@ -2766,7 +2768,7 @@ function openPatient(id) {
       </button>
     </div>` : lastCg ? `
     <div class="hr"></div>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:8px">🔗 마지막 담당 간병인 <span style="font-weight:400;text-transform:none">(중도종료됨)</span></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:8px">🔗 마지막 담당 간병인 <span style="font-weight:400;text-transform:none">${lastCgSource==='earlyEnd' ? '(중도종료됨)' : '(이후 다른 환자로 이동, 과거 이력)'}</span></div>
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--rsm);padding:10px 14px;display:flex;align-items:center;gap:12px">
       <div style="width:36px;height:36px;border-radius:50%;background:var(--gray-lt);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:700;flex-shrink:0">${lastCg.name[0]}</div>
       <div style="flex:1">
