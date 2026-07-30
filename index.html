@@ -912,6 +912,19 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   </div>
 </div>
 
+<!-- 매칭 간병인 없는 환자 진단 결과 -->
+<div class="overlay" id="audit-overlay" onclick="closeOverlay('audit-overlay',event)">
+  <div class="modal" style="max-width:760px">
+    <div class="modal-hd">
+      <div class="modal-title" style="color:var(--red)">🔍 매칭 간병인 없는 환자 진단 결과</div>
+      <button class="btn btn-icon" onclick="closeOverlay('audit-overlay')">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="audit-body" style="max-height:65vh;overflow-y:auto"></div>
+  </div>
+</div>
+
 
 <div class="page" id="page-log">
   <div class="sh"><div><div class="sh-title">발송 기록</div><div class="sh-sub">단톡방별 발송 이력</div></div>
@@ -1262,6 +1275,9 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       </button>
       <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="checkPayRemind(true)">
         💰 급여 알림 테스트
+      </button>
+      <button class="btn btn-sm" style="border-color:var(--red);color:var(--red)" onclick="auditUnmatchedPatients()">
+        🔍 매칭 간병인 없는 환자 진단
       </button>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -2701,11 +2717,21 @@ function openPatient(id) {
   document.getElementById('pt-modal-title').textContent=p.name+' 환자 상세';
   // 정상적으로 연결된(현재 매칭 중인) 간병인 우선 조회
   const cg = caregivers.find(c=>String(c.patientId)===String(p.id));
-  // 종료된 환자인데 위에서 못 찾은 경우: 중도종료(완전종료)로 연결이 끊긴 마지막 담당 간병인을 대신 찾음
-  // (중도종료 시 cg.patientId는 비워지지만 cg.earlyEndPatientId에 보존되어 있음)
-  const lastCg = (!cg && p.status==='종료')
-    ? caregivers.find(c=>String(c.earlyEndPatientId)===String(p.id))
-    : null;
+  // 종료된 환자인데 위에서 못 찾은 경우: 연결이 끊긴 마지막 담당 간병인을 대신 찾음
+  // 1순위: 중도종료로 cg.earlyEndPatientId에 보존된 경우
+  // 2순위: 과거 담당 이력(assignHistory)에 이 환자 기록이 남아있는 경우 (재배정으로 다른 환자에게 넘어간 경우 등)
+  //        여러 명이 걸리면 그중 가장 최근에 마감된 사람을 선택
+  let lastCg = null;
+  if(!cg && p.status==='종료') {
+    lastCg = caregivers.find(c=>String(c.earlyEndPatientId)===String(p.id));
+    if(!lastCg) {
+      const candidates = caregivers
+        .filter(c=>(c.assignHistory||[]).some(h=>String(h.patientId)===String(p.id)))
+        .map(c=>({ cg:c, entry:c.assignHistory.find(h=>String(h.patientId)===String(p.id)) }));
+      candidates.sort((a,b)=>(b.entry.endDate||'').localeCompare(a.entry.endDate||''));
+      if(candidates.length) lastCg = candidates[0].cg;
+    }
+  }
   const pLogs=logs.filter(l=>String(l.patientId)===String(p.id));
   document.getElementById('pt-modal-body').innerHTML=`
     <div class="g2" style="margin-bottom:.875rem">
@@ -6084,6 +6110,62 @@ function fixEarlyEndData() {
   } else {
     toast('복구할 데이터가 없어요 (이미 모두 복구됨)');
   }
+}
+
+// 현재 매칭된 간병인이 없는 환자를 전부 찾아서, 각각 왜 없는지 사유를 진단해서 보여줌
+function auditUnmatchedPatients() {
+  const unmatched = patients.filter(p => !caregivers.some(c=>String(c.patientId)===String(p.id)));
+
+  const results = unmatched.map(p => {
+    let reason, reasonColor, lastCgNames = '';
+
+    // 1. 한 번도 매칭된 적 없음
+    if(!p.recruited && !p.caregiverName) {
+      reason = '매칭 이력 없음 (한 번도 간병인이 등록된 적 없음)';
+      reasonColor = 'var(--gray)';
+    } else {
+      // 2. 중도종료로 연결 끊김 (cg.earlyEndPatientId 보존)
+      const viaEarlyEnd = caregivers.find(c=>String(c.earlyEndPatientId)===String(p.id));
+      if(viaEarlyEnd) {
+        reason = '중도종료로 연결 끊김';
+        reasonColor = 'var(--amber)';
+        lastCgNames = viaEarlyEnd.name;
+      } else {
+        // 3. 과거 담당 이력(assignHistory)에는 남아있음 → 재배정으로 다른 환자에게 넘어갔을 가능성
+        const viaHistory = caregivers.filter(c=>(c.assignHistory||[]).some(h=>String(h.patientId)===String(p.id)));
+        if(viaHistory.length) {
+          reason = '간병인이 재배정 등으로 다른 환자에게 넘어감 (이력은 남아있음)';
+          reasonColor = 'var(--blue)';
+          lastCgNames = viaHistory.map(c=>c.name).join(', ');
+        } else {
+          // 4. 매칭됐던 기록(caregiverName)은 있는데 어디서도 못 찾음 → 수동 확인 필요
+          reason = '매칭 기록은 있으나 간병인 쪽에서 이력을 찾을 수 없음 — 수동 확인이 필요해요';
+          reasonColor = 'var(--red)';
+          lastCgNames = p.caregiverName || '';
+        }
+      }
+    }
+    return { patient: p, reason, reasonColor, lastCgNames };
+  });
+
+  const rows = results.map(r => `
+    <div style="padding:10px 12px;border-left:3px solid ${r.reasonColor};background:var(--surface2);border-radius:0 var(--rsm) var(--rsm) 0;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700;font-size:13px">${r.patient.name}</span>
+        <span style="font-size:11px;color:var(--gray)">상태: ${r.patient.status||'—'}</span>
+      </div>
+      <div style="font-size:12px;color:${r.reasonColor};margin-top:3px">${r.reason}</div>
+      ${r.lastCgNames?`<div style="font-size:11px;color:var(--gray);margin-top:2px">관련 간병인: ${r.lastCgNames}</div>`:''}
+    </div>
+  `).join('');
+
+  document.getElementById('audit-body').innerHTML = `
+    <p style="font-size:12px;color:var(--gray);margin-bottom:.875rem">
+      현재 매칭된 간병인이 없는 환자 총 <b>${unmatched.length}명</b>을 찾았어요. 각 사유를 확인해 주세요.
+    </p>
+    ${rows || '<div class="empty"><p>매칭 간병인이 없는 환자가 없어요</p></div>'}
+  `;
+  document.getElementById('audit-overlay').classList.add('open');
 }
 // 환자 수정 폼 - 종료일 변경 시 기간 미리보기
 function onEpEndDateChange() {
