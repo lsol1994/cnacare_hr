@@ -4197,6 +4197,28 @@ function openCgDetail(id) {
         ${hours?`<div style="font-size:11px;color:var(--gray);margin-top:3px;text-align:right">총 근무시간: ${hours}</div>`:''}
       </div>`;
     })()}
+    <div class="hr"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--amber)">💰 선지급 내역</div>
+      <button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="toggleAdvanceForm('${cg.id}')">+ 선지급 등록</button>
+    </div>
+    <div id="cg-advance-form-${cg.id}" style="display:none;background:var(--amber-lt);border-radius:var(--rsm);padding:10px 12px;margin-bottom:8px">
+      <div class="g3" style="margin-bottom:8px">
+        <div class="field" style="margin-bottom:0"><label style="font-size:10px">지급일</label><input type="date" id="adv-date-${cg.id}" value="${todayStr()}"></div>
+        <div class="field" style="margin-bottom:0"><label style="font-size:10px">금액</label><input type="number" id="adv-amount-${cg.id}" placeholder="100000"></div>
+        <div class="field" style="margin-bottom:0"><label style="font-size:10px">메모 (선택)</label><input type="text" id="adv-memo-${cg.id}" placeholder="예: 요청에 의한 선지급"></div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber);flex:1;justify-content:center" onclick="saveAdvance('${cg.id}')">저장</button>
+        <button class="btn btn-sm" onclick="toggleAdvanceForm('${cg.id}')">취소</button>
+      </div>
+    </div>
+    ${(cg.advances && cg.advances.length) ? cg.advances.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(a=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface2);border-radius:var(--rsm);padding:7px 12px;margin-bottom:5px;font-size:12px">
+        <span><b>${a.date}</b> · ${Number(a.amount||0).toLocaleString()}원 ${a.memo?'· '+a.memo:''}</span>
+        <button style="border:none;background:none;color:var(--red);cursor:pointer;font-size:13px" onclick="deleteAdvance('${cg.id}','${a.id}')" title="삭제">✕</button>
+      </div>
+    `).join('') : ''}
     ${cg.feedback?`<div style="font-size:12px;color:var(--gray);background:var(--surface2);border-radius:var(--rsm);padding:8px 10px;margin-bottom:.875rem">💬 보호자 피드백: ${cg.feedback}</div>`:''}
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:8px">🔗 매칭 환자</div>
@@ -4305,6 +4327,64 @@ function saveCgComplaint(cgId) {
   save();
   renderCaregivers();
   toast(cg.complaint ? `⚠️ ${cg.name} 컴플레인 기록됐어요` : `✅ ${cg.name} 컴플레인 해제됐어요`);
+}
+
+// ─── 선지급(급여 선지급) 관리 ───
+function toggleAdvanceForm(cgId) {
+  const form = document.getElementById('cg-advance-form-' + cgId);
+  if(!form) return;
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+function saveAdvance(cgId) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg) return;
+  const dateEl   = document.getElementById('adv-date-' + cgId);
+  const amountEl = document.getElementById('adv-amount-' + cgId);
+  const memoEl   = document.getElementById('adv-memo-' + cgId);
+  const date   = dateEl ? dateEl.value : '';
+  const amount = amountEl ? Number(amountEl.value) : 0;
+  if(!date) { toast('지급일을 입력해주세요', true); return; }
+  if(!amount || amount <= 0) { toast('금액을 입력해주세요', true); return; }
+  if(!cg.advances) cg.advances = [];
+  cg.advances.push({ id: genId(), date, amount, memo: memoEl ? memoEl.value.trim() : '' });
+  save();
+  openCgDetail(cgId); // 목록 갱신을 위해 상세 다시 렌더
+  refreshCalendarIfOpen();
+  toast(`✅ 선지급 ${amount.toLocaleString()}원 등록됐어요`);
+}
+
+function deleteAdvance(cgId, advId) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg || !cg.advances) return;
+  if(!confirm('이 선지급 내역을 삭제할까요?')) return;
+  cg.advances = cg.advances.filter(a=>String(a.id)!==String(advId));
+  save();
+  openCgDetail(cgId);
+  refreshCalendarIfOpen();
+  toast('삭제됐어요');
+}
+
+// 선지급 총액 중 아직 정규/최종 지급액에서 차감되지 않은 잔액을 계산하기 위한 헬퍼
+function totalAdvance(cg) {
+  return (cg.advances||[]).reduce((s,a)=>s+(Number(a.amount)||0), 0);
+}
+
+// 지급일(주급/단기) 배열에 선지급액을 시간순으로 차감 반영 (초과분은 다음 지급일로 이월)
+function applyAdvanceDeductions(cg, payEntries) {
+  let remaining = totalAdvance(cg);
+  if(remaining <= 0) return payEntries;
+  return payEntries.map(entry => {
+    if(remaining <= 0) return entry;
+    const deduct = Math.min(remaining, entry.amount || 0);
+    remaining -= deduct;
+    if(deduct <= 0) return entry;
+    return Object.assign({}, entry, {
+      originalAmount: entry.amount,
+      amount: (entry.amount || 0) - deduct,
+      advanceDeducted: deduct
+    });
+  });
 }
 // 근무 이력 한 건 삭제 (중복/잘못된 기록 정리용)
 // 간병인 마감일시 직접 수정 (환자 수정 경유 없이 그 지급건만 확실하게 고치고 싶을 때)
@@ -6719,6 +6799,7 @@ function showCalDetail(dateStr) {
       var pt = cg.patientId ? patients.find(function(pt){return String(pt.id)===String(cg.patientId);}) : null;
       var ptStr = pt ? ' (' + pt.name + ')' : '';
       var reserveStr = p.isReserve ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">원래 지급일: ' + (p.payDate||p.endDate) + '</div>' : '';
+      var advanceNoteStr = p.advanceDeducted ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">선지급 ' + p.advanceDeducted.toLocaleString() + '원 차감 (원래 ' + (p.originalAmount||0).toLocaleString() + '원)</div>' : '';
       var amountStr = p.amount ? '<div style="font-size:15px;font-weight:900;color:'+bdColor+';margin-top:4px">' + p.amount.toLocaleString() + '원</div>' : '';
       var bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
       var expenseHtml = '';
@@ -6742,7 +6823,29 @@ function showCalDetail(dateStr) {
         + amountStr
         + bankHtml
         + reserveStr
+        + advanceNoteStr
         + expenseHtml
+        + '</div>' });
+    });
+  });
+  // 선지급 자체를 지급일 캘린더에 등록 (급여가 실제로 나간 날짜)
+  caregivers.forEach(function(cg) {
+    (cg.advances||[]).forEach(function(a) {
+      if(a.date !== dateStr) return;
+      var pt = cg.patientId ? patients.find(function(p){return String(p.id)===String(cg.patientId);}) : null;
+      var ptStr = pt ? ' (' + pt.name + ')' : '';
+      var bankStr = (cg.bankName||cg.bankAccount)
+        ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
+        : '';
+      var bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
+      var memoHtml = a.memo ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + a.memo + '</div>' : '';
+      payEvents.push({ time: '', html:
+        '<div style="padding:10px 12px;border-left:3px solid #B45309;margin-bottom:8px;background:#FEF3C7;border-radius:0 var(--rsm) var(--rsm) 0">'
+        + '<div style="font-size:11px;font-weight:700;color:#B45309;margin-bottom:3px">💰 선지급</div>'
+        + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
+        + '<div style="font-size:15px;font-weight:900;color:#B45309;margin-top:4px">' + Number(a.amount||0).toLocaleString() + '원</div>'
+        + bankHtml
+        + memoHtml
         + '</div>' });
     });
   });
@@ -6761,7 +6864,7 @@ function showCalDetail(dateStr) {
     if(!cg.pay) return;
     var wasAdjusted = adjustedStr !== cg.endDate;
     var totalOwed  = calcTotalPayAmount(cg);
-    var alreadyPaid = calcPayDates(cg).reduce(function(sum,p){ return sum + (p.amount||0); }, 0);
+    var alreadyPaid = calcPayDates(cg).reduce(function(sum,p){ return sum + (p.amount||0); }, 0) + totalAdvance(cg);
     var settleAmount = totalOwed - alreadyPaid;
     if(settleAmount <= 0) return; // 이미 다 지급된 상태면 표시 안 함
     var pt = cg.patientId ? patients.find(function(p){return String(p.id)===String(cg.patientId);}) : null;
@@ -7389,7 +7492,8 @@ function calcPayDates(cg) {
       week++;
     }
   }
-  return results;
+  // 선지급이 있으면 시간순으로 차감 반영 (초과분은 다음 지급일로 이월)
+  return applyAdvanceDeductions(cg, results);
 }
 
 // ── 지출결의서용 지출내용 자동 생성 ──
