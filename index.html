@@ -7629,7 +7629,7 @@ function buildExpenseMemo(cg, pt, payEntry) {
     rangeStartTime = cg.startTime;
     rangeEnd       = cg.endDate; rangeEndTime = cg.endTime;
     totalDays      = Math.round((parseLocalDate(rangeEnd) - parseLocalDate(rangeStart)) / 86400000);
-    const lastWeek  = lastWeekEntry ? lastWeekEntry.week : 1;
+    const lastWeek  = lastWeekEntry ? lastWeekEntry.week + 1 : 1; // 마지막으로 완료된 주차의 "다음" 주차 (그 주급이 이미 나갔으므로 최종정산은 그 다음 주차분)
     const isReplace = pt.status !== '종료'; // 환자가 계속 매칭 상태면 다른 간병인으로 교체된 것
     reasonLabel = lastWeek + '주차 주급_' + (isReplace ? '교체' : '퇴실');
   } else {
