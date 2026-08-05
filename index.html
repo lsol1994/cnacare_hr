@@ -2367,7 +2367,7 @@ function buildPost(p) {
 
   // 구인 간병인 성별
   const cgGender = p.cgGender || '';
-  const titleGender = cgGender ? `${cgGender} ` : '';
+  const titleGender = cgGender ? `${cgGender} ` : '남/여 ';
 
   // 환자 상태 조합
   const stateParts = [p.diagnosis];
@@ -2832,6 +2832,7 @@ function openPatient(id) {
         <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>환자 수정
       </button>
       <button class="btn btn-sm" onclick="openCaregiverModal('${p.id}')">간병인 등록</button>
+      <button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="confirmOnsiteCancel('${p.id}')">🚫 현장 취소</button>
       <button class="btn btn-sm" onclick="doCopy(patients.find(x=>String(x.id)==='${p.id}')?._editedPost || buildPost(patients.find(x=>String(x.id)==='${p.id}')));closeOverlay('pt-overlay')">공고 복사</button>
       <button class="btn btn-red btn-sm" onclick="deletePatient('${p.id}')">환자 삭제</button>
     </div>
@@ -3251,6 +3252,53 @@ function confirmEndPatient(id) {
   updateSidebar();
 
   toast(`✅ ${p.name} 종료 처리됐어요 (${endDate}${endTime ? ' ' + endTime : ''})`);
+}
+
+// 도착 후 취소(현장 취소): 환자·간병인 모두 서비스 시작시각에 종료 처리하고,
+// 간병인에게는 업체 지급 2만원 - 협회수수료 5천원 = 15,000원을 캘린더에 지급 예정으로 등록
+function confirmOnsiteCancel(id) {
+  const p = patients.find(x=>String(x.id)===String(id));
+  if(!p) { toast('환자를 찾을 수 없어요', true); return; }
+  if(!p.startDate) { toast('서비스 시작일이 없어서 처리할 수 없어요', true); return; }
+
+  const cg = caregivers.find(c=>String(c.patientId)===String(p.id));
+  const ok = confirm(
+    `${p.name} 님을 "도착 후 취소(현장 취소)"로 처리할까요?\n` +
+    `서비스 시작 시각(${p.startDate} ${p.startTime||''})에 환자·간병인 모두 종료 처리되고,` +
+    (cg ? ` ${cg.name} 님에게 15,000원이 캘린더에 지급 예정으로 등록돼요.` : ' (연결된 간병인이 없어요)')
+  );
+  if(!ok) return;
+
+  // 환자: 서비스 시작시각에 종료 처리 (실제 근무는 없었으므로 시작=마감)
+  p.status    = '종료';
+  p.recruited = true;
+  p.endDate   = p.startDate;
+  p.endTime   = p.startTime || '';
+  p.endReason = '현장 취소';
+  recalcDuration(p, p.endDate);
+
+  if(cg) {
+    saveToAssignHistory(cg); // 근무 이력 저장 (일반 종료와 동일하게)
+    cg.workStatus = '종료';
+    cg.endDate = cg.startDate;
+    cg.endTime = cg.startTime || '';
+    recalcDuration(cg, cg.endDate);
+    cg.onsiteCancelDate   = cg.startDate; // 캘린더에 고정 지급액을 표시하기 위한 플래그
+    cg.onsiteCancelAmount = 15000;        // 업체 지급 20,000원 - 협회 수수료 5,000원
+  }
+
+  markPtEdited(p.id);
+  if(cg) markCgEdited(cg.id);
+  save();
+  if(cg) autoFillAttendance(String(cg.id));
+  refreshCalendarIfOpen();
+  document.getElementById('pt-overlay').classList.remove('open');
+  renderPatients();
+  renderCaregivers();
+  renderDashboard();
+  updateSidebar();
+
+  toast(`✅ ${p.name} 님 현장 취소 처리됐어요` + (cg ? ` (${cg.name} 님 15,000원 지급 예정)` : ''));
 }
 
 function deletePatient(id) {
@@ -5925,7 +5973,8 @@ function buildMatchMessage(pt, cg) {
 
 // 간병 시작(입실) 시 모든 간병인에게 동일하게 발송하는 안내 문자 (고정 양식, 환자별로 달라지지 않음)
 function buildArrivalNotice() {
-  return `[씨엔에이케어 협회 안내 말씀]
+  return `협회 운영시간은 09:00~18:00 입니다. 운영시간 외 전화통화가 어려울 수 있으니, 문자나 카톡으로 문의사항 남겨주시기 바랍니다.
+[씨엔에이케어 협회 안내 말씀]
 안녕하세요, 선생님. 늘 현장에서 환자분들을 위해 애써주셔서 진심으로 감사드립니다.
 원활하고 안전한 간병 서비스를 위해 아래 몇 가지 협조 사항을 안내해 드리오니, 확인 후 숙지해 주시기를 부탁드립니다.
 ◎1:1 간병 원칙 준수
@@ -6946,6 +6995,41 @@ function showCalDetail(dateStr) {
         + '</div>' });
     });
   });
+  // 현장 취소(도착 후 취소) 처리된 간병인 — 고정 지급액(15,000원)을 정규/최종정산과 별개로 표시
+  caregivers.forEach(function(cg) {
+    if(!cg.onsiteCancelDate || cg.onsiteCancelDate !== dateStr) return;
+    paidCgIdsToday[String(cg.id)] = true; // 최종정산 로직이 이 간병인을 중복 처리하지 않도록 표시
+    var pt = cg.patientId ? patients.find(function(p){return String(p.id)===String(cg.patientId);}) : null;
+    var ptStr = pt ? ' (' + pt.name + ')' : '';
+    var bankStr = (cg.bankName||cg.bankAccount)
+      ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
+      : '';
+    var bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
+    var amount = cg.onsiteCancelAmount || 15000;
+    var expenseHtml = '';
+    if(pt) {
+      var expenseMsg = buildExpenseMemo(cg, pt, { label: '현장취소', amount: amount });
+      if(expenseMsg) {
+        _calExpenseMsgs.push(expenseMsg);
+        var idx2 = _calExpenseMsgs.length - 1;
+        expenseHtml = '<div style="margin-top:6px">'
+          + '<div id="cal-expense-text-' + idx2 + '" style="white-space:pre-wrap;font-size:11px;line-height:1.6;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:6px;margin-bottom:4px">' + expenseMsg + '</div>'
+          + '<div style="display:flex;gap:6px">'
+          + '<button class="btn btn-sm" id="cal-expense-toggle-' + idx2 + '" style="flex:1;justify-content:center" onclick="toggleCalExpense(' + idx2 + ')">🙈 숨기기</button>'
+          + '<button class="btn btn-sm" style="flex:1;justify-content:center" onclick="copyCalExpenseMsg(' + idx2 + ')">📋 복사</button>'
+          + '</div></div>';
+      }
+    }
+    payEvents.push({ time: '', html:
+      '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">🚫 현장 취소 지급</div>'
+      + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
+      + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + amount.toLocaleString() + '원</div>'
+      + '<div style="font-size:11px;color:var(--gray);margin-top:2px">사유: 도착 후 취소/현장 취소</div>'
+      + bankHtml
+      + expenseHtml
+      + '</div>' });
+  });
   // 당일 근무가 마감되는 간병인은 정규 급여 주기와 상관없이 자동으로 최종 정산 건 추가
   // (교체/중도종료/기간마감 등 어떤 사유로 마감되든, 마감일 = 그날까지의 급여를 정산해야 하므로)
   // 최종정산 금액 = 총 급여(calcTotalPayAmount) - 지금까지 정규 주급으로 이미 지급된 금액
@@ -7615,7 +7699,13 @@ function buildExpenseMemo(cg, pt, payEntry) {
 
   let rangeStart, rangeStartTime, rangeEnd, rangeEndTime, totalDays, reasonLabel;
 
-  if(payEntry.label === '단기 급여') {
+  if(payEntry.label === '현장취소') {
+    // 도착 후 취소: 시작=마감(실제 근무 없음), 고정 지급액
+    rangeStart = cg.startDate; rangeStartTime = cg.startTime;
+    rangeEnd   = cg.startDate; rangeEndTime   = cg.startTime;
+    totalDays  = 0;
+    reasonLabel = '도착 후 취소/현장 취소';
+  } else if(payEntry.label === '단기 급여') {
     rangeStart = cg.startDate; rangeStartTime = cg.startTime;
     rangeEnd   = cg.endDate;   rangeEndTime   = cg.endTime;
     totalDays  = Math.round((parseLocalDate(rangeEnd) - parseLocalDate(rangeStart)) / 86400000);
