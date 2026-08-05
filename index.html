@@ -6864,12 +6864,23 @@ function showCalDetail(dateStr) {
   var startEvents = []; // {time, html}
   var endEvents   = [];
   var payEvents   = [];
+  var onsiteCancelEvents = []; // 현장취소(도착 후 취소) 전용 — 간병시작/마감과 분리해서 하나로 통합 표시
   _calExpenseMsgs = []; // 지출내용 복사 버튼용 임시 저장 (렌더할 때마다 초기화)
 
   // 환자 시작일 / 마감일
   patients.forEach(function(p) {
     var cg = caregivers.find(function(c){ return String(c.patientId)===String(p.id); });
     var cgStr = cg ? ' / 간병인: ' + cg.name : '';
+    // 현장취소(도착 후 취소) 환자는 "간병 시작/마감" 대신 별도의 "도착 후 취소" 섹션에서만 다룸
+    if(p.endReason === '현장 취소' && p.startDate === dateStr) {
+      onsiteCancelEvents.push({ time: p.startTime||'', html:
+        '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+        + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">🚫 현장취소' + (p.startTime?' · '+p.startTime:'') + '</div>'
+        + '<div style="font-size:14px;font-weight:700">' + p.name + '</div>'
+        + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (p.hospital||'') + (p.room?' ('+p.room+')':'') + '</div>'
+        + '</div>' });
+      return; // 이 환자는 아래의 일반 시작/마감 로직을 타지 않음
+    }
     if(p.startDate === dateStr) {
       startEvents.push({ time: p.startTime||'', html:
         '<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
@@ -6899,6 +6910,7 @@ function showCalDetail(dateStr) {
   caregivers.forEach(function(c) {
     var pt = c.patientId ? patients.find(function(p){return String(p.id)===String(c.patientId);}) : null;
     var ptStr = pt ? ' (' + pt.name + ')' : '';
+    if(c.onsiteCancelDate) return; // 현장취소 간병인은 "근무 시작/마감" 카드를 아예 표시하지 않음 (위 도착후취소 섹션에서만 다룸)
     if(c.startDate === dateStr) {
       startEvents.push({ time: c.startTime||'', html:
         '<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
@@ -7089,6 +7101,7 @@ function showCalDetail(dateStr) {
   }
   startEvents = sortByTime(startEvents);
   endEvents   = sortByTime(endEvents);
+  onsiteCancelEvents = sortByTime(onsiteCancelEvents);
 
   function sectionHtml(title, events) {
     if(!events.length) return '';
@@ -7098,9 +7111,10 @@ function showCalDetail(dateStr) {
 
   var sectionsHtml = sectionHtml('▶ 간병 시작', startEvents)
     + sectionHtml('■ 간병 마감', endEvents)
+    + sectionHtml('🚫 도착 후 취소', onsiteCancelEvents)
     + sectionHtml('💰 급여 지급', payEvents);
 
-  bodyEl.innerHTML = (startEvents.length + endEvents.length + payEvents.length) > 0
+  bodyEl.innerHTML = (startEvents.length + endEvents.length + onsiteCancelEvents.length + payEvents.length) > 0
     ? sectionsHtml
     : '<div style="padding:2rem;text-align:center;color:var(--gray);font-size:13px">이날 일정이 없어요 😊</div>';
 }
@@ -7623,6 +7637,7 @@ function initMemoPage() {
 // - 지급 예정일이 주말(토/일) 또는 공휴일(설정 → 공휴일 목록)이면 다음주 월요일로 조정
 function calcPayDates(cg) {
   if(!cg.startDate) return [];
+  if(cg.onsiteCancelDate) return []; // 현장취소는 별도의 고정 지급액 카드로만 표시하므로 정규/단기 계산 대상에서 제외
   const results = [];
   const start = parseLocalDate(cg.startDate);
   if(!start) return [];
