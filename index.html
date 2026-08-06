@@ -2074,7 +2074,11 @@ function attachFirebaseListener() {
             dc.insuranceMemo       = local.insuranceMemo;
             dc.insuranceTerminated = local.insuranceTerminated;
           }
-          if(local.workStatus==='종료' && dc.workStatus!=='종료') dc.workStatus = local.workStatus;
+          // 로컬이 이미 "종료" 처리된 상태라면, workStatus 한 필드만 패치하지 않고
+          // 로컬 객체 전체를 그대로 우선함. (그렇지 않으면 onsiteCancelDate, earlyEndPatientId,
+          // 정확한 endDate/endTime 등 종료 처리 시 함께 저장된 다른 필드들이 낡은 Firebase
+          // 스냅샷 값으로 조용히 되돌아가 버리는 문제가 있었음)
+          if(local.workStatus==='종료' && dc.workStatus!=='종료') return local;
           if(local._snapshot && !dc._snapshot) dc._snapshot = local._snapshot;
           return dc;
         }).filter(Boolean);
