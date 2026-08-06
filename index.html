@@ -1608,21 +1608,40 @@ let _lastSyncedMisc = {};
 let _newLocalPtIds = new Set();
 let _newLocalCgIds = new Set();
 
-// 최근 로컬에서 수정된 항목 ID + 시각 (Firebase 덮어쓰기 방지)
-const _editedPtMap = new Map(); // id → 수정 시각(ms)
-const _editedCgMap = new Map();
+// 최근 로컬에서 수정된 항목 ID + 시각 (Firebase 덮어쓰기 방지) - 전체 컬렉션 공통 처리
+const _editedMaps = {
+  patients: new Map(), caregivers: new Map(), attendance: new Map(), logs: new Map(),
+  reportLogs: new Map(), members: new Map(), blacklist: new Map(), memos: new Map(), notices: new Map()
+};
 const EDIT_PROTECT_MS = 10000; // 10초 보호
 
-function markPtEdited(id) { _editedPtMap.set(String(id), Date.now()); }
-function markCgEdited(id) { _editedCgMap.set(String(id), Date.now()); }
-function isPtEditProtected(id) {
-  const t = _editedPtMap.get(String(id));
+function markEdited(collection, id) { _editedMaps[collection].set(String(id), Date.now()); }
+function isEditProtected(collection, id) {
+  const t = _editedMaps[collection].get(String(id));
   return t && (Date.now() - t) < EDIT_PROTECT_MS;
 }
-function isCgEditProtected(id) {
-  const t = _editedCgMap.get(String(id));
-  return t && (Date.now() - t) < EDIT_PROTECT_MS;
-}
+
+// 기존 함수명 유지 (환자·간병인 — 하위 호환, 기존 호출부 수정 불필요)
+function markPtEdited(id) { markEdited('patients', id); }
+function markCgEdited(id) { markEdited('caregivers', id); }
+function isPtEditProtected(id) { return isEditProtected('patients', id); }
+function isCgEditProtected(id) { return isEditProtected('caregivers', id); }
+
+// 나머지 7개 컬렉션 — 간병일지/발송기록/업체보고/협회간병인/블랙리스트/업무일지/알림
+function markAttendEdited(id) { markEdited('attendance', id); }
+function isAttendEditProtected(id) { return isEditProtected('attendance', id); }
+function markLogEdited(id) { markEdited('logs', id); }
+function isLogEditProtected(id) { return isEditProtected('logs', id); }
+function markReportLogEdited(id) { markEdited('reportLogs', id); }
+function isReportLogEditProtected(id) { return isEditProtected('reportLogs', id); }
+function markMemberEdited(id) { markEdited('members', id); }
+function isMemberEditProtected(id) { return isEditProtected('members', id); }
+function markBlacklistEdited(id) { markEdited('blacklist', id); }
+function isBlacklistEditProtected(id) { return isEditProtected('blacklist', id); }
+function markMemoEdited(id) { markEdited('memos', id); }
+function isMemoEditProtected(id) { return isEditProtected('memos', id); }
+function markNoticeEdited(id) { markEdited('notices', id); }
+function isNoticeEditProtected(id) { return isEditProtected('notices', id); }
 
 // 삭제 보호 해제 카운터 - 연속 3회 확인 후 해제 (단발 캐시 스냅샷 오탐 방지)
 let _ptDeleteConfirmCount = 0;
@@ -2004,11 +2023,20 @@ function attachFirebaseListener() {
     const fbNotices     = objToArrById(d.notices);
 
     // id 있는 컬렉션 공용 병합: Firebase 우선 + 아직 동기화 안 된 로컬 신규 항목만 보존
-    function mergeIdCollection(localArr, fbArr) {
+    function mergeIdCollection(localArr, fbArr, collectionName) {
       if(!fbArr || fbArr.length === 0) return localArr;
       const fbIds = new Set(fbArr.map(x=>String(x.id)));
       const localOnly = (localArr||[]).filter(x => x && x.id!=null && !fbIds.has(String(x.id)));
-      return [...fbArr, ...localOnly];
+      // 방금 로컬에서 수정된 항목은 Firebase의 낡은 스냅샷으로 덮어쓰지 않고 로컬 값을 그대로 유지
+      const merged = collectionName ? fbArr.map(fbItem => {
+        if(!fbItem || fbItem.id==null) return fbItem;
+        if(isEditProtected(collectionName, fbItem.id)) {
+          const local = (localArr||[]).find(x => x && String(x.id)===String(fbItem.id));
+          if(local) return local;
+        }
+        return fbItem;
+      }) : fbArr;
+      return [...merged, ...localOnly];
     }
 
     if(fbPatients.length > 0) {
@@ -2096,24 +2124,24 @@ function attachFirebaseListener() {
       localStorage.setItem('cnc_cg', JSON.stringify(caregivers));
     }
     if(fbAttendance.length > 0) {
-      attendance = mergeIdCollection(attendance, fbAttendance);
+      attendance = mergeIdCollection(attendance, fbAttendance, 'attendance');
       localStorage.setItem('cnc_attend', JSON.stringify(attendance));
     }
     if(fbRooms.length > 0) { rooms = fbRooms; localStorage.setItem('cnc_rooms', JSON.stringify(rooms)); }
     if(fbLogs.length > 0) {
-      logs = mergeIdCollection(logs, fbLogs);
+      logs = mergeIdCollection(logs, fbLogs, 'logs');
       localStorage.setItem('cnc_logs', JSON.stringify(logs));
     }
     if(fbReportLogs.length > 0) {
-      reportLogs = mergeIdCollection(reportLogs, fbReportLogs);
+      reportLogs = mergeIdCollection(reportLogs, fbReportLogs, 'reportLogs');
       localStorage.setItem('cnc_rptlogs', JSON.stringify(reportLogs));
     }
     if(fbMembers.length > 0) {
-      members = mergeIdCollection(members, fbMembers);
+      members = mergeIdCollection(members, fbMembers, 'members');
       localStorage.setItem('cnc_members', JSON.stringify(members));
     }
     if(fbBlacklist.length > 0) {
-      blacklist = mergeIdCollection(blacklist, fbBlacklist);
+      blacklist = mergeIdCollection(blacklist, fbBlacklist, 'blacklist');
       localStorage.setItem('cnc_blacklist', JSON.stringify(blacklist));
     }
     if(d.cfg && typeof d.cfg === 'object') {
@@ -2122,11 +2150,11 @@ function attachFirebaseListener() {
       localStorage.setItem('cnc_cfg', JSON.stringify(cfg));
     }
     if(fbMemos.length > 0) {
-      memos = mergeIdCollection(memos, fbMemos);
+      memos = mergeIdCollection(memos, fbMemos, 'memos');
       localStorage.setItem('cnc_memos', JSON.stringify(memos));
     }
     if(fbNotices.length > 0) {
-      notices = mergeIdCollection(notices, fbNotices);
+      notices = mergeIdCollection(notices, fbNotices, 'notices');
       localStorage.setItem('cnc_notices', JSON.stringify(notices));
     }
 
@@ -3234,8 +3262,9 @@ function confirmEndPatient(id) {
   const timeStr = now2.toLocaleDateString('ko-KR') + ' ' +
     now2.toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit', hour12:false});
   const endMsg = buildEndReport(p, endDate, endTime); // 실제 종료일 전달
+  const _rptId1 = genId();
   reportLogs.unshift({
-    id:          genId(),
+    id:          _rptId1,
     patientId:   String(p.id),
     patientName: p.name,
     type:        'ended',
@@ -3243,6 +3272,7 @@ function confirmEndPatient(id) {
     msg:         endMsg,
     auto:        true
   });
+  markReportLogEdited(_rptId1);
 
   // 저장 + UI 갱신
   markPtEdited(p.id); // Firebase 덮어쓰기 방지 (10초)
@@ -3684,13 +3714,15 @@ function bulkLogAll() {
     now.toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit', hour12:false});
 
   rooms.forEach(room => {
+    const logId = genId();
     logs.unshift({
-      id:          genId(),
+      id:          logId,
       room,
       patientId:   selPt.id,
       patientName: selPt.name,
       time:        timeStr
     });
+    markLogEdited(logId);
   });
 
   save();
@@ -3713,8 +3745,10 @@ function copyForRoom(roomName) {
   if(!txt){toast('공고 내용이 없어요',true);return;}
   doCopy(txt);
   const now=new Date();
-  logs.unshift({id:genId(),room:roomName,patientId:selPt.id,patientName:selPt.name,
+  const logId = genId();
+  logs.unshift({id:logId,room:roomName,patientId:selPt.id,patientName:selPt.name,
     time:now.toLocaleDateString('ko-KR')+' '+now.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false})});
+  markLogEdited(logId);
   save();renderRooms();updateSidebar();
   toast(`✅ [${roomName}] 복사+기록 완료! 카카오톡 붙여넣기 하세요`);
 }
@@ -4039,8 +4073,9 @@ function saveCg() {
     // 교체보고 로그 저장
     const now2 = new Date();
     const timeStr = now2.toLocaleDateString('ko-KR')+' '+now2.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
+    const _rptId2 = genId();
     reportLogs.unshift({
-      id:          genId(),
+      id:          _rptId2,
       patientId:   String(pt.id),
       patientName: pt.name,
       type:        'replace',
@@ -4048,6 +4083,7 @@ function saveCg() {
       msg:         replaceMsg,
       auto:        true
     });
+    markReportLogEdited(_rptId2);
     save();
 
     // 팝업 알림 (교체보고 + 매칭 안내 메시지 둘 다 표시)
@@ -5122,8 +5158,9 @@ function saveReplacementInfo(ptId) {
   const replaceMsg = buildReplaceReport(p, arriveDate, arriveTime, p.pendingReplacement);
   const now2 = new Date();
   const timeStr = now2.toLocaleDateString('ko-KR')+' '+now2.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
+  const _rptId3 = genId();
   reportLogs.unshift({
-    id:          genId(),
+    id:          _rptId3,
     patientId:   String(p.id),
     patientName: p.name,
     type:        'replace',
@@ -5131,6 +5168,7 @@ function saveReplacementInfo(ptId) {
     msg:         replaceMsg,
     auto:        true
   });
+  markReportLogEdited(_rptId3);
   save();
 
   closeOverlay('replace-overlay'); openPatient(ptId);
@@ -6335,12 +6373,14 @@ function saveReportLog() {
     existing.msg  = msg;
     existing.time = timeStr;
   } else {
+    const _rptId4 = genId();
     reportLogs.unshift({
-      id: genId(),
+      id: _rptId4,
       patientId:   String(selRptPt.id),
       patientName: selRptPt.name,
       type, time: timeStr, msg
     });
+    markReportLogEdited(_rptId4);
   }
   save(); renderReportLog(); toast('✅ 보고 기록이 저장됐어요');
 }
@@ -6538,6 +6578,7 @@ function saveMember() {
   };
   if(editMemberId){const idx=members.findIndex(x=>String(x.id)===String(editMemberId));if(idx>-1)members[idx]=m;else members.unshift(m);}
   else members.unshift(m);
+  markMemberEdited(m.id);
   saveMem();closeOverlay('member-overlay');renderMembers();
   toast(`✅ ${name} 등록/수정 완료`);
 }
@@ -6633,6 +6674,7 @@ function saveBlacklistEntry() {
   } else {
     blacklist.unshift(b);
   }
+  markBlacklistEdited(b.id);
   save();
   closeOverlay('blacklist-overlay');
   renderBlacklist();
@@ -7291,8 +7333,11 @@ function saveNoticeEntry() {
   if(editNoticeId) {
     const n = notices.find(x=>String(x.id)===String(editNoticeId));
     if(n) Object.assign(n, {title, content, level, updatedAt:todayStr()});
+    markNoticeEdited(editNoticeId);
   } else {
-    notices.unshift({ id:genId(), title, content, level, createdAt:todayStr(), type:'manual' });
+    const newNoticeId = genId();
+    notices.unshift({ id:newNoticeId, title, content, level, createdAt:todayStr(), type:'manual' });
+    markNoticeEdited(newNoticeId);
   }
   save(); renderNotices();
   document.getElementById('notice-editor').style.display = 'none';
@@ -7319,14 +7364,16 @@ function saveAutoNotice(content, level) {
   const today = todayStr();
   // 오늘 날짜 자동알림 기존 것 제거 (중복 방지)
   notices = notices.filter(function(n){ return !(n.type==='auto' && n.createdAt===today); });
+  const autoNoticeId = genId();
   notices.unshift({
-    id: genId(),
+    id: autoNoticeId,
     title: '',
     content: content,
     level: level,
     createdAt: today,
     type: 'auto'
   });
+  markNoticeEdited(autoNoticeId);
   if(notices.length > 50) notices = notices.slice(0, 50);
   // localStorage만 업데이트 (save() 호출 시 Firebase 트리거되어 리스너 재연결 방지)
   localStorage.setItem('cnc_notices', JSON.stringify(notices));
@@ -7563,8 +7610,11 @@ function saveMemoEntry() {
   if(editMemoId) {
     const m = memos.find(x=>String(x.id)===String(editMemoId));
     if(m) Object.assign(m, {date,author,content,patientId,caregiverId,updatedAt:todayStr()});
+    markMemoEdited(editMemoId);
   } else {
-    memos.unshift({ id:genId(), date, author, content, patientId, caregiverId, createdAt:todayStr() });
+    const newId = genId();
+    memos.unshift({ id:newId, date, author, content, patientId, caregiverId, createdAt:todayStr() });
+    markMemoEdited(newId);
   }
   save(); renderMemo();
   document.getElementById('memo-editor').style.display = 'none';
@@ -7979,6 +8029,7 @@ function saveAttendance(cgId, origDate) {
   rec.auto    = false; // 담당자가 직접 수정 → 이후 자동 동기화가 덮어쓰지 않도록 보호
   // 구버전 date 필드 제거
   delete rec.date;
+  markAttendEdited(rec.id);
 
   if(newOutTime) {
     const cg = caregivers.find(c=>String(c.id)===cgId);
@@ -8108,6 +8159,7 @@ function checkIn(cgId) {
   rec.inDate = selDate;
   rec.inTime = now;
   delete rec.auto; // 자동 기록 아님 표시
+  markAttendEdited(rec.id);
   save();
   // 출근 체크 후 이전 날짜 자동 채우기
   setTimeout(()=>{ autoFillAttendance(cgId); renderAttendance(); }, 100);
@@ -8128,6 +8180,7 @@ function checkOut(cgId) {
   if(!rec||!rec.inTime){ toast('출근 체크 먼저 해주세요',true); return; }
   rec.outDate = selDate;
   rec.outTime = now;
+  markAttendEdited(rec.id);
   // 간병일지 전송
   const cg = caregivers.find(c=>String(c.id)===cgId);
   if(cg) sendSheets({type:'journal', caregiverName:cg.name, hospital:cg.hospital,
@@ -8545,8 +8598,9 @@ function checkAutoEnd() {
       const timeStr = now2.toLocaleDateString('ko-KR')+' '+now2.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
       newItems.forEach(({pt}) => {
         if(!pt) return;
+        const _rptId5 = genId();
         reportLogs.unshift({
-          id:          genId(),
+          id:          _rptId5,
           patientId:   String(pt.id),
           patientName: pt.name,
           type:        'ended',
@@ -8554,6 +8608,7 @@ function checkAutoEnd() {
           msg:         msgs,
           auto:        true
         });
+        markReportLogEdited(_rptId5);
       });
 
       // 팝업 표시 (한 번만)
