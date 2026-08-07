@@ -2,9 +2,19 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <title>씨앤에이케어 — 간병인 구인 관리 시스템</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0B7A6E">
+<meta name="mobile-web-app-capable" content="yes">
+<!-- iOS 전용 (iOS는 manifest.json의 일부 항목을 지원하지 않아 별도 태그 필요) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="씨앤에이케어">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <!-- SheetJS -->
@@ -41,7 +51,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--black);min-height:
 
 /* NAV */
 nav{position:sticky;top:0;z-index:300;background:var(--surface);border-bottom:1px solid var(--border);
-  height:56px;padding:0 1.5rem;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--sh)}
+  height:56px;padding:0 1.5rem;padding-top:env(safe-area-inset-top);height:calc(56px + env(safe-area-inset-top));
+  padding-left:calc(1.5rem + env(safe-area-inset-left));padding-right:calc(1.5rem + env(safe-area-inset-right));
+  display:flex;align-items:center;justify-content:space-between;box-shadow:var(--sh)}
 .logo{display:flex;align-items:center;gap:10px}
 .logo-mark{width:32px;height:32px;background:var(--teal);border-radius:8px;display:flex;align-items:center;justify-content:center}
 .logo-mark svg{width:17px;height:17px;stroke:#fff;stroke-width:2.2;fill:none;stroke-linecap:round}
@@ -191,7 +203,8 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 
 /* MODAL */
 .overlay{position:fixed;inset:0;background:rgba(28,26,23,.5);display:flex;align-items:center;justify-content:center;
-  z-index:500;opacity:0;pointer-events:none;transition:opacity .2s;padding:1rem}
+  z-index:500;opacity:0;pointer-events:none;transition:opacity .2s;
+  padding:calc(1rem + env(safe-area-inset-top)) calc(1rem + env(safe-area-inset-right)) calc(1rem + env(safe-area-inset-bottom)) calc(1rem + env(safe-area-inset-left))}
 .overlay.open{opacity:1;pointer-events:all}
 .modal{background:var(--surface);border-radius:var(--r);padding:1.5rem;width:100%;max-width:580px;
   max-height:90vh;overflow-y:auto;box-shadow:var(--sh-md);transform:translateY(8px);transition:transform .2s}
@@ -206,9 +219,9 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 .overlay-hd h3{font-size:17px;font-weight:900;margin:0}
 
 /* REMIND POPUP */
-#remind-popup{position:fixed;top:72px;right:1.5rem;z-index:600;
+#remind-popup{position:fixed;top:calc(72px + env(safe-area-inset-top));right:calc(1.5rem + env(safe-area-inset-right));z-index:600;
   background:var(--amber);color:#fff;border-radius:var(--r);padding:1.25rem 1.5rem;
-  box-shadow:var(--sh-md);width:320px;display:none}
+  box-shadow:var(--sh-md);width:320px;display:none;max-width:calc(100vw - 2rem)}
 #remind-popup h4{font-size:15px;font-weight:700;margin-bottom:.5rem}
 #remind-popup p{font-size:13px;opacity:.9;line-height:1.6}
 .remind-close{margin-top:.875rem;width:100%;padding:8px;border-radius:var(--rsm);background:rgba(255,255,255,.2);
@@ -216,10 +229,10 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 .remind-close:hover{background:rgba(255,255,255,.3)}
 
 /* TOAST */
-#toast{position:fixed;bottom:1.5rem;right:1.5rem;background:var(--black);color:#fff;
+#toast{position:fixed;bottom:calc(1.5rem + env(safe-area-inset-bottom));right:calc(1.5rem + env(safe-area-inset-right));background:var(--black);color:#fff;
   padding:11px 18px;border-radius:var(--r);font-size:13px;font-weight:500;
   display:flex;align-items:center;gap:8px;box-shadow:var(--sh-md);
-  opacity:0;transform:translateY(6px);transition:all .22s;pointer-events:none;z-index:999}
+  opacity:0;transform:translateY(6px);transition:all .22s;pointer-events:none;z-index:999;max-width:calc(100vw - 2rem)}
 #toast.show{opacity:1;transform:none}
 #toast svg{width:15px;height:15px;stroke:#4ade80;stroke-width:2.5;fill:none;stroke-linecap:round}
 #toast.err svg{stroke:#f87171}
@@ -270,7 +283,10 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   .top-tab{padding:0 8px;height:36px;font-size:11px}
 
   /* MAIN */
-  main{padding:.875rem .875rem 5rem}
+  main{padding:.875rem .875rem 5rem;
+    padding-left:calc(.875rem + env(safe-area-inset-left));
+    padding-right:calc(.875rem + env(safe-area-inset-right));
+    padding-bottom:calc(5rem + env(safe-area-inset-bottom))}
 
   /* SECTION HEADER */
   .sh-title{font-size:16px}
@@ -317,11 +333,14 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   .stat .n{font-size:20px}
   .g4{gap:.5rem}
 
-  /* BUTTONS */
-  .btn{padding:7px 12px;font-size:12px}
-  .btn-sm{padding:5px 9px;font-size:11px}
-  .btn-full{font-size:13px;padding:10px}
-  .copy-btn{font-size:13px;padding:10px}
+  /* BUTTONS — 터치 영역 확보 (최소 36~44px) */
+  .btn{padding:9px 12px;font-size:12px;min-height:40px}
+  .btn-sm{padding:8px 10px;font-size:11px;min-height:36px}
+  .btn-full{font-size:13px;padding:12px;min-height:44px}
+  .copy-btn{font-size:13px;padding:12px;min-height:44px}
+  .btn-icon{min-width:40px;min-height:40px}
+  /* 인접한 버튼들 사이 간격을 넉넉히 둬서 오터치 방지 */
+  .pt-foot > div{gap:8px}
 
   /* MODAL */
   .overlay{padding:.5rem}
@@ -406,6 +425,19 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   #flt-status,#cg-flt-status,#rpt-type{font-size:11px;padding:5px 22px 5px 8px}
 }
 
+/* 아주 좁은 화면(구형 소형 안드로이드, iPhone SE 등 360~400px대) — 로고 줄바꿈 방지 및 nav 요소 정리 */
+@media(max-width:400px){
+  nav{padding-left:calc(.75rem + env(safe-area-inset-left));padding-right:calc(.75rem + env(safe-area-inset-right))}
+  .logo-word{font-size:14px;white-space:nowrap}
+  .logo{gap:6px}
+  .logo-mark{width:28px;height:28px;flex-shrink:0}
+  #remind-counter{display:none !important} /* 대시보드의 "모집중" 카드로도 확인 가능하므로 nav에서는 숨김 */
+  .nav-r{gap:5px}
+  .nav-r .btn-label{display:none} /* 아이콘만 남기고 버튼 글자는 숨김 */
+  .nav-r .btn-sm{padding:8px;min-width:36px;justify-content:center}
+  .nav-r .btn-sm svg{margin:0}
+}
+
 /* 태블릿 */
 @media(min-width:601px) and (max-width:900px){
   main{padding:1.25rem 1.25rem 4rem}
@@ -435,11 +467,11 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
     </div>
     <button class="btn btn-sm" onclick="showPage('settings')">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-      설정
+      <span class="btn-label">설정</span>
     </button>
     <button class="btn btn-teal btn-sm" onclick="showPage('new-patient')">
       <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      새 환자 등록
+      <span class="btn-label">새 환자 등록</span>
     </button>
   </div>
 </nav>
@@ -9571,6 +9603,14 @@ try {
 // Firebase는 100ms 후 비동기 실행 - 앱 동작과 완전 분리
 setTimeout(function() {
   try { startFirebaseSync(); } catch(e) { console.warn('Firebase 오류:', e); }
+
+  // PWA: 서비스워커 등록 (오프라인 실행 + 홈 화면에 추가 지원)
+  // 참고: window의 load 이벤트는 외부 스크립트(폰트, Firebase 등)가 느리거나 실패하면
+  // 한참 늦게 뜨거나 아예 안 뜰 수 있어서, load를 기다리지 않고 바로 등록함
+  if('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('service-worker.js')
+      .catch(e => console.warn('서비스워커 등록 실패:', e));
+  }
 }, 100);
 
 // 오늘 날짜 기본값
