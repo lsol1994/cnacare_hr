@@ -221,7 +221,9 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 /* REMIND POPUP */
 #remind-popup{position:fixed;top:calc(72px + env(safe-area-inset-top));right:calc(1.5rem + env(safe-area-inset-right));z-index:600;
   background:var(--amber);color:#fff;border-radius:var(--r);padding:1.25rem 1.5rem;
-  box-shadow:var(--sh-md);width:320px;display:none;max-width:calc(100vw - 2rem)}
+  box-shadow:var(--sh-md);width:320px;display:none;max-width:calc(100vw - 2rem);
+  max-height:calc(100vh - 72px - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem);
+  overflow-y:auto;overscroll-behavior:contain}
 #remind-popup h4{font-size:15px;font-weight:700;margin-bottom:.5rem}
 #remind-popup p{font-size:13px;opacity:.9;line-height:1.6}
 .remind-close{margin-top:.875rem;width:100%;padding:8px;border-radius:var(--rsm);background:rgba(255,255,255,.2);
@@ -393,7 +395,8 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   .room-row .btn-sm{font-size:11px;padding:4px 8px}
 
   /* REMIND POPUP */
-  #remind-popup{width:calc(100vw - 1.5rem);right:.75rem;left:.75rem;top:58px}
+  #remind-popup{width:calc(100vw - 1.5rem);right:.75rem;left:.75rem;top:58px;
+    max-height:calc(100vh - 58px - env(safe-area-inset-bottom) - 1rem)}
   #remind-popup h4{font-size:13px}
   #remind-popup #remind-popup-body{font-size:12px}
 
