@@ -2444,7 +2444,7 @@ function buildPost(p) {
 🏥 병원위치 : ${p.hospital || '—'}${p.station ? ' / '+p.station : ''}
 📅 간병시작일 : ${postStartDate || '—'}${days?' ('+days+')':''} ${p.startTime || ''}
 👤 환자분 : ${p.gender||''}${ageWeight?' / '+ageWeight:''} / ${state || '—'}
-💰 가격 : ${pay} / 식비포함
+💰 가격 : ${pay} / 식비포함(별도지급X)
 📆 기간 : ${p.duration || '미정'}
 ${p.request ? '📌 요청사항 : '+p.request+'\n' : ''}🚩협회비 없음 / 배상책임보험 가입 지원
 
