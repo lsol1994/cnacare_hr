@@ -4236,6 +4236,7 @@ function renderCaregivers() {
           <button class="btn btn-sm" onclick="openCgDetail('${cg.id}')">상세</button>
           <button class="btn btn-sm" onclick="editCg('${cg.id}')">수정</button>
           ${cg.patientId&&cg.workStatus==='근무중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openEarlyTerminate('${cg.id}')">중도종료</button>`:''}
+          ${cg.patientId&&cg.workStatus==='대기중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openPreStartCancel('${cg.id}')">🚫 시작 전 취소</button>`:''}
           ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="cancelEarlyTerminate('${cg.id}')">↩ 종료취소</button>`:''}
           ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="toggleReassignSelect('${cg.id}')">🔄 재배정</button>`:''}
           <button class="btn btn-sm btn-red" onclick="deleteCg('${cg.id}')">삭제</button>
@@ -4394,6 +4395,7 @@ function openCgDetail(id) {
       ${pt?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="showMatchMessage('${cg.id}')">📋 매칭 안내 문자</button>`:''}
       <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="showArrivalNoticePopup(caregivers.find(x=>String(x.id)===String('${cg.id}')))">📋 입실 안내 문자</button>
       ${cg.patientId&&cg.workStatus==='근무중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="closeOverlay('cg-overlay');openEarlyTerminate('${cg.id}')">중도종료</button>`:''}
+      ${cg.patientId&&cg.workStatus==='대기중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openPreStartCancel('${cg.id}')">🚫 시작 전 취소</button>`:''}
       ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="cancelEarlyTerminate('${cg.id}')">↩ 종료취소</button>`:''}
       ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="closeOverlay('cg-overlay');setTimeout(()=>{const el=document.getElementById('reassign-select-${cg.id}');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'center'});}},200)">🔄 재배정</button>`:''}
       <button class="btn btn-red btn-sm" onclick="deleteCg('${cg.id}')">삭제</button>
@@ -5392,10 +5394,81 @@ function selectTermType(type) {
   }
 }
 
+// 서비스 시작 전(대기중) 간병인 전용 취소 — "중도종료"와 달리 실제 근무한 적이 없으므로
+// 종료일시를 따로 입력받지 않고(시작일시로 고정), 급여도 발생하지 않음
+function openPreStartCancel(cgId) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg) return;
+  const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
+
+  document.getElementById('cg-modal-title').textContent = '시작 전 취소';
+  document.getElementById('cg-form-body').innerHTML = `
+    <div class="warn-banner" style="margin-bottom:1rem">
+      <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div><strong>${cg.name}</strong> 간병인이 서비스 시작 전에 취소됩니다. 실제로 근무한 적이 없으므로 급여는 발생하지 않아요.</div>
+    </div>
+
+    <!-- 종료 유형 선택 -->
+    <div style="margin-bottom:1rem">
+      <label style="font-size:12px;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:8px">이후 처리</label>
+      <div style="display:flex;gap:8px">
+        <label style="flex:1;display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--rsm);cursor:pointer;font-size:13px;font-weight:600"
+          onclick="selectTermType('recruit')">
+          <input type="radio" name="et-type" id="et-type-recruit" value="recruit" checked style="accent-color:var(--teal)">
+          <div>
+            <div style="color:var(--teal)">🔄 재모집</div>
+            <div style="font-size:10px;font-weight:400;color:var(--gray);margin-top:2px">환자 모집중 복귀 → 새 간병인 구함</div>
+          </div>
+        </label>
+        <label style="flex:1;display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--rsm);cursor:pointer;font-size:13px;font-weight:600"
+          onclick="selectTermType('end')">
+          <input type="radio" name="et-type" id="et-type-end" value="end" style="accent-color:#dc2626">
+          <div>
+            <div style="color:#dc2626">🚫 완전 취소</div>
+            <div style="font-size:10px;font-weight:400;color:var(--gray);margin-top:2px">환자·간병인 모두 종료 처리</div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- 종료일시는 항상 시작일시로 고정되므로 입력받지 않음(화면에는 안 보이지만 값은 유지) -->
+    <input type="hidden" id="et-endDate" value="${cg.startDate||''}">
+    <input type="hidden" id="et-endTime" value="${cg.startTime||''}">
+
+    <div class="field">
+      <label>취소 사유</label>
+      <textarea id="et-reason" placeholder="예: 개인 사정으로 시작 전 취소" style="min-height:55px"></textarea>
+    </div>
+
+    <label class="ck-wrap" style="margin-top:.5rem;display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--red-lt);border-radius:var(--rsm);cursor:pointer">
+      <input type="checkbox" id="et-blacklist" style="width:16px;height:16px;accent-color:var(--red);flex-shrink:0">
+      <span style="font-size:12px;color:var(--red);font-weight:600">⚠️ 이 간병인을 블랙리스트에 추가 (사유: 매칭 후 취소)</span>
+    </label>
+
+    <!-- 재모집 안내 (기본 표시) -->
+    <div id="et-recruit-info" style="background:var(--teal-lt);border:1px solid var(--teal-mid);border-radius:var(--rsm);padding:8px 12px;font-size:12px;color:var(--teal);margin-top:.75rem">
+      💡 취소 후 새 간병인을 매칭하면 <strong>교체보고가 자동 작성</strong>돼요.
+    </div>
+    <!-- 완전취소 안내 (숨김) -->
+    <div id="et-end-info" style="display:none;background:#FFF0F0;border:1px solid #fca5a5;border-radius:var(--rsm);padding:8px 12px;font-size:12px;color:#dc2626;margin-top:.75rem">
+      ⚠️ 환자 <strong>${pt?pt.name:''}(${pt?pt.hospital||'':''})</strong>도 함께 <strong>종료</strong> 처리됩니다.
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:1rem">
+      <button class="btn btn-amber" style="flex:1;justify-content:center" onclick="confirmEarlyTerminate('${cgId}')">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><polyline points="20 6 9 17 4 12"/></svg>
+        취소 확정
+      </button>
+      <button class="btn" onclick="closeOverlay('cg-overlay')">닫기</button>
+    </div>`;
+  document.getElementById('cg-overlay').classList.add('open');
+}
+
 
 function confirmEarlyTerminate(cgId) {
   const cg = caregivers.find(c=>String(c.id)===String(cgId));
   if(!cg) return;
+  const wasNotStartedYet = cg.workStatus === '대기중'; // 아직 근무 시작 전이었는지 (이후 종료 처리로 값이 바뀌기 전에 먼저 기록)
   const endDate  = document.getElementById('et-endDate').value;
   const endTime  = document.getElementById('et-endTime').value;
   const reason   = document.getElementById('et-reason').value.trim();
@@ -5436,8 +5509,15 @@ function confirmEarlyTerminate(cgId) {
 
   // ── 간병인 종료 처리 ──
   cg.workStatus = '종료';
-  cg.endDate    = endDate;
-  cg.endTime    = endTime;
+  if(wasNotStartedYet) {
+    // 근무를 시작하기 전에 취소된 경우: 실제로 일한 날이 없으므로, 입력된 종료일시와 무관하게
+    // 시작일시=마감일시로 고정해서 급여 계산 대상에서 확실히 제외함(0일 근무 = 0원 지급)
+    cg.endDate = cg.startDate;
+    cg.endTime = cg.startTime || '';
+  } else {
+    cg.endDate = endDate;
+    cg.endTime = endTime;
+  }
   cg.patientId  = ''; // 정상 연결 해제 (중도종료 환자는 earlyEndPatientId로 보존)
   if(reason) cg.feedback = (cg.feedback ? cg.feedback + ' / ' : '') + '[중도종료] ' + reason;
 
@@ -5448,12 +5528,12 @@ function confirmEarlyTerminate(cgId) {
       // 완전 종료: 환자도 종료 처리
       pt.status        = '종료';
       pt.recruited     = true;
-      pt.endDate       = endDate;
-      pt.endTime       = endTime;
+      pt.endDate       = cg.endDate; // 시작 전 취소된 경우 위에서 보정된 값(=시작일시)을 그대로 사용
+      pt.endTime       = cg.endTime;
       pt.caregiverName = '';
       if(reason) pt.endReason = reason;
       delete pt.pendingReplacement; // 혹시 예약해둔 대체 간병인이 있었다면 정리 (완전종료 선택했으므로)
-      recalcDuration(pt, endDate); // 실제 종료일로 duration 재계산
+      recalcDuration(pt, pt.endDate); // 실제 종료일로 duration 재계산
       sendSheets({type:'updatePatient', name:pt.name, startDate:pt.startDate, caregiverName:'', status:'종료'});
     } else if(pt.pendingReplacement) {
       // 이미 예약해둔 대체 간병인이 있으면 → 바로 인계 (환자는 계속 매칭완료 상태 유지, 재모집 절차 불필요)
@@ -5505,6 +5585,20 @@ function confirmEarlyTerminate(cgId) {
       });
       sendSheets({type:'updatePatient', name:pt.name, startDate:pt.startDate, caregiverName:'', status:'모집중'});
     }
+  }
+
+  // 블랙리스트 체크박스(시작 전 취소 화면에만 있음)가 체크되어 있으면 블랙리스트에 등록
+  const blacklistChk = document.getElementById('et-blacklist');
+  if(blacklistChk && blacklistChk.checked) {
+    const blId = genId();
+    blacklist.unshift({
+      id: blId,
+      name: cg.name,
+      phone: cg.phone || '',
+      reason: '매칭 후 취소' + (reason ? ' — ' + reason : ''),
+      createdAt: todayStr()
+    });
+    markBlacklistEdited(blId);
   }
 
   // 간병인 duration도 재계산
@@ -7750,6 +7844,8 @@ function calcPayDates(cg) {
   const payPerDay = Number(cg.pay) || 0;
 
   if(totalDays !== null && totalDays <= 6) {
+    // 마감일이 시작일보다 같거나 이전(시작 전 취소 등)이면 실제 근무가 없었던 것이므로 지급액 자체를 만들지 않음
+    if(totalDays <= 0) return results;
     // 6일 이하 단기: 마감일 당일 지급 (주말/공휴일이면 다음주 월요일로 조정)
     const payDate = parseLocalDate(cg.endDate);
     if(!payDate) return [];
