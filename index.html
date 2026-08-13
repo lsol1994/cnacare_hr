@@ -1648,7 +1648,7 @@ const _editedMaps = {
   patients: new Map(), caregivers: new Map(), attendance: new Map(), logs: new Map(),
   reportLogs: new Map(), members: new Map(), blacklist: new Map(), memos: new Map(), notices: new Map()
 };
-const EDIT_PROTECT_MS = 10000; // 10초 보호
+const EDIT_PROTECT_MS = 120000; // 2분 보호 (기존 10초는 너무 짧아서, 직원이 화면을 좀 오래 보거나 네트워크가 느리면 그 사이 낡은 동기화가 방금 한 수정을 덮어써버리는 문제가 있었음)
 
 function markEdited(collection, id) { _editedMaps[collection].set(String(id), Date.now()); }
 function isEditProtected(collection, id) {
@@ -2146,7 +2146,22 @@ function attachFirebaseListener() {
           // 정확한 endDate/endTime 등 종료 처리 시 함께 저장된 다른 필드들이 낡은 Firebase
           // 스냅샷 값으로 조용히 되돌아가 버리는 문제가 있었음)
           if(local.workStatus==='종료' && dc.workStatus!=='종료') return local;
+          // 재배정 등으로 로컬이 "대기중"으로 막 재활성화됐는데, Firebase 쪽엔 아직
+          // 재배정 전(종료 상태·이전 환자 연결)의 낡은 스냅샷이 남아있는 경우도 동일하게 보호.
+          // 이걸 안 막으면 재배정 직후 간병인의 매칭 환자가 예전 환자로 되돌아가는 문제가 있었음
+          if(local.workStatus==='대기중' && dc.workStatus==='종료' && String(local.patientId||'')!==String(dc.patientId||'')) return local;
           if(local._snapshot && !dc._snapshot) dc._snapshot = local._snapshot;
+          // 과거 담당 환자 이력(assignHistory)은 계속 쌓이기만 해야 하는 기록이라,
+          // 위에서 최종적으로 dc(Firebase 쪽)가 선택되더라도 로컬에만 있는 이력 항목은
+          // 항상 같이 합쳐서 보존함 (그렇지 않으면 재배정 직후처럼 방금 추가된 이력이
+          // 동기화 타이밍에 따라 조용히 사라질 수 있었음)
+          if(local.assignHistory && local.assignHistory.length) {
+            const dcHistory = dc.assignHistory || [];
+            const histKey = h => String(h.patientId) + '|' + (h.startDate||'');
+            const dcKeys = new Set(dcHistory.map(histKey));
+            const localOnlyHistory = local.assignHistory.filter(h => !dcKeys.has(histKey(h)));
+            if(localOnlyHistory.length) dc.assignHistory = [...localOnlyHistory, ...dcHistory];
+          }
           return dc;
         }).filter(Boolean);
       }
@@ -3190,6 +3205,9 @@ function changeStatus(id, status) {
   const wasEnded = p.status === '종료';
   p.status = status;
   if(status === '매칭완료') p.recruited = true;
+  if(status === '모집중') { p.caregiverName = ''; p.recruited = false; } // 모집중은 간병인이 없는 상태를 뜻하므로 낡은 매칭 정보 정리
+
+  markPtEdited(p.id); // Firebase 덮어쓰기 방지 — 이게 빠져있어서 상태 변경이 낡은 동기화로 되돌아가는 문제가 있었음
 
   if(wasEnded) {
     // 종료 상태에서 되돌리는 경우: 예전 마감일/기간이 남아있으면
@@ -4248,8 +4266,8 @@ function renderCaregivers() {
           <div style="display:flex;gap:6px;align-items:center">
             <select id="reassign-pt-${cg.id}" style="flex:1;font-size:13px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface)">
               <option value="">— 환자를 선택하세요 —</option>
-              ${patients.filter(p=>p.status==='모집중').map(p=>`
-                <option value="${p.id}">${p.name} (${p.hospital||''}) · ${p.startDate||'날짜미정'} · ${p.duration||'미정'}${p.recruitInfo?' 🔄':''}
+              ${patients.filter(p=>p.status==='모집중' || (p.status==='매칭완료' && !caregivers.some(c=>String(c.patientId)===String(p.id)))).map(p=>`
+                <option value="${p.id}">${p.name} (${p.hospital||''}) · ${p.startDate||'날짜미정'} · ${p.duration||'미정'}${p.recruitInfo?' 🔄':''}${p.status==='매칭완료'?' ⚠️매칭정보꼬임':''}
                 </option>`).join('')}
             </select>
             <button class="btn btn-teal btn-sm" onclick="confirmReassign('${cg.id}')">확인</button>
@@ -4757,23 +4775,35 @@ function saveToAssignHistory(cg, overridePatientId) {
 }
 
 // ─── 중복 간병인 정리 ───
+// 외국인 간병인은 "외국어이름/한국어이름" 형식으로 저장되기도 하고, 한국어 이름만 저장되기도 함.
+// 중복 판별 시 항상 한국어 이름 부분(마지막 "/" 뒤)만 비교 기준으로 사용해서 둘을 같은 사람으로 인식시킴
+function extractKoreanName(name) {
+  const n = (name || '').trim();
+  return n.includes('/') ? n.split('/').pop().trim() : n;
+}
+
 function mergeAllDuplicateCg() {
-  const statusOrder = { '근무중':0, '대기중':1, '종료':2 };
   const groups = {};
   caregivers.forEach(cg => {
-    const key = cg.name.trim();
+    const key = extractKoreanName(cg.name);
+    if(!key) return;
     if(!groups[key]) groups[key] = [];
     groups[key].push(cg);
   });
-  const dupGroups = Object.entries(groups).filter(([,list]) => list.length > 1);
+  // 자동 일괄 정리는 신중하게: 주민번호가 서로 다르게 기재된 경우(동명이인일 가능성)는
+  // 이름이 완전히 같더라도 자동 병합 대상에서 제외하고, 수동 확인 화면에서 직접 판단하도록 남겨둠.
+  const dupGroups = Object.entries(groups).filter(([,list]) => {
+    if(list.length < 2) return false;
+    const ssns = list.map(cg => (cg.ssn||'').replace(/[-\s]/g,'')).filter(Boolean);
+    if(ssns.length < 2) return true; // 주민번호가 둘 다 있는 쌍이 없으면 비교 불가 → 이름 매칭만으로 진행
+    return ssns.every(s => s === ssns[0]); // 주민번호가 기재된 것들끼리는 전부 일치해야 자동 병합
+  });
   if(!dupGroups.length) { toast('중복된 간병인이 없어요'); return; }
 
   let totalDeleted = 0;
   dupGroups.forEach(([name, list]) => {
-    // 상태 우선순위로 정렬 → 첫 번째를 유지
-    const sorted = [...list].sort((a,b) =>
-      (statusOrder[a.workStatus]??9) - (statusOrder[b.workStatus]??9)
-    );
+    // 간병 시작일이 가장 늦은(최신) 레코드를 유지 → 그 레코드의 매칭 환자가 "현재 매칭 환자"가 됨
+    const sorted = [...list].sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
     const keepCg   = sorted[0];
     const deleteCgs = sorted.slice(1);
     if(!keepCg.assignHistory) keepCg.assignHistory = [];
@@ -4813,10 +4843,11 @@ function mergeAllDuplicateCg() {
 }
 
 function openDuplicateCgManager() {
-  // 이름 기준 그룹핑
+  // 한국어 이름 기준 그룹핑 (외국어이름/한국어이름 형식과 한국어이름 단독 표기를 같은 사람으로 인식)
   const groups = {};
   caregivers.forEach(cg => {
-    const key = cg.name.trim();
+    const key = extractKoreanName(cg.name);
+    if(!key) return;
     if(!groups[key]) groups[key] = [];
     groups[key].push(cg);
   });
@@ -4832,25 +4863,25 @@ function openDuplicateCgManager() {
   }
 
   const statusColor = { '근무중':'var(--teal)', '대기중':'var(--blue)', '종료':'var(--gray)' };
-  const statusOrder = { '근무중':0, '대기중':1, '종료':2 };
 
   bodyEl.innerHTML = `
     <p style="font-size:12px;color:var(--gray);margin-bottom:1rem;line-height:1.6">
-      같은 이름의 간병인이 <b>${dupGroups.length}그룹</b> 발견됐어요.<br>
+      같은 한국어 이름의 간병인이 <b>${dupGroups.length}그룹</b> 발견됐어요 ("외국어이름/한국어이름"과 한국어이름 단독 표기도 같은 사람으로 인식돼요).<br>
       ⭐ 표시된 레코드를 <b>유지</b>하고 나머지를 삭제할 수 있어요. (이력은 유지 레코드로 통합)
     </p>
     <button class="btn btn-teal" style="width:100%;justify-content:center;margin-bottom:1rem" onclick="mergeAllDuplicateCg()">
-      ✅ 전체 ${dupGroups.length}그룹 일괄 정리 (자동 선택)
+      ✅ 전체 일괄 정리 (자동 선택 — 주민번호가 다르면 자동 정리에서 제외됨)
     </button>
     ${dupGroups.map(([name, list]) => {
-      // 상태 우선순위로 정렬 (근무중 > 대기중 > 종료)
-      const sorted = [...list].sort((a,b) =>
-        (statusOrder[a.workStatus]??9) - (statusOrder[b.workStatus]??9)
-      );
+      // 간병 시작일이 가장 늦은(최신) 레코드를 기본 유지 대상으로 (자동 일괄정리와 동일한 우선순위)
+      const sorted = [...list].sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
       const keepId = sorted[0].id; // 기본 유지 대상
+      const ssns = list.map(cg => (cg.ssn||'').replace(/[-\s]/g,'')).filter(Boolean);
+      const ssnMismatch = ssns.length >= 2 && !ssns.every(s => s === ssns[0]);
 
       return `<div style="background:var(--surface2);border-radius:var(--r);padding:12px;margin-bottom:1rem">
         <div style="font-size:14px;font-weight:900;margin-bottom:8px">👤 ${name} (${list.length}개 레코드)</div>
+        ${ssnMismatch?`<div style="font-size:11px;color:var(--red);background:var(--red-lt);border-radius:var(--rsm);padding:6px 10px;margin-bottom:8px">⚠️ 주민번호가 서로 달라요 — 동명이인일 수 있으니 확인 후 진행해주세요</div>`:''}
         ${sorted.map((cg,i) => {
           const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
           const earlyPt = cg.earlyEndPatientId ? patients.find(p=>String(p.id)===String(cg.earlyEndPatientId)) : null;
@@ -4859,8 +4890,10 @@ function openDuplicateCgManager() {
             <div style="flex:1">
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 ${i===0?'<span style="font-size:10px;background:var(--teal);color:#fff;padding:1px 5px;border-radius:3px">유지</span>':''}
+                <span style="font-size:11px;color:var(--gray)">${cg.name}</span>
                 <span style="font-size:12px;font-weight:700;color:${statusColor[cg.workStatus]||'var(--gray)'}">${cg.workStatus||'—'}</span>
                 <span style="font-size:11px;color:var(--gray)">${cg.phone||''}</span>
+                ${cg.ssn?`<span style="font-size:11px;color:var(--gray)">🪪 ${cg.ssn}</span>`:''}
               </div>
               <div style="font-size:11px;color:var(--gray);margin-top:3px;line-height:1.6">
                 📅 ${cg.startDate||'—'} ~ ${cg.endDate||'—'}<br>
@@ -4880,7 +4913,7 @@ function openDuplicateCgManager() {
 }
 
 function mergeDuplicateCg(name) {
-  const group = caregivers.filter(cg=>cg.name.trim()===name);
+  const group = caregivers.filter(cg=>extractKoreanName(cg.name)===name);
   if(group.length < 2) { toast('중복 레코드가 없어요'); return; }
 
   const radio = document.querySelector(`input[name="keep-${name.replace(/\s/g,'_')}"]:checked`);
