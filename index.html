@@ -4249,7 +4249,16 @@ function openCgDetail(id) {
     ${(()=>{
       const hist = cg.assignHistory;
       if(!hist || !hist.length) return '';
+      const keywords = extractDiagnosisKeywords(cg);
+      const keywordHtml = keywords.length ? `
+        <div class="hr"></div>
+        <div style="font-size:11px;font-weight:700;color:var(--gray);letter-spacing:.4px;margin-bottom:6px">🩺 자주 담당했던 병증 키워드</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+          ${keywords.map(([word,count]) => `<span style="background:var(--teal-lt);color:var(--teal);font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px">${word} ×${count}</span>`).join('')}
+        </div>
+        <div style="font-size:10px;color:var(--gray-lt);margin-bottom:.5rem">담당했던 환자들의 병증 기록에서 자주 등장한 단어예요 (참고용 — 정식 분류는 아니에요)</div>` : '';
       return `<div class="hr"></div>
+        ${keywordHtml}
         <div style="font-size:11px;font-weight:700;color:var(--gray);letter-spacing:.4px;margin-bottom:8px">📋 과거 담당 환자 (${hist.length}건)</div>
         <div style="display:flex;flex-direction:column;gap:6px">
           ${hist.map(h => {
@@ -4279,6 +4288,7 @@ function openCgDetail(id) {
                 </div>
               </div>
               <div style="color:var(--gray)">🏥 ${h.hospital||'—'}</div>
+              ${h.diagnosis?`<div style="color:var(--gray)">🩺 ${h.diagnosis}</div>`:''}
               <div style="color:var(--gray)">📅 ${h.startDate||'—'} ${h.startTime||''} ~ ${h.endDate?h.endDate+' '+(h.endTime||''):'(진행중)'}</div>
               ${totalPay?`<div style="color:var(--teal);font-weight:600;margin-top:2px">💵 ${totalPay}</div>`:''}
             </div>`;
@@ -4569,6 +4579,29 @@ function saveHistoryEntryEdit(cgId, patientId, startDate) {
 }
 
 // ─── 간병인 근무 이력 ───
+// 간병인이 담당했던 환자들의 병증을 모아서, 자주 등장한 단어를 빈도순으로 뽑아줌
+// (정식 분류가 아니라 "자주 언급된 단어" 참고용 — 병증 텍스트는 직원이 자유롭게 입력하는 값이라 정확한 의학적 분류는 아님)
+function extractDiagnosisKeywords(cg) {
+  const texts = [];
+  const seenPatientIds = new Set();
+  (cg.assignHistory||[]).forEach(h => {
+    if(h.diagnosis) { texts.push(h.diagnosis); }
+    if(h.patientId) seenPatientIds.add(String(h.patientId));
+  });
+  if(cg.patientId && !seenPatientIds.has(String(cg.patientId))) {
+    const pt = patients.find(p=>String(p.id)===String(cg.patientId));
+    if(pt && pt.diagnosis) texts.push(pt.diagnosis);
+  }
+  if(!texts.length) return [];
+  const counts = {};
+  texts.forEach(t => {
+    t.split(/[,\/、·\s]+/).map(w=>w.trim()).filter(w=>w.length>=2).forEach(w => {
+      counts[w] = (counts[w]||0) + 1;
+    });
+  });
+  return Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,6);
+}
+
 function saveToAssignHistory(cg, overridePatientId) {
   const ptId = overridePatientId || cg.patientId || cg.earlyEndPatientId;
   if(!ptId) return;
@@ -4583,6 +4616,7 @@ function saveToAssignHistory(cg, overridePatientId) {
   if(existing) {
     if(cg.endDate) existing.endDate = cg.endDate;
     if(cg.endTime) existing.endTime = cg.endTime;
+    if(!existing.diagnosis && pt.diagnosis) existing.diagnosis = pt.diagnosis; // 예전 이력에 병증이 비어있으면 지금이라도 채워둠
     existing.status     = cg.workStatus || existing.status;
     existing.recordedAt = new Date().toLocaleDateString('ko-KR');
     return;
@@ -4592,6 +4626,7 @@ function saveToAssignHistory(cg, overridePatientId) {
     patientId:   String(ptId),
     patientName: pt.name,
     hospital:    pt.hospital || '',
+    diagnosis:   pt.diagnosis || '', // 병증 (담당했던 환자들의 병증 이력/특화분야 파악용)
     startDate:   cg.startDate || '',
     startTime:   cg.startTime || '',
     endDate:     cg.endDate   || '',
