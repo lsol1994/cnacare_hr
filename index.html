@@ -2516,8 +2516,7 @@ function ptRowHTML(p) {
         <div style="font-size:11px;color:var(--gray);margin-top:2px">${p.createdAt} 등록</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-        ${stBadge(p.status)}
-        ${p.recruitInfo && !p.pendingReplacement ? `<span class="badge b-amber" style="font-size:10px">🔄 재모집중</span>` : ''}
+        ${(p.recruitInfo && !p.pendingReplacement) ? `<span class="badge b-amber" style="font-size:10px">🔄 재모집중</span>` : stBadge(p.status)}
         ${ptDdayBadge(p)}
       </div>
     </div>
@@ -3256,8 +3255,7 @@ function renderSend() {
           </div>
         </div>
         <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
-          ${stBadge(p.status)}
-          ${isScheduled?'<span class="badge b-amber" style="font-size:10px">예약교체</span>':(isRecruit?'<span class="badge b-amber" style="font-size:10px">재모집</span>':'')}
+          ${isScheduled?'<span class="badge b-amber" style="font-size:10px">예약교체</span>':(isRecruit?'<span class="badge b-amber" style="font-size:10px">재모집</span>':stBadge(p.status))}
         </div>
       </div>
     </div>`;
@@ -3901,7 +3899,9 @@ function saveCg() {
 
   if(editCgId){
     const idx=caregivers.findIndex(x=>String(x.id)===String(editCgId));
-    if(idx>-1) caregivers[idx]=cg;
+    // 폼에 없는 필드(assignHistory, 컴플레인, 선지급, 배상보험 정보 등)가 통째로 사라지지 않도록
+    // 기존 레코드 위에 폼에서 받은 값만 덮어씀 (완전 교체 금지)
+    if(idx>-1) caregivers[idx] = Object.assign({}, caregivers[idx], cg);
     markCgEdited(editCgId); // Firebase 덮어쓰기 방지 (10초)
   } else {
     caregivers.unshift(cg);
@@ -4084,7 +4084,7 @@ function renderCaregivers() {
           ${cg.patientId&&cg.workStatus==='근무중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openEarlyTerminate('${cg.id}')">중도종료</button>`:''}
           ${cg.patientId&&cg.workStatus==='대기중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openPreStartCancel('${cg.id}')">🚫 시작 전 취소</button>`:''}
           ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="cancelEarlyTerminate('${cg.id}')">↩ 종료취소</button>`:''}
-          ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="toggleReassignSelect('${cg.id}')">🔄 재배정</button>`:''}
+          ${(cg.workStatus==='종료'||(cg.workStatus==='대기중'&&!cg.patientId))?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="toggleReassignSelect('${cg.id}')">🔄 재배정</button>`:''}
           <button class="btn btn-sm btn-red" onclick="deleteCg('${cg.id}')">삭제</button>
         </div>
       </div>
@@ -4243,7 +4243,7 @@ function openCgDetail(id) {
       ${cg.patientId&&cg.workStatus==='근무중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="closeOverlay('cg-overlay');openEarlyTerminate('${cg.id}')">중도종료</button>`:''}
       ${cg.patientId&&cg.workStatus==='대기중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openPreStartCancel('${cg.id}')">🚫 시작 전 취소</button>`:''}
       ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="cancelEarlyTerminate('${cg.id}')">↩ 종료취소</button>`:''}
-      ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="closeOverlay('cg-overlay');setTimeout(()=>{const el=document.getElementById('reassign-select-${cg.id}');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'center'});}},200)">🔄 재배정</button>`:''}
+      ${(cg.workStatus==='종료'||(cg.workStatus==='대기중'&&!cg.patientId))?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="closeOverlay('cg-overlay');setTimeout(()=>{const el=document.getElementById('reassign-select-${cg.id}');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'center'});}},200)">🔄 재배정</button>`:''}
       <button class="btn btn-red btn-sm" onclick="deleteCg('${cg.id}')">삭제</button>
     </div>
     ${(()=>{
@@ -8534,10 +8534,22 @@ function checkAutoEnd() {
     // 종료 처리 전에 마감일까지 간병일지 자동 채우기 (퇴근 미등록 날 포함)
     autoFillAttendanceUntilEnd(String(cg.id), cg.endDate);
 
-    cg.workStatus = '종료';
+    // 매칭된 환자는 patientId를 지우기 전에 먼저 참조를 잡아둠 (아래 환자 쪽 처리에 필요)
+    const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
+
+    // 이미 과거 이력이 있는(재사용 중인) 간병인은 "종료"가 아니라 "대기중"으로 전환해서
+    // 계속 매칭 가능한 풀에 남겨둠. 이번에 끝난 근무도 이력에 먼저 기록해둠.
+    const isReturningCg = !!(cg.assignHistory && cg.assignHistory.length);
+    if(isReturningCg) saveToAssignHistory(cg);
+    cg.workStatus = isReturningCg ? '대기중' : '종료';
+    if(isReturningCg) {
+      cg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
+      // endDate를 안 지우면, 이미 지난 날짜가 계속 남아있어서 이 루프가 매번 다시 이 간병인을 걸고넘어짐
+      cg.endDate = '';
+      cg.endTime = '';
+    }
     changed = true;
 
-    const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
     let skipEndReport = false; // 예약 교체 인계/대체 미확보 재모집 전환은 실제 "환자 종료"가 아니므로 종료보고 제외
     if(pt && pt.status !== '종료') {
       if(pt.pendingReplacement) {
