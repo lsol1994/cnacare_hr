@@ -454,6 +454,41 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 </head>
 <body>
 
+<!-- ══ 로그인 화면 (인증 전까지 이 화면만 보임) ══ -->
+<div id="login-screen" style="position:fixed;inset:0;z-index:9999;background:var(--surface2, #F4F2EE);
+  display:flex;align-items:center;justify-content:center;padding:1rem">
+  <div style="width:100%;max-width:360px;background:#fff;border-radius:16px;padding:2rem 1.75rem;
+    box-shadow:0 4px 24px rgba(0,0,0,.08)">
+    <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:1.5rem">
+      <div style="width:48px;height:48px;background:var(--teal,#0B7A6E);border-radius:12px;
+        display:flex;align-items:center;justify-content:center;margin-bottom:.75rem">
+        <svg viewBox="0 0 24 24" style="width:26px;height:26px;fill:#fff">
+          <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
+        </svg>
+      </div>
+      <div style="font-size:17px;font-weight:900">씨앤에이케어</div>
+      <div style="font-size:12px;color:#888;margin-top:2px">직원 전용 로그인</div>
+    </div>
+    <div style="margin-bottom:.75rem">
+      <label style="font-size:12px;font-weight:700;color:#888;display:block;margin-bottom:4px">이메일</label>
+      <input type="email" id="login-email" placeholder="office@cnacare.kr"
+        style="width:100%;padding:10px 12px;border:1px solid #E5E1D8;border-radius:8px;font-size:14px;box-sizing:border-box">
+    </div>
+    <div style="margin-bottom:1rem">
+      <label style="font-size:12px;font-weight:700;color:#888;display:block;margin-bottom:4px">비밀번호</label>
+      <input type="password" id="login-password" placeholder="비밀번호"
+        style="width:100%;padding:10px 12px;border:1px solid #E5E1D8;border-radius:8px;font-size:14px;box-sizing:border-box"
+        onkeydown="if(event.key==='Enter') loginWithEmail()">
+    </div>
+    <div id="login-error" style="display:none;background:#FEE2E2;color:#B91C1C;font-size:12px;
+      padding:8px 10px;border-radius:8px;margin-bottom:.875rem"></div>
+    <button id="login-btn" onclick="loginWithEmail()"
+      style="width:100%;padding:11px;background:var(--teal,#0B7A6E);color:#fff;border:none;border-radius:8px;
+        font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">로그인</button>
+    <div id="login-status" style="text-align:center;font-size:12px;color:#888;margin-top:.75rem"></div>
+  </div>
+</div>
+
 <nav>
   <div class="logo">
     <div class="logo-mark">
@@ -1123,7 +1158,9 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 
 <!-- ══ SETTINGS ══ -->
 <div class="page" id="page-settings">
-  <div class="sh"><div><div class="sh-title">설정</div><div class="sh-sub">협회 정보 및 데이터 관리</div></div></div>
+  <div class="sh"><div><div class="sh-title">설정</div><div class="sh-sub">협회 정보 및 데이터 관리</div></div>
+    <button class="btn btn-sm" style="border-color:var(--red);color:var(--red)" onclick="logout()">🔒 로그아웃</button>
+  </div>
 
   <!-- 1. 협회 정보 -->
   <div class="card">
@@ -1494,7 +1531,31 @@ const _editedMaps = {
 };
 const EDIT_PROTECT_MS = 120000; // 2분 보호 (기존 10초는 너무 짧아서, 직원이 화면을 좀 오래 보거나 네트워크가 느리면 그 사이 낡은 동기화가 방금 한 수정을 덮어써버리는 문제가 있었음)
 
-function markEdited(collection, id) { _editedMaps[collection].set(String(id), Date.now()); }
+function markEdited(collection, id) {
+  _editedMaps[collection].set(String(id), Date.now());
+  // 레코드 자체에도 "마지막 수정 시각"을 남겨서, 기기 간 동기화 시 "더 최근 것이 이긴다"는
+  // 원칙으로 병합 충돌을 해결할 수 있게 함 (기존 markXEdited 호출부를 하나도 안 건드리고
+  // 이 공통 함수 하나만 확장해서 전체 9개 컬렉션에 자동으로 적용됨)
+  const arr = getCollectionArray(collection);
+  if(arr) {
+    const item = arr.find(x => x && String(x.id) === String(id));
+    if(item) item._ts = Date.now();
+  }
+}
+function getCollectionArray(name) {
+  switch(name) {
+    case 'patients':   return patients;
+    case 'caregivers': return caregivers;
+    case 'attendance': return attendance;
+    case 'logs':       return logs;
+    case 'reportLogs': return reportLogs;
+    case 'members':    return members;
+    case 'blacklist':  return blacklist;
+    case 'memos':      return memos;
+    case 'notices':    return notices;
+    default: return null;
+  }
+}
 function isEditProtected(collection, id) {
   const t = _editedMaps[collection].get(String(id));
   return t && (Date.now() - t) < EDIT_PROTECT_MS;
@@ -1812,19 +1873,18 @@ function save() {
         });
     };
 
-    // 익명 인증 확인
+    // 로그인 상태 확인 (익명 계정은 새 보안 규칙에서 거부되므로 익명 재인증은 더 이상 시도하지 않음)
     if(firebase && firebase.auth) {
       const user = firebase.auth().currentUser;
-      if(user) {
+      if(user && !user.isAnonymous) {
         doSave();
       } else {
-        // 인증 안 됐으면 재인증 후 저장
-        firebase.auth().signInAnonymously()
-          .then(doSave)
-          .catch(e => {
-            console.warn('인증 실패:', e);
-            doSave(); // 인증 실패해도 저장 시도
-          });
+        // 로그인이 풀린 상태 → 저장을 시도하지 않고 로그인 화면을 다시 띄움
+        console.warn('로그인 세션이 없어서 저장을 건너뜀');
+        const ls = document.getElementById('login-screen');
+        if(ls) ls.style.display = 'flex';
+        _pendingSave = false;
+        toast('⚠️ 로그인이 풀렸어요. 다시 로그인해주세요', true);
       }
     } else {
       doSave();
@@ -1910,13 +1970,15 @@ function attachFirebaseListener() {
       if(!fbArr || fbArr.length === 0) return localArr;
       const fbIds = new Set(fbArr.map(x=>String(x.id)));
       const localOnly = (localArr||[]).filter(x => x && x.id!=null && !fbIds.has(String(x.id)));
-      // 방금 로컬에서 수정된 항목은 Firebase의 낡은 스냅샷으로 덮어쓰지 않고 로컬 값을 그대로 유지
       const merged = collectionName ? fbArr.map(fbItem => {
         if(!fbItem || fbItem.id==null) return fbItem;
-        if(isEditProtected(collectionName, fbItem.id)) {
-          const local = (localArr||[]).find(x => x && String(x.id)===String(fbItem.id));
-          if(local) return local;
-        }
+        const local = (localArr||[]).find(x => x && String(x.id)===String(fbItem.id));
+        if(!local) return fbItem;
+        // 방금 로컬에서 수정된 항목은 몇 분간 확실하게 보호
+        if(isEditProtected(collectionName, fbItem.id)) return local;
+        // ── 원칙: 저장 시각이 둘 다 있으면 "더 최근 것"이 무조건 이김 ──
+        if(local._ts && fbItem._ts) return local._ts >= fbItem._ts ? local : fbItem;
+        // 시각 정보가 없는 예전 데이터는 기존처럼 Firebase 값을 기본으로 사용
         return fbItem;
       }) : fbArr;
       return [...merged, ...localOnly];
@@ -1940,6 +2002,9 @@ function attachFirebaseListener() {
         if(!local) return dp;
         // 최근 로컬에서 수정된 항목 → 로컬 우선 (Firebase 덮어쓰기 방지)
         if(isPtEditProtected(dp.id)) return local;
+        // ── 원칙: 저장 시각이 둘 다 있으면 "더 최근 것"이 무조건 이김 ──
+        if(local._ts && dp._ts) return local._ts >= dp._ts ? local : dp;
+        // 시각 정보가 없는 예전 데이터는 기존 휴리스틱 규칙으로 판단 (하위 호환)
         if(local.status==='종료' && dp.status!=='종료') return local;
         const hasEarlyEndCg = caregivers.some(c =>
           (c.earlyEndPatientId || c.earlyEndSnapshot) &&
@@ -1979,34 +2044,43 @@ function attachFirebaseListener() {
           if(!local) return dc;
           // 최근 로컬에서 수정된 항목 → 로컬 우선
           if(isCgEditProtected(dc.id)) return local;
-          if(local.insuranceActive && !dc.insuranceActive) {
-            dc.insuranceActive     = local.insuranceActive;
-            dc.insuranceExpiry     = local.insuranceExpiry;
-            dc.insuranceMemo       = local.insuranceMemo;
-            dc.insuranceTerminated = local.insuranceTerminated;
+
+          // ── 원칙: 저장 시각이 둘 다 있으면 "더 최근 것"이 무조건 이김 ──
+          let winner;
+          if(local._ts && dc._ts) {
+            winner = local._ts >= dc._ts ? local : dc;
+          } else {
+            // 시각 정보가 없는 예전 데이터는 기존 휴리스틱 규칙으로 판단 (하위 호환)
+            winner = dc;
+            if(local.workStatus==='종료' && dc.workStatus!=='종료') winner = local;
+            else if(local.patientId && String(local.patientId)!==String(dc.patientId||'')) winner = local;
           }
-          // 로컬이 이미 "종료" 처리된 상태라면, workStatus 한 필드만 패치하지 않고
-          // 로컬 객체 전체를 그대로 우선함. (그렇지 않으면 onsiteCancelDate, earlyEndPatientId,
-          // 정확한 endDate/endTime 등 종료 처리 시 함께 저장된 다른 필드들이 낡은 Firebase
-          // 스냅샷 값으로 조용히 되돌아가 버리는 문제가 있었음)
-          if(local.workStatus==='종료' && dc.workStatus!=='종료') return local;
-          // 재배정 등으로 로컬이 "대기중"으로 막 재활성화됐는데, Firebase 쪽엔 아직
-          // 재배정 전(종료 상태·이전 환자 연결)의 낡은 스냅샷이 남아있는 경우도 동일하게 보호.
-          // 이걸 안 막으면 재배정 직후 간병인의 매칭 환자가 예전 환자로 되돌아가는 문제가 있었음
-          if(local.workStatus==='대기중' && dc.workStatus==='종료' && String(local.patientId||'')!==String(dc.patientId||'')) return local;
-          if(local._snapshot && !dc._snapshot) dc._snapshot = local._snapshot;
+
+          // 보험 정보는 승자와 무관하게, 값이 있는 쪽을 항상 보존
+          if(local.insuranceActive && !winner.insuranceActive) {
+            winner.insuranceActive     = local.insuranceActive;
+            winner.insuranceExpiry     = local.insuranceExpiry;
+            winner.insuranceMemo       = local.insuranceMemo;
+            winner.insuranceTerminated = local.insuranceTerminated;
+          }
+          if(local._snapshot && !winner._snapshot) winner._snapshot = local._snapshot;
+
           // 과거 담당 환자 이력(assignHistory)은 계속 쌓이기만 해야 하는 기록이라,
-          // 위에서 최종적으로 dc(Firebase 쪽)가 선택되더라도 로컬에만 있는 이력 항목은
-          // 항상 같이 합쳐서 보존함 (그렇지 않으면 재배정 직후처럼 방금 추가된 이력이
-          // 동기화 타이밍에 따라 조용히 사라질 수 있었음)
-          if(local.assignHistory && local.assignHistory.length) {
-            const dcHistory = dc.assignHistory || [];
+          // 승자가 어느 쪽이든 상관없이 양쪽을 항상 합쳐서 보존함 (유실 절대 방지)
+          const localHistory = local.assignHistory || [];
+          const dcHistory    = dc.assignHistory    || [];
+          if(localHistory.length || dcHistory.length) {
             const histKey = h => String(h.patientId) + '|' + (h.startDate||'');
-            const dcKeys = new Set(dcHistory.map(histKey));
-            const localOnlyHistory = local.assignHistory.filter(h => !dcKeys.has(histKey(h)));
-            if(localOnlyHistory.length) dc.assignHistory = [...localOnlyHistory, ...dcHistory];
+            const seen = new Set();
+            const combined = [];
+            [...localHistory, ...dcHistory].forEach(h => {
+              const k = histKey(h);
+              if(!seen.has(k)) { seen.add(k); combined.push(h); }
+            });
+            combined.sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
+            winner.assignHistory = combined;
           }
-          return dc;
+          return winner;
         }).filter(Boolean);
       }
 
@@ -2136,6 +2210,44 @@ function attachFirebaseListener() {
   });
 }
 
+function loginWithEmail() {
+  const email    = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl    = document.getElementById('login-error');
+  const btnEl    = document.getElementById('login-btn');
+  const statusEl = document.getElementById('login-status');
+  errEl.style.display = 'none';
+
+  if(!email || !password) {
+    errEl.textContent = '이메일과 비밀번호를 입력해주세요';
+    errEl.style.display = 'block';
+    return;
+  }
+  if(typeof firebase === 'undefined' || !firebase.auth) {
+    errEl.textContent = '아직 연결 중이에요. 잠시 후 다시 시도해주세요';
+    errEl.style.display = 'block';
+    return;
+  }
+  btnEl.disabled = true;
+  statusEl.textContent = '로그인 중...';
+  firebase.auth().signInWithEmailAndPassword(email, password)
+    .catch(e => {
+      btnEl.disabled = false;
+      statusEl.textContent = '';
+      let msg = '로그인에 실패했어요. 이메일/비밀번호를 확인해주세요';
+      if(e.code === 'auth/too-many-requests') msg = '너무 여러 번 시도했어요. 잠시 후 다시 시도해주세요';
+      if(e.code === 'auth/network-request-failed') msg = '네트워크 연결을 확인해주세요';
+      errEl.textContent = msg;
+      errEl.style.display = 'block';
+    });
+  // 로그인 성공 시엔 onAuthStateChanged가 알아서 화면 전환을 처리함
+}
+
+function logout() {
+  if(!confirm('로그아웃 하시겠어요?')) return;
+  if(typeof firebase !== 'undefined' && firebase.auth) firebase.auth().signOut();
+}
+
 function startFirebaseSync() {
   showSyncStatus('연결 중...');
   loadFirebase().then(ok => {
@@ -2154,23 +2266,27 @@ function startFirebaseSync() {
       };
       if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 
-      // 익명 인증 후 DB 연결 (보안 규칙 auth != null 대응)
-      if(firebase.auth) {
-        firebase.auth().signInAnonymously()
-          .then(() => {
-            db = firebase.database();
-            attachFirebaseListener();
-          })
-          .catch(e => {
-            console.warn('익명 인증 실패, 인증 없이 연결 시도:', e);
-            // 익명 인증이 꺼져있으면 기존 방식으로 연결 (하위 호환)
-            db = firebase.database();
-            attachFirebaseListener();
-          });
-      } else {
+      if(!firebase.auth) {
+        // 인증 기능 자체를 못 불러온 극히 예외적인 경우 — 로그인 없이 예전 방식으로 연결
+        const ls = document.getElementById('login-screen');
+        if(ls) ls.style.display = 'none';
         db = firebase.database();
         attachFirebaseListener();
+        return;
       }
+
+      // 로그인 상태를 계속 지켜보다가, 로그인되면 로그인 화면을 숨기고 앱을 시작함
+      // (같은 기기에서 이전에 로그인했었다면 Firebase가 자동으로 로그인 상태를 유지해줌)
+      firebase.auth().onAuthStateChanged(user => {
+        const ls = document.getElementById('login-screen');
+        if(user && !user.isAnonymous) {
+          if(ls) ls.style.display = 'none';
+          if(!db) { db = firebase.database(); attachFirebaseListener(); }
+        } else {
+          if(ls) ls.style.display = 'flex';
+          showSyncStatus('로그인이 필요해요');
+        }
+      });
     } catch(e) {
       showSyncStatus('오프라인 모드');
       console.warn('Firebase 초기화 실패:', e);
@@ -2436,6 +2552,7 @@ function doCopy(text) {
 function registerPatient() {
   const p = getFormPatient();
   if(!p.name||!p.hospital||!p.diagnosis) { toast('이름, 병원, 병증은 필수입니다',true); return; }
+  p._ts = Date.now(); // 동기화 충돌 해결(최신 우선)을 위한 저장 시각
   patients.unshift(p);
   _newLocalPtIds.add(String(p.id)); // Firebase 저장 전까지 신규로 보호
   save();
@@ -3904,6 +4021,7 @@ function saveCg() {
     if(idx>-1) caregivers[idx] = Object.assign({}, caregivers[idx], cg);
     markCgEdited(editCgId); // Firebase 덮어쓰기 방지 (10초)
   } else {
+    cg._ts = Date.now(); // 동기화 충돌 해결(최신 우선)을 위한 저장 시각
     caregivers.unshift(cg);
     _newLocalCgIds.add(String(cg.id)); // Firebase 저장 전까지 신규로 보호
   }
