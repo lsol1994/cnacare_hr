@@ -8645,6 +8645,12 @@ function checkAutoEnd() {
   // ① 간병인 마감일 기준 자동 종료
   caregivers.forEach(cg => {
     if(cg.workStatus === '종료') return;
+    // 이미 "재사용 대기" 상태로 전환된 간병인(매칭 해제됨)은 다시 처리하지 않음.
+    // (예전엔 이 재처리를 막으려고 endDate를 지웠었는데, 그러면 calcPayDates()가
+    //  "마감일이 없는 진행중 근무"로 오인해서 캘린더에 정규 주급이 끝없이 잡히고,
+    //  정작 끝난 근무의 최종정산은 계산이 안 되는 심각한 문제가 있었음.
+    //  그래서 endDate는 그대로 남겨두고, 이 플래그로만 재처리를 막음)
+    if(cg.workStatus === '대기중' && !cg.patientId && cg._returnedToPoolAt) return;
     if(!cg.endDate) return;
     const endDt = calcEndDt(cg.endDate, cg.endTime);
     if(!endDt || now < endDt) return;
@@ -8662,9 +8668,7 @@ function checkAutoEnd() {
     cg.workStatus = isReturningCg ? '대기중' : '종료';
     if(isReturningCg) {
       cg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
-      // endDate를 안 지우면, 이미 지난 날짜가 계속 남아있어서 이 루프가 매번 다시 이 간병인을 걸고넘어짐
-      cg.endDate = '';
-      cg.endTime = '';
+      cg._returnedToPoolAt = cg.endDate; // 재처리 방지용 플래그 (endDate는 캘린더 계산을 위해 그대로 유지)
     }
     changed = true;
 
