@@ -8749,7 +8749,25 @@ function checkAutoEnd() {
     pt.recruited = true;
     changed = true;
 
-    if(cg) { cg.workStatus='종료'; }
+    if(cg) {
+      // 간병인 쪽 마감일시를 환자의 실제 마감일시로 동기화 (직원이 환자의 마감일만 직접 바꾼
+      // 경우, 간병인 쪽 endDate가 예전 계획대로 낡게 남아있으면 calcPayDates()가 잘못된
+      // 정규 주급을 계속 생성해버리는 문제가 있었음 — 여기서 항상 실제 마감일로 맞춰줌)
+      cg.endDate = endDate;
+      cg.endTime = endTime || '23:59';
+
+      const isReturningCg = !!(cg.assignHistory && cg.assignHistory.length);
+      if(isReturningCg) {
+        cg.earlyEndPatientId = String(pt.id); // "종료취소"가 이 경로로 끝난 경우도 복원할 수 있도록
+        saveToAssignHistory(cg);
+        cg.workStatus = '대기중';
+        cg.patientId  = '';
+        cg._returnedToPoolAt = cg.endDate;
+      } else {
+        cg.earlyEndPatientId = String(pt.id);
+        cg.workStatus = '종료';
+      }
+    }
     endedItems.push({pt, cg});
   });
 
