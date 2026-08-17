@@ -2365,7 +2365,7 @@ function toast(msg, err=false) {
 }
 
 // ─── NAV ───
-function showPage(name) {
+function showPage(name, fromHistory) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('act'));
   document.querySelectorAll('.aside-btn').forEach(b=>b.classList.remove('act'));
   document.querySelectorAll('.top-tab').forEach(b=>b.classList.remove('act'));
@@ -2377,6 +2377,11 @@ function showPage(name) {
   const fns={dashboard:renderDashboard,patients:renderPatients,send:renderSend,caregiver:renderCaregivers,log:renderLog,settings:loadSettings,report:renderReport,members:renderMembers,blacklist:renderBlacklist,memo:initMemoPage,calendar:initCalendar};
   if(fns[name]) fns[name]();
   updateSidebar();
+  // 뒤로가기 지원: 메뉴를 직접 눌러서 이동한 경우에만 브라우저 기록에 새로 남김
+  // (popstate로 인해 호출된 경우는 이미 있는 기록을 따라가는 것이라 다시 남기지 않음 — 안 그러면 무한 루프)
+  if(!fromHistory) {
+    history.pushState({ cncPage: name }, '', location.href);
+  }
 }
 
 function closeOverlay(id, e) {
@@ -8524,6 +8529,13 @@ function startRemind() {
       return '';
     }
   });
+  // 뒤로가기 지원: 브라우저 뒤로/앞으로가기를 누르면 사이트를 벗어나는 대신 앱 안의 이전 화면으로 이동
+  window.addEventListener('popstate', function(e) {
+    const page = (e.state && e.state.cncPage) || 'dashboard';
+    showPage(page, true);
+  });
+  // 시작 화면(대시보드)을 기록의 기준점으로 남겨서, 첫 이동부터 뒤로가기가 걸리도록 함
+  history.replaceState({ cncPage: 'dashboard' }, '', location.href);
   // 시작 시 즉시 체크
   setTimeout(checkInsuranceExpiry, 3000);
   setTimeout(checkAutoEnd, 2000);
