@@ -2230,7 +2230,11 @@ function loginWithEmail() {
   }
   btnEl.disabled = true;
   statusEl.textContent = '로그인 중...';
-  firebase.auth().signInWithEmailAndPassword(email, password)
+  // 로그인 유지 방식을 "이 탭에서만" 유지되도록 설정 — 탭이나 브라우저를 닫으면
+  // 로그인이 자동으로 풀림 (기본값은 브라우저를 완전히 꺼도 계속 로그인 상태가 유지돼서,
+  // 공용 계정을 여러 컴퓨터에서 쓰는 경우 위험할 수 있었음)
+  firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION)
+    .then(() => firebase.auth().signInWithEmailAndPassword(email, password))
     .catch(e => {
       btnEl.disabled = false;
       statusEl.textContent = '';
@@ -5652,6 +5656,13 @@ function cancelEarlyTerminate(cgId) {
   cg.patientId  = ptId;  // 정상 연결 복원
   cg.endDate    = snap ? (snap.prevEndDate || '') : '';
   cg.endTime    = snap ? (snap.prevEndTime || '') : '';
+
+  // 이 환자와의 근무가 "끝났다"는 이력이 남아있었다면, 복원되는 순간 더 이상 사실이
+  // 아니게 되므로 제거함 (안 지우면 지금 매칭 중인 환자인데 "과거 담당 환자"에도
+  // 동시에 나타나는 혼란스러운 상태가 됨)
+  if(ptId && cg.assignHistory && cg.assignHistory.length) {
+    cg.assignHistory = cg.assignHistory.filter(h => String(h.patientId) !== String(ptId));
+  }
 
   // feedback에서 [중도종료] 제거
   if(cg.feedback) {
