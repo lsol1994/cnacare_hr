@@ -3659,7 +3659,7 @@ function copyAllSelected() {
     const post = p.recruitInfo ? buildRecruitPost(p) : (p._editedPost || buildPost(p));
     posts.push(post);
   });
-  const combined = posts.join('\n\n' + '─'.repeat(28) + '\n\n');
+  const combined = posts.join('\n\n' + '─'.repeat(10) + '\n\n');
   navigator.clipboard.writeText(combined).then(()=>{
     toast('✅ ' + posts.length + '개 공고 복사됐어요! 카카오톡에 붙여넣기 하세요');
   }).catch(()=>{
