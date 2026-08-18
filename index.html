@@ -2625,7 +2625,7 @@ function buildPost(p) {
 
 • 병원 : ${p.hospital || '—'}${stationLine}
 ${wrapPostValue('• 시작 : ', `${postStartDate || '—'}${dayShort?'('+dayShort+')':''}${p.startTime ? '/'+p.startTime : ''}`)}
-${wrapPostValue('• 환자 : ', `${genderShort}${ageWeight?'/'+ageWeight:''} / ${state || '—'}`)}
+• 환자 : ${genderShort}${ageWeight?'/'+ageWeight:''} / ${state || '—'}
 • 가격 : ${pay}원(식비포함)/ 별도지급X
 ${wrapPostValue('• 기간 : ', p.duration || '미정')}
 ${p.request ? wrapPostValue('• 요청사항 : ', p.request)+'\n' : ''}• 협회비 없음 / 배상책임보험 가입 지원
