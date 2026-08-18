@@ -1523,6 +1523,7 @@ window.addEventListener('unhandledrejection', function(e) {
 let patients   = JSON.parse(localStorage.getItem('cnc_patients')  || '[]');
 let caregivers = JSON.parse(localStorage.getItem('cnc_cg')        || '[]');
 let rooms      = JSON.parse(localStorage.getItem('cnc_rooms')     || '["강남 간병인 모집방","서울 간호간병 정보방","간병인 구인구직"]');
+let _roomsTs   = Number(localStorage.getItem('cnc_roomsTs') || 0); // rooms 동기화 충돌 판단용 저장 시각
 let logs       = JSON.parse(localStorage.getItem('cnc_logs')      || '[]');
 let attendance = JSON.parse(localStorage.getItem('cnc_attend')    || '[]');
 let reportLogs = JSON.parse(localStorage.getItem('cnc_rptlogs')   || '[]');
@@ -1578,6 +1579,21 @@ const _editedMaps = {
   reportLogs: new Map(), members: new Map(), blacklist: new Map(), memos: new Map(), notices: new Map()
 };
 const EDIT_PROTECT_MS = 120000; // 2분 보호 (기존 10초는 너무 짧아서, 직원이 화면을 좀 오래 보거나 네트워크가 느리면 그 사이 낡은 동기화가 방금 한 수정을 덮어써버리는 문제가 있었음)
+
+// rooms(단톡방 목록)와 cfg(협회 정보·설정)는 id가 없는 통짜 데이터라 위 9개 컬렉션과 같은 방식의
+// 보호가 안 걸려있었음 — 감사 결과 이 부분만 낡은 동기화가 와도 무조건 덮어써지는 구멍이 있었어서,
+// 같은 원칙(최근 수정은 몇 분간 보호 + 저장 시각 비교)을 이 둘에도 동일하게 적용함
+let _roomsEditedAt = 0;
+function markRoomsEdited() {
+  _roomsEditedAt = Date.now();
+  _roomsTs = Date.now();
+  localStorage.setItem('cnc_roomsTs', String(_roomsTs));
+}
+function isRoomsEditProtected() { return _roomsEditedAt && (Date.now() - _roomsEditedAt) < EDIT_PROTECT_MS; }
+
+let _cfgEditedAt = 0;
+function markCfgEdited() { _cfgEditedAt = Date.now(); cfg._ts = Date.now(); }
+function isCfgEditProtected() { return _cfgEditedAt && (Date.now() - _cfgEditedAt) < EDIT_PROTECT_MS; }
 
 function markEdited(collection, id) {
   _editedMaps[collection].set(String(id), Date.now());
@@ -1844,7 +1860,9 @@ function buildSyncUpdates() {
   });
 
   // id 없는 컬렉션(rooms/cfg): 변경된 경우에만 통째로 update (컬렉션 단위 부분 업데이트)
-  const miscEntries = [['rooms', rooms], ['cfg', cfg]];
+  // roomsTs는 rooms(문자열 배열이라 자체적으로 _ts를 못 담음)의 저장 시각을 별도로 실어보내서,
+  // 다른 기기에서 받았을 때 "이게 더 최근인지" 비교할 수 있게 함
+  const miscEntries = [['rooms', rooms], ['roomsTs', _roomsTs], ['cfg', cfg]];
   miscEntries.forEach(([key, val]) => {
     const clean = cleanForFirebase(val);
     const str = JSON.stringify(clean);
@@ -1959,6 +1977,7 @@ function resyncLastSyncedSnapshot() {
 
   _lastSyncedMisc = {
     rooms: JSON.stringify(cleanForFirebase(rooms)),
+    roomsTs: JSON.stringify(cleanForFirebase(_roomsTs)),
     cfg:   JSON.stringify(cleanForFirebase(cfg))
   };
   persistLastSyncedSnapshot();
@@ -2147,7 +2166,22 @@ function attachFirebaseListener() {
       attendance = mergeIdCollection(attendance, fbAttendance, 'attendance');
       localStorage.setItem('cnc_attend', JSON.stringify(attendance));
     }
-    if(fbRooms.length > 0) { rooms = fbRooms; localStorage.setItem('cnc_rooms', JSON.stringify(rooms)); }
+    if(fbRooms.length > 0) {
+      // 방금 로컬에서 수정된 경우 → 로컬 우선. 아니면 저장 시각(roomsTs) 비교해서 더 최근 쪽을 씀.
+      // (예전엔 이 보호가 아예 없어서, 다른 기기가 살짝 늦게 동기화하면 방금 추가/수정/삭제한
+      // 단톡방이 낡은 목록으로 조용히 되돌아가는 문제가 있었음)
+      const fbRoomsTs = Number(d.roomsTs || 0);
+      if(isRoomsEditProtected()) {
+        // 로컬 방어 유지 — rooms 그대로 둠
+      } else if(_roomsTs && fbRoomsTs && _roomsTs > fbRoomsTs) {
+        // 로컬이 더 최근 — rooms 그대로 둠
+      } else {
+        rooms = fbRooms;
+        if(fbRoomsTs) _roomsTs = fbRoomsTs;
+      }
+      localStorage.setItem('cnc_rooms', JSON.stringify(rooms));
+      localStorage.setItem('cnc_roomsTs', String(_roomsTs));
+    }
     if(fbLogs.length > 0) {
       logs = mergeIdCollection(logs, fbLogs, 'logs');
       localStorage.setItem('cnc_logs', JSON.stringify(logs));
@@ -2165,8 +2199,19 @@ function attachFirebaseListener() {
       localStorage.setItem('cnc_blacklist', JSON.stringify(blacklist));
     }
     if(d.cfg && typeof d.cfg === 'object') {
-      cfg = d.cfg;
-      if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays(); // 예전 cfg 호환
+      // 방금 로컬에서 설정 저장한 경우 → 로컬 우선. 아니면 cfg._ts 비교해서 더 최근 쪽을 씀.
+      // (예전엔 이 보호가 아예 없어서, 협회 정보·공휴일 등을 저장한 직후 낡은 동기화가 오면
+      // 그대로 덮어써지는 문제가 있었음)
+      const fbCfgTs = Number((d.cfg && d.cfg._ts) || 0);
+      const localCfgTs = Number(cfg._ts || 0);
+      if(isCfgEditProtected()) {
+        // 로컬 방어 유지 — cfg 그대로 둠
+      } else if(localCfgTs && fbCfgTs && localCfgTs > fbCfgTs) {
+        // 로컬이 더 최근 — cfg 그대로 둠
+      } else {
+        cfg = d.cfg;
+        if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays(); // 예전 cfg 호환
+      }
       localStorage.setItem('cnc_cfg', JSON.stringify(cfg));
     }
     if(fbMemos.length > 0) {
@@ -3965,6 +4010,7 @@ function saveRoomName(i) {
   const old = rooms[i];
   logs.forEach(l => { if(l.room === old) l.room = val; });
   rooms[i] = val;
+  markRoomsEdited();
   save(); renderRooms(); updateSidebar();
   toast('✅ 단톡방 이름이 수정됐어요');
 }
@@ -3973,12 +4019,12 @@ function addRoom(){
   const v=document.getElementById('room-input').value.trim();
   if(!v)return;
   if(rooms.includes(v)){toast('이미 있어요',true);return;}
-  rooms.push(v);save();renderRooms();renderSend();updateSidebar();
+  rooms.push(v);markRoomsEdited();save();renderRooms();renderSend();updateSidebar();
   document.getElementById('room-input').value='';toast('단톡방 추가됐어요');
 }
 document.getElementById('room-input').addEventListener('keydown',e=>{if(e.key==='Enter')addRoom();});
 
-function removeRoom(i){rooms.splice(i,1);save();renderRooms();}
+function removeRoom(i){rooms.splice(i,1);markRoomsEdited();save();renderRooms();}
 
 // 복사만 (기록 없음)
 // 모든 단톡방 일괄 기록
@@ -6126,6 +6172,7 @@ function saveSettings() {
   if(holEl) {
     cfg.holidays = holEl.value.split('\n').map(l=>l.trim()).filter(Boolean);
   }
+  markCfgEdited();
   save(); startRemind(); toast('설정 저장됐어요');
 }
 
@@ -7005,7 +7052,7 @@ function saveMember() {
     memo:document.getElementById('mem-memo').value.trim(),
     updatedAt:new Date().toLocaleDateString('ko-KR'),
   };
-  if(editMemberId){const idx=members.findIndex(x=>String(x.id)===String(editMemberId));if(idx>-1)members[idx]=m;else members.unshift(m);}
+  if(editMemberId){const idx=members.findIndex(x=>String(x.id)===String(editMemberId));if(idx>-1)members[idx]=Object.assign({},members[idx],m);else members.unshift(m);}
   else members.unshift(m);
   markMemberEdited(m.id);
   saveMem();closeOverlay('member-overlay');renderMembers();
@@ -7099,7 +7146,7 @@ function saveBlacklistEntry() {
   };
   if(editBlacklistId) {
     const idx = blacklist.findIndex(x=>String(x.id)===String(editBlacklistId));
-    if(idx > -1) blacklist[idx] = b; else blacklist.unshift(b);
+    if(idx > -1) blacklist[idx] = Object.assign({}, blacklist[idx], b); else blacklist.unshift(b);
   } else {
     blacklist.unshift(b);
   }
@@ -8524,7 +8571,7 @@ function autoFillAttendance(cgId) {
       const inTime  = isFirst ? (cg.startTime || '') : '00:00';
       const outTime = isLast ? (cg.endTime || '23:59') : '23:59';
       const outDate = isLast ? (cg.endDate || dateStr) : dateStr;
-      attendance.push({
+      const newRec = {
         id:      genId(),
         cgId:    String(cgId),
         inDate:  dateStr,
@@ -8532,13 +8579,16 @@ function autoFillAttendance(cgId) {
         outDate,
         outTime,
         auto:    true
-      });
+      };
+      attendance.push(newRec);
+      markAttendEdited(newRec.id);
       added++;
     } else {
       const isManual = existing.auto !== true; // 수기 체크인/수정 기록(auto가 true가 아닌 모든 경우)은 보호
       // 시작일: 간병 시작시간과 항상 동기화 (변경 감지 포함)
       if(isFirst && !isManual && cg.startTime && existing.inTime !== cg.startTime) {
         existing.inTime = cg.startTime;
+        markAttendEdited(existing.id);
         added++;
       }
       // 마감일(실제 등록된 경우): 간병 마감일시와 항상 동기화 (변경 감지 포함)
@@ -8548,6 +8598,7 @@ function autoFillAttendance(cgId) {
         if(existing.outDate !== wantOutDate || existing.outTime !== wantOutTime) {
           existing.outDate = wantOutDate;
           existing.outTime = wantOutTime;
+          markAttendEdited(existing.id);
           added++;
         }
       }
@@ -8555,10 +8606,12 @@ function autoFillAttendance(cgId) {
       if(!isManual && existing.inTime && !existing.outTime) {
         existing.outDate = dateStr;
         existing.outTime = '23:59';
+        markAttendEdited(existing.id);
         added++;
       }
       if(isFirst && !isManual && !existing.inTime && cg.startTime) {
         existing.inTime = cg.startTime;
+        markAttendEdited(existing.id);
         added++;
       }
     }
@@ -9944,9 +9997,11 @@ function importData(input) {
         });
       }
       if(Array.isArray(data.rooms)) {
+        const before = rooms.length;
         data.rooms.forEach(r=>{if(!rooms.includes(r))rooms.push(r);});
+        if(rooms.length !== before) markRoomsEdited();
       }
-      if(data.cfg) { Object.assign(cfg,data.cfg); loadSettings(); }
+      if(data.cfg) { Object.assign(cfg,data.cfg); markCfgEdited(); loadSettings(); }
       save(); updateSidebar(); renderDashboard();
       toast(`✅ 불러오기 완료! 환자 ${added.patients}건, 간병인 ${added.caregivers}건 추가`);
     } catch(err) {
