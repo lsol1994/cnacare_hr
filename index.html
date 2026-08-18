@@ -2584,7 +2584,7 @@ ${wrapPostValue('• 환자 : ', `${genderShort}${ageWeight?'/'+ageWeight:''} / 
 • 가격 : ${pay}원(식비포함)/ 별도지급X
 ${wrapPostValue('• 기간 : ', p.duration || '미정')}
 ${p.request ? wrapPostValue('• 요청사항 : ', p.request)+'\n' : ''}• 협회비 없음 / 배상책임보험 가입 지원
-   ${cfg.name || '씨앤에이케어간병협회'} / ${phone}`;
+${cfg.name || '씨앤에이케어간병협회'} / ${phone}`;
 }
 
 function getDayLabel(dateStr) {
@@ -3659,7 +3659,7 @@ function copyAllSelected() {
     const post = p.recruitInfo ? buildRecruitPost(p) : (p._editedPost || buildPost(p));
     posts.push(post);
   });
-  const combined = posts.join('\n\n' + '─'.repeat(20) + '\n\n');
+  const combined = posts.join('\n\n' + '─'.repeat(28) + '\n\n');
   navigator.clipboard.writeText(combined).then(()=>{
     toast('✅ ' + posts.length + '개 공고 복사됐어요! 카카오톡에 붙여넣기 하세요');
   }).catch(()=>{
@@ -3845,7 +3845,7 @@ function buildJointPost(rawMessage) {
 ${msg}
 
 • 협회비 없음 / 배상책임보험 가입 지원
-   ${cfg.name || '씨앤에이케어간병협회'} / ${toBoldDigits(formatPhone(cfg.phone) || '전화번호를 설정에서 입력해주세요')}`;
+${cfg.name || '씨앤에이케어간병협회'} / ${toBoldDigits(formatPhone(cfg.phone) || '전화번호를 설정에서 입력해주세요')}`;
 }
 
 function updateJointPreview() {
