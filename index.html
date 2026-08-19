@@ -270,6 +270,10 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 .layout-2col{display:grid;grid-template-columns:1fr 360px;gap:1.25rem;align-items:start}
 @media(max-width:900px){.layout-2col{grid-template-columns:1fr}.layout-2col .sticky-col{position:static}}
 
+/* ══ 하단 탭바 + 더보기 서랍 (기본은 숨김, 모바일에서만 보임) ══ */
+.bottom-tabbar{display:none}
+.more-drawer-overlay{display:none}
+
 /* ══ MOBILE OPTIMIZATIONS ══ */
 @media(max-width:600px){
   /* NAV */
@@ -280,9 +284,45 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   .nav-r .btn-sm{padding:5px 8px;font-size:11px}
   #remind-counter{font-size:10px}
 
-  /* TABBAR */
-  .top-tabbar{padding:0 .25rem}
-  .top-tab{padding:0 8px;height:36px;font-size:11px}
+  /* TABBAR — 하단 탭바로 대체되므로 상단 탭바는 숨김 (중복 방지 + 공간 확보) */
+  .top-tabbar{display:none}
+
+  /* 하단 탭바 */
+  .bottom-tabbar{
+    display:flex;position:fixed;left:0;right:0;bottom:0;top:auto;z-index:500;
+    background:var(--surface,#fff);border-top:1px solid var(--border);
+    padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
+  }
+  .bottom-tab{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    padding:6px 0 5px;border:none;background:none;cursor:pointer;color:var(--gray);
+    font-size:10px;min-height:52px;font-family:inherit
+  }
+  .bottom-tab svg{width:20px;height:20px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .bottom-tab.act{color:var(--teal)}
+
+  /* 더보기 서랍 */
+  .more-drawer-overlay.open{display:flex;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,.4);align-items:flex-end}
+  .more-drawer{
+    background:var(--surface,#fff);width:100%;max-height:75vh;border-radius:16px 16px 0 0;
+    padding:1rem 1rem calc(1rem + env(safe-area-inset-bottom));overflow-y:auto
+  }
+  .more-drawer-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;font-size:15px;font-weight:700}
+  .more-drawer-lbl{font-size:11px;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.5px;margin:1rem 0 .5rem}
+  .more-drawer-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .more-drawer-stats > div{background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;display:flex;flex-direction:column-reverse;gap:2px}
+  .more-drawer-stats .v{font-size:18px;font-weight:700;color:var(--teal)}
+  .more-drawer-stats .l{font-size:11px;color:var(--gray)}
+  .more-drawer-rooms{display:flex;flex-direction:column;gap:6px}
+  .more-drawer-rooms > div{font-size:13px;color:var(--gray);padding:8px 10px;background:var(--surface2);border-radius:var(--rsm);display:flex;align-items:center;gap:8px}
+  .more-drawer-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .more-drawer-grid button{
+    display:flex;align-items:center;gap:8px;padding:11px 12px;border:1px solid var(--border);
+    border-radius:var(--rsm);background:none;font-size:13px;font-weight:600;color:var(--black);
+    cursor:pointer;min-height:44px;font-family:inherit
+  }
+  .more-drawer-grid button svg{width:16px;height:16px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 
   /* MAIN */
   main{padding:.875rem .875rem 5rem;
@@ -575,6 +615,73 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   <div id="s-rooms"></div>
 </aside>
 
+<!-- ══ 모바일 전용: 하단 고정 탭 + 더보기 서랍 (600px 이하에서만 보임) ══ -->
+<nav class="bottom-tabbar" id="bottom-tabbar">
+  <button class="bottom-tab act" id="bt-dashboard" onclick="showPage('dashboard')">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg><span>대시보드</span>
+  </button>
+  <button class="bottom-tab" id="bt-patients" onclick="showPage('patients')">
+    <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>환자관리</span>
+  </button>
+  <button class="bottom-tab" id="bt-send" onclick="showPage('send')">
+    <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg><span>단톡방발송</span>
+  </button>
+  <button class="bottom-tab" id="bt-caregiver" onclick="showPage('caregiver')">
+    <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg><span>간병인관리</span>
+  </button>
+  <button class="bottom-tab" id="bt-more" onclick="toggleMoreDrawer()">
+    <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg><span>더보기</span>
+  </button>
+</nav>
+
+<div class="more-drawer-overlay" id="more-drawer-overlay" onclick="closeMoreDrawer(event)">
+  <div class="more-drawer">
+    <div class="more-drawer-hd">
+      <span>전체 메뉴</span>
+      <button class="btn-icon" onclick="closeMoreDrawer()">
+        <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="more-drawer-body">
+      <div class="more-drawer-stats">
+        <div><span class="v" id="md-recruiting">0</span><span class="l">모집중</span></div>
+        <div><span class="v" id="md-alarm">0</span><span class="l">미구인 알람</span></div>
+        <div><span class="v" id="md-matched">0</span><span class="l">매칭완료</span></div>
+        <div><span class="v" id="md-sent">0</span><span class="l">총 발송</span></div>
+      </div>
+      <div class="more-drawer-lbl">단톡방</div>
+      <div id="md-rooms" class="more-drawer-rooms"></div>
+      <div class="more-drawer-lbl">전체 페이지</div>
+      <div class="more-drawer-grid">
+        <button onclick="navigateFromDrawer('new-patient')">
+          <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>환자 등록
+        </button>
+        <button onclick="navigateFromDrawer('report')">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>업체보고
+        </button>
+        <button onclick="navigateFromDrawer('quickmatch')">
+          <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>빠른매칭
+        </button>
+        <button onclick="navigateFromDrawer('blacklist')">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>블랙리스트
+        </button>
+        <button onclick="navigateFromDrawer('calendar')">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>캘린더
+        </button>
+        <button onclick="navigateFromDrawer('memo')">
+          <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>업무일지
+        </button>
+        <button onclick="navigateFromDrawer('log')">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>발송 기록
+        </button>
+        <button onclick="navigateFromDrawer('settings')">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>설정
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <main>
 
 <!-- ══ DASHBOARD ══ -->
@@ -596,6 +703,17 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   </div>
   <div class="layout-2col">
   <div>
+    <div class="card" style="border:1px solid rgba(11,122,110,.35);background:var(--teal-lt)">
+      <div class="card-hd" style="cursor:pointer;justify-content:space-between" onclick="toggleVendorPaste()">
+        <span><span class="dot"></span>📋 업체 메시지로 자동 입력</span>
+        <span id="vendor-paste-icon" style="font-size:11px;color:var(--teal);font-weight:400">펼치기 ▾</span>
+      </div>
+      <div id="vendor-paste-body" style="display:none">
+        <div class="field"><textarea id="vendor-paste-text" placeholder="업체에서 받은 메시지를 그대로 붙여넣으세요" style="min-height:130px;font-size:12px"></textarea></div>
+        <button class="btn btn-teal btn-sm" onclick="applyVendorMessageToForm()">아래 항목에 자동 입력</button>
+        <div style="font-size:11px;color:var(--gray);margin-top:6px">자동으로 채워진 내용은 꼭 확인 후 저장해주세요. 입실시간, 특이사항 일부는 자동으로 못 채울 수 있어요.</div>
+      </div>
+    </div>
     <div class="card">
       <div class="card-hd"><span class="dot"></span>환자 기본 정보</div>
       <div class="g2">
@@ -2514,15 +2632,31 @@ function toast(msg, err=false) {
 }
 
 // ─── NAV ───
+function toggleMoreDrawer() {
+  document.getElementById('more-drawer-overlay').classList.add('open');
+}
+function closeMoreDrawer(e) {
+  if(e && e.target !== document.getElementById('more-drawer-overlay')) return;
+  document.getElementById('more-drawer-overlay').classList.remove('open');
+}
+function navigateFromDrawer(name) {
+  showPage(name);
+  closeMoreDrawer();
+}
+
 function showPage(name, fromHistory) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('act'));
   document.querySelectorAll('.aside-btn').forEach(b=>b.classList.remove('act'));
   document.querySelectorAll('.top-tab').forEach(b=>b.classList.remove('act'));
+  document.querySelectorAll('.bottom-tab').forEach(b=>b.classList.remove('act'));
   document.getElementById('page-'+name).classList.add('act');
   const m=document.getElementById('mb-'+name);
   if(m) m.classList.add('act');
   const tt=document.getElementById('tt-'+name);
   if(tt) tt.classList.add('act');
+  const bt=document.getElementById('bt-'+name);
+  if(bt) bt.classList.add('act');
+  closeMoreDrawer(); // 더보기 서랍에서 이동한 경우, 이동 후 서랍은 자동으로 닫음
   const fns={dashboard:renderDashboard,patients:renderPatients,send:renderSend,caregiver:renderCaregivers,log:renderLog,settings:loadSettings,report:renderReport,quickmatch:renderQuickMatch,blacklist:renderBlacklist,memo:initMemoPage,calendar:initCalendar};
   if(fns[name]) fns[name]();
   updateSidebar();
@@ -2719,6 +2853,117 @@ function checkHospitalLength(inputId, warnId) {
   } else {
     warnEl.style.display = 'none';
   }
+}
+
+function toggleVendorPaste() {
+  const body = document.getElementById('vendor-paste-body');
+  const icon = document.getElementById('vendor-paste-icon');
+  const open = body.style.display === 'none';
+  body.style.display = open ? '' : 'none';
+  icon.textContent = open ? '접기 ▴' : '펼치기 ▾';
+}
+
+// 업체 메시지 원문을 환자 등록 폼 필드에 맞게 파싱 (공동구인 파서와 라벨 인식 방식은 같지만,
+// 병원명에서 병동/호실을 분리해서 "호실" 칸에 따로 넣는 등 환자 등록 폼에 맞게 다듬어져 있음)
+function parseVendorMessageForRegistration(text) {
+  const msg = (text || '').trim();
+  if(!msg) return null;
+
+  const getLine = (...labels) => {
+    for(const label of labels) {
+      const re = new RegExp('^[\\s\\-•*]*' + label + '\\s*[:：]\\s*(.+)', 'm');
+      const m = msg.match(re);
+      if(m) return m[1].trim();
+    }
+    return '';
+  };
+
+  // 이름: "남영욱(여, 52세)" → 이름/성별/나이 분리 (괄호가 있어야만 성별로 인식 — 안 그러면
+  // "남OO"처럼 이름 자체가 "남"으로 시작할 때 성별로 잘못 인식하는 문제가 있어서 괄호를 필수로 둠)
+  const nameRaw = getLine('이름');
+  let name = nameRaw, gender = '', age = '';
+  const nm = nameRaw.match(/^(.*?)\((남|여)\s*[,，]?\s*(\d+)\s*세?\)/);
+  if(nm) {
+    name = nm[1].trim();
+    gender = nm[2] === '남' ? '남성' : '여성';
+    age = nm[3];
+  }
+
+  // 병원명 뒤에 남는 부분(병동/호실 등)은 "호실" 칸으로 따로 분리
+  const hospitalRaw = getLine('병원', '병원명', '병원위치');
+  const hospMatch = hospitalRaw.match(/^(.*?(?:병원|의료원|센터))/);
+  const hospital = hospMatch ? hospMatch[1].trim() : hospitalRaw;
+  const room = hospMatch ? hospitalRaw.slice(hospMatch[1].length).trim() : '';
+
+  // 연락처: 부가 설명("(환자 본인)" 등)은 빼고 전화번호 패턴만 추출
+  const contactRaw = getLine('연락처', '전화번호', '전화');
+  const contactMatch = contactRaw.match(/01[0-9][-\s]?\d{3,4}[-\s]?\d{4}/);
+  const contact = contactMatch ? contactMatch[0].replace(/\s/g,'') : '';
+
+  // 상태: 진단명 부분 + 키/몸무게 부분(마지막 "/" 뒤) 분리
+  const stateRaw = getLine('상태', '증상', '진단', '병명');
+  let diagnosis = stateRaw, height = '', weight = '';
+  if(stateRaw.includes('/')) {
+    const parts = stateRaw.split('/');
+    const hwPart = parts[parts.length-1].trim();
+    const hwMatch = hwPart.match(/(\d+)\s*-\s*(\d+)\s*kg/i);
+    if(hwMatch) {
+      height = hwMatch[1];
+      weight = hwMatch[2];
+      diagnosis = parts.slice(0,-1).join('/').replace(/[,，]\s*$/,'').trim();
+    }
+  }
+
+  // 사용기간: "7이상일" → "7일 이상" 형태로 다듬기
+  let duration = getLine('사용기간', '기간');
+  const durMatch = duration.match(/^(\d+)\s*이상\s*일?$/);
+  if(durMatch) duration = durMatch[1] + '일 이상';
+
+  // 서비스시작일: "2026.08.21일" → "2026-08-21"
+  const startRaw = getLine('서비스시작일', '입실일', '시작일', '간병시작일');
+  let startDate = '';
+  const dMatch = startRaw.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+  if(dMatch) startDate = dMatch[1] + '-' + dMatch[2].padStart(2,'0') + '-' + dMatch[3].padStart(2,'0');
+
+  const pay = getLine('금액', '일당', '가격').replace(/[^\d]/g,'');
+  const request = getLine('요청사항', '요청');
+
+  return { name, gender, age, hospital, room, contact, diagnosis, height, weight, duration, startDate, pay, request };
+}
+
+function applyVendorMessageToForm() {
+  const raw = document.getElementById('vendor-paste-text').value;
+  const p = parseVendorMessageForRegistration(raw);
+  if(!p || (!p.name && !p.hospital)) { toast('메시지에서 인식할 수 있는 내용이 없어요', true); return; }
+
+  if(p.name) document.getElementById('p-name').value = p.name;
+  if(p.age) document.getElementById('p-age').value = p.age;
+  if(p.gender) document.getElementById('p-gender').value = p.gender;
+  if(p.contact) document.getElementById('p-contact').value = p.contact;
+  if(p.hospital) document.getElementById('p-hospital').value = p.hospital;
+  if(p.room) document.getElementById('p-room').value = p.room;
+  if(p.diagnosis) document.getElementById('p-diagnosis').value = p.diagnosis;
+  if(p.height) document.getElementById('p-height').value = p.height;
+  if(p.weight) document.getElementById('p-weight').value = p.weight;
+  if(p.startDate) document.getElementById('p-start-date').value = p.startDate;
+  if(p.pay) document.getElementById('p-pay').value = p.pay;
+  if(p.request) document.getElementById('p-request').value = p.request;
+  if(p.duration) {
+    const sel = document.getElementById('p-duration-sel');
+    const inp = document.getElementById('p-duration');
+    const presetMatch = Array.from(sel.options).find(o => o.value === p.duration);
+    if(presetMatch) {
+      sel.value = p.duration;
+      inp.style.display = 'none';
+    } else {
+      sel.value = '__direct';
+      inp.style.display = '';
+      inp.value = p.duration;
+    }
+  }
+  checkHospitalLength('p-hospital','p-hospital-warn');
+  updateNPPreview();
+  toast('✅ 업체 메시지 내용을 채웠어요 — 확인 후 저장해주세요');
 }
 
 function getFormPatient() {
@@ -6269,15 +6514,29 @@ function clearLogs(){if(!confirm('초기화할까요?'))return;logs=[];save();re
 function updateSidebar() {
   const today=new Date().toLocaleDateString('ko-KR');
   const unrecruited=patients.filter(p=>!p.recruited&&p.status==='모집중');
-  document.getElementById('s-recruiting').textContent=patients.filter(p=>p.status==='모집중').length;
+  const recruitingCnt = patients.filter(p=>p.status==='모집중').length;
+  const matchedCnt = patients.filter(p=>p.status==='매칭완료').length;
+  document.getElementById('s-recruiting').textContent=recruitingCnt;
   document.getElementById('s-alarm').textContent=unrecruited.length;
-  document.getElementById('s-matched').textContent=patients.filter(p=>p.status==='매칭완료').length;
+  document.getElementById('s-matched').textContent=matchedCnt;
   document.getElementById('s-sent').textContent=logs.length;
   document.getElementById('remind-cnt').textContent=unrecruited.length;
   document.getElementById('remind-counter').style.display=unrecruited.length?'':'none';
   document.getElementById('s-rooms').innerHTML=rooms.slice(0,5).map(r=>
     `<div style="font-size:12px;color:var(--gray);padding:3px 8px;display:flex;align-items:center;gap:6px">
       <span style="width:4px;height:4px;border-radius:50%;background:var(--teal);display:inline-block"></span>${r}</div>`).join('');
+
+  // 모바일 "더보기" 서랍도 사이드바와 동일한 통계·단톡방 목록을 보여줌
+  const mdR = document.getElementById('md-recruiting'); if(mdR) mdR.textContent = recruitingCnt;
+  const mdA = document.getElementById('md-alarm'); if(mdA) mdA.textContent = unrecruited.length;
+  const mdM = document.getElementById('md-matched'); if(mdM) mdM.textContent = matchedCnt;
+  const mdS = document.getElementById('md-sent'); if(mdS) mdS.textContent = logs.length;
+  const mdRooms = document.getElementById('md-rooms');
+  if(mdRooms) {
+    mdRooms.innerHTML = rooms.length
+      ? rooms.map(r=>`<div><span style="width:4px;height:4px;border-radius:50%;background:var(--teal);display:inline-block;flex-shrink:0"></span>${r}</div>`).join('')
+      : '<div style="color:var(--gray)">등록된 단톡방이 없어요</div>';
+  }
 }
 
 // ─── SETTINGS ───
