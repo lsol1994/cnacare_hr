@@ -425,7 +425,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   #pt-search,#cg-search,#rpt-search{width:140px !important}
 
   /* 상태 필터 select */
-  #flt-status,#cg-flt-status,#rpt-type{font-size:11px;padding:5px 22px 5px 8px}
+  #rpt-type{font-size:11px;padding:5px 22px 5px 8px}
 }
 
 /* 아주 좁은 화면(구형 소형 안드로이드, iPhone SE 등 360~400px대) — 로고 줄바꿈 방지 및 nav 요소 정리 */
@@ -707,12 +707,28 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
           style="padding:6px 10px 6px 28px;font-size:12px;width:180px;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface);color:var(--black)">
         <button id="pt-search-clear" onclick="document.getElementById('pt-search').value='';renderPatients()" style="display:none;position:absolute;right:7px;background:none;border:none;cursor:pointer;color:var(--gray-lt);font-size:14px;line-height:1">✕</button>
       </div>
-      <select id="flt-status" onchange="renderPatients()" style="width:auto;padding:6px 28px 6px 10px;font-size:12px">
-        <option value="">전체</option><option value="모집중">모집중</option>
-        <option value="컨택됨">컨택됨</option><option value="매칭완료">매칭완료</option><option value="종료">종료</option>
-      </select>
     </div>
   </div>
+
+  <!-- 검색 결과: 검색어가 있을 때만, 탭과 별도로 항상 전체 환자 대상으로 표시 -->
+  <div id="pt-search-section" style="display:none;margin-bottom:1.25rem">
+    <div style="font-size:11px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">🔍 검색 결과</div>
+    <div id="pt-search-list"></div>
+  </div>
+
+  <!-- 상태 탭 (모집중/매칭완료/종료) -->
+  <div style="display:flex;gap:6px;margin-bottom:1rem;border-bottom:2px solid var(--border)">
+    <button id="pt-tab-모집중" class="pt-status-tab act" onclick="switchPtTab('모집중')"
+      style="padding:10px 18px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:700;color:var(--gray);border-bottom:3px solid transparent;margin-bottom:-2px">모집중 <span id="pt-tab-cnt-모집중" style="font-weight:400;color:var(--gray-lt)"></span></button>
+    <button id="pt-tab-매칭완료" class="pt-status-tab" onclick="switchPtTab('매칭완료')"
+      style="padding:10px 18px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:700;color:var(--gray);border-bottom:3px solid transparent;margin-bottom:-2px">매칭완료 <span id="pt-tab-cnt-매칭완료" style="font-weight:400;color:var(--gray-lt)"></span></button>
+    <button id="pt-tab-종료" class="pt-status-tab" onclick="switchPtTab('종료')"
+      style="padding:10px 18px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:700;color:var(--gray);border-bottom:3px solid transparent;margin-bottom:-2px">종료 <span id="pt-tab-cnt-종료" style="font-weight:400;color:var(--gray-lt)"></span></button>
+  </div>
+  <style>
+    .pt-status-tab.act{color:var(--teal) !important;border-bottom-color:var(--teal) !important}
+  </style>
+
   <div id="pt-list"></div>
 </div>
 
@@ -842,58 +858,87 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
           style="padding:6px 10px 6px 28px;font-size:12px;width:190px;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface);color:var(--black)">
         <button id="cg-search-clear" onclick="document.getElementById('cg-search').value='';renderCaregivers()" style="display:none;position:absolute;right:7px;background:none;border:none;cursor:pointer;color:var(--gray-lt);font-size:14px;line-height:1">✕</button>
       </div>
-      <select id="cg-flt-status" onchange="renderCaregivers()" style="width:auto;padding:6px 28px 6px 10px;font-size:12px">
-        <option value="">전체</option><option value="근무중">근무중</option>
-        <option value="대기중">대기중</option><option value="휴무">휴무</option><option value="종료">종료</option>
-      </select>
       <button class="btn btn-teal btn-sm" onclick="openCaregiverModal()">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>간병인 등록
       </button>
     </div>
   </div>
 
-  <!-- 출퇴근 체크 섹션 -->
-  <div class="card" style="margin-bottom:1rem">
-    <div class="card-hd" style="justify-content:space-between">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span class="dot"></span>⏱ 출퇴근 체크
-        <span style="font-family:var(--mono);font-size:11px;font-weight:400;color:var(--gray);text-transform:none;letter-spacing:0" id="today-date-lbl"></span>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px">
-        <button class="btn btn-sm btn-icon" title="이전 날짜" onclick="shiftAttendDate(-1)">
-          <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
-        <input type="date" id="attend-date" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--rsm);color:var(--black);background:var(--surface)"
-          onchange="renderAttendance()">
-        <button class="btn btn-sm btn-icon" title="다음 날짜" onclick="shiftAttendDate(1)">
-          <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-        <button class="btn btn-sm" onclick="goTodayAttend()">오늘</button>
-      </div>
+  <!-- 검색 결과: 검색어가 있을 때만, 탭과 별도로 항상 전체 간병인 대상으로 표시 -->
+  <div id="cg-search-section" style="display:none;margin-bottom:1.25rem">
+    <div style="font-size:11px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">🔍 검색 결과</div>
+    <div id="cg-search-list"></div>
+  </div>
+
+  <!-- 메인 탭 -->
+  <div style="display:flex;gap:6px;margin-bottom:1rem;border-bottom:2px solid var(--border)">
+    <button id="cg-maintab-list" class="cg-main-tab act" onclick="switchCgMainTab('list')"
+      style="padding:10px 18px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:700;color:var(--gray);border-bottom:3px solid transparent;margin-bottom:-2px">👥 간병인 목록</button>
+    <button id="cg-maintab-attend" class="cg-main-tab" onclick="switchCgMainTab('attend')"
+      style="padding:10px 18px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:700;color:var(--gray);border-bottom:3px solid transparent;margin-bottom:-2px">⏱ 출퇴근 체크</button>
+    <button id="cg-maintab-ins" class="cg-main-tab" onclick="switchCgMainTab('ins')"
+      style="padding:10px 18px;border:none;background:none;cursor:pointer;font-size:14px;font-weight:700;color:var(--gray);border-bottom:3px solid transparent;margin-bottom:-2px">🛡 배상보험 현황</button>
+  </div>
+  <style>
+    .cg-main-tab.act{color:var(--teal) !important;border-bottom-color:var(--teal) !important}
+    .cg-status-pill.act{background:var(--teal) !important;color:#fff !important;border-color:var(--teal) !important}
+  </style>
+
+  <!-- 패널: 간병인 목록 -->
+  <div id="cg-panel-list">
+    <div style="display:flex;gap:6px;margin-bottom:1rem;flex-wrap:wrap">
+      <button id="cg-status-" class="btn btn-sm cg-status-pill act" onclick="switchCgStatusFlt('')">전체</button>
+      <button id="cg-status-근무중" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('근무중')">근무중</button>
+      <button id="cg-status-대기중" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('대기중')">대기중</button>
+      <button id="cg-status-휴무" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('휴무')">휴무</button>
+      <button id="cg-status-종료" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('종료')">종료</button>
     </div>
-    <div id="attendance-list">
-      <div class="empty" style="padding:1rem 0"><p style="font-size:13px">근무중인 간병인이 없어요</p></div>
+    <div id="cg-list"></div>
+  </div>
+
+  <!-- 패널: 출퇴근 체크 (기존 카드 내용 그대로) -->
+  <div id="cg-panel-attend" style="display:none">
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-hd" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="dot"></span>⏱ 출퇴근 체크
+          <span style="font-family:var(--mono);font-size:11px;font-weight:400;color:var(--gray);text-transform:none;letter-spacing:0" id="today-date-lbl"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <button class="btn btn-sm btn-icon" title="이전 날짜" onclick="shiftAttendDate(-1)">
+            <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <input type="date" id="attend-date" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--rsm);color:var(--black);background:var(--surface)"
+            onchange="renderAttendance()">
+          <button class="btn btn-sm btn-icon" title="다음 날짜" onclick="shiftAttendDate(1)">
+            <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          <button class="btn btn-sm" onclick="goTodayAttend()">오늘</button>
+        </div>
+      </div>
+      <div id="attendance-list">
+        <div class="empty" style="padding:1rem 0"><p style="font-size:13px">근무중인 간병인이 없어요</p></div>
+      </div>
     </div>
   </div>
 
-  <!-- 배상보험 섹션 -->
-  <div class="card" style="margin-bottom:1rem">
-    <div class="card-hd" style="justify-content:space-between">
-      <div><span class="dot"></span>🛡 배상보험 현황</div>
-      <div style="display:flex;gap:5px;flex-wrap:wrap">
-        <button id="ins-flt-all"     class="btn btn-sm" onclick="setInsFlt('all')"     style="font-size:11px">전체</button>
-        <button id="ins-flt-none"    class="btn btn-sm btn-teal" onclick="setInsFlt('none')"    style="font-size:11px">가입전</button>
-        <button id="ins-flt-active"  class="btn btn-sm btn-teal" onclick="setInsFlt('active')"  style="font-size:11px">가입</button>
-        <button id="ins-flt-expired" class="btn btn-sm" onclick="setInsFlt('expired')" style="font-size:11px">만료</button>
+  <!-- 패널: 배상보험 현황 (기존 카드 내용 그대로) -->
+  <div id="cg-panel-ins" style="display:none">
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-hd" style="justify-content:space-between">
+        <div><span class="dot"></span>🛡 배상보험 현황</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          <button id="ins-flt-all"     class="btn btn-sm" onclick="setInsFlt('all')"     style="font-size:11px">전체</button>
+          <button id="ins-flt-none"    class="btn btn-sm btn-teal" onclick="setInsFlt('none')"    style="font-size:11px">가입전</button>
+          <button id="ins-flt-active"  class="btn btn-sm btn-teal" onclick="setInsFlt('active')"  style="font-size:11px">가입</button>
+          <button id="ins-flt-expired" class="btn btn-sm" onclick="setInsFlt('expired')" style="font-size:11px">만료</button>
+        </div>
+      </div>
+      <div id="insurance-list">
+        <div class="empty" style="padding:1rem 0"><p style="font-size:13px">등록된 간병인이 없어요</p></div>
       </div>
     </div>
-    <div id="insurance-list">
-      <div class="empty" style="padding:1rem 0"><p style="font-size:13px">등록된 간병인이 없어요</p></div>
-    </div>
   </div>
-
-  <div class="card-hd" style="padding:0 0 .5rem;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray)"><span style="width:5px;height:5px;border-radius:50%;background:var(--teal);display:inline-block;margin-right:7px"></span>전체 간병인 목록</div>
-  <div id="cg-list"></div>
 </div>
 
 <!-- ══ REPORT ══ -->
@@ -2875,33 +2920,57 @@ function ptRowHTML(p) {
   </div>`;
 }
 
+let ptActiveTab = '모집중'; // 현재 선택된 환자 상태 탭
+
+function switchPtTab(tab) {
+  ptActiveTab = tab;
+  document.querySelectorAll('.pt-status-tab').forEach(b => b.classList.remove('act'));
+  document.getElementById('pt-tab-'+tab)?.classList.add('act');
+  renderPatients();
+}
+
+function ptSearchMatch(p, q, qNum) {
+  // 매칭된 간병인을 실시간으로 조회해서 이름 검색 (캐시된 caregiverName이 어긋나 있어도 항상 정확하게 잡히도록)
+  const matchedCg = caregivers.find(c=>String(c.patientId)===String(p.id));
+  return (p.name||'').toLowerCase().includes(q) ||
+    (p.hospital||'').toLowerCase().includes(q) ||
+    (p.diagnosis||'').toLowerCase().includes(q) ||
+    (p.contact||'').toLowerCase().includes(q) ||
+    (qNum && (p.contact||'').replace(/[^0-9]/g,'').includes(qNum)) ||
+    (p.caregiverName||'').toLowerCase().includes(q) ||
+    (matchedCg && (matchedCg.name||'').toLowerCase().includes(q));
+}
+
 function renderPatients() {
   autoMatch();
-  const flt  = document.getElementById('flt-status')?.value || '';
-  const q    = (document.getElementById('pt-search')?.value || '').trim().toLowerCase();
+  const q = (document.getElementById('pt-search')?.value || '').trim().toLowerCase();
   const clrBtn = document.getElementById('pt-search-clear');
   if(clrBtn) clrBtn.style.display = q ? '' : 'none';
 
-  let list = flt ? patients.filter(p=>p.status===flt) : [...patients];
+  // 탭별 인원수 표시
+  ['모집중','매칭완료','종료'].forEach(s => {
+    const cntEl = document.getElementById('pt-tab-cnt-'+s);
+    if(cntEl) cntEl.textContent = patients.filter(p=>p.status===s).length;
+  });
+
+  // 검색 결과: 탭 구분 없이 전체 환자 대상, 탭 위 별도 영역에 표시
+  const searchSection = document.getElementById('pt-search-section');
   if(q) {
-    const qNum = q.replace(/[^0-9]/g,''); // 숫자만
-    list = list.filter(p => {
-      // 매칭된 간병인을 실시간으로 조회해서 이름 검색 (캐시된 caregiverName이 어긋나 있어도 항상 정확하게 잡히도록)
-      const matchedCg = caregivers.find(c=>String(c.patientId)===String(p.id));
-      return (p.name||'').toLowerCase().includes(q) ||
-        (p.hospital||'').toLowerCase().includes(q) ||
-        (p.diagnosis||'').toLowerCase().includes(q) ||
-        (p.contact||'').toLowerCase().includes(q) ||
-        (qNum && (p.contact||'').replace(/[^0-9]/g,'').includes(qNum)) ||
-        (p.caregiverName||'').toLowerCase().includes(q) ||
-        (matchedCg && (matchedCg.name||'').toLowerCase().includes(q));
-    });
+    searchSection.style.display = '';
+    const qNum = q.replace(/[^0-9]/g,'');
+    const searchList = patients.filter(p => ptSearchMatch(p, q, qNum));
+    const searchEl = document.getElementById('pt-search-list');
+    searchEl.innerHTML = searchList.length
+      ? searchList.map(p=>ptRowHTML(p)).join('')
+      : `<div class="empty" style="padding:1rem 0"><p>"${q}" 검색 결과가 없어요</p></div>`;
+  } else {
+    searchSection.style.display = 'none';
   }
-  // 정렬: 종료 환자 맨 뒤, 나머지는 서비스시작일 순
+
+  // 탭 목록: 검색어와 무관하게 현재 선택된 상태 탭 기준으로만 표시
+  let list = patients.filter(p=>p.status===ptActiveTab);
+  // 정렬: 서비스시작일 순
   list.sort((a, b) => {
-    const aEnded = a.status === '종료' ? 1 : 0;
-    const bEnded = b.status === '종료' ? 1 : 0;
-    if(aEnded !== bEnded) return aEnded - bEnded;
     const da = a.startDate || '9999-99-99';
     const db = b.startDate || '9999-99-99';
     if(da !== db) return da.localeCompare(db);
@@ -2910,7 +2979,7 @@ function renderPatients() {
 
   const el = document.getElementById('pt-list');
   if(!list.length) {
-    el.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><p>${q ? `"${q}" 검색 결과가 없어요` : '환자가 없어요'}</p></div>`;
+    el.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><p>${ptActiveTab} 환자가 없어요</p></div>`;
     return;
   }
   el.innerHTML = list.map(p=>ptRowHTML(p)).join('');
@@ -2965,7 +3034,7 @@ function openPatient(id) {
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:6px">상태 변경</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:.875rem">
-      ${['모집중','컨택됨','매칭완료','종료'].map(s=>
+      ${['모집중','매칭완료','종료'].map(s=>
         `<button class="btn btn-sm ${p.status===s?'btn-teal':''}" onclick="changeStatus('${p.id}','${s}')">${s}</button>`).join('')}
     </div>
     ${cg ? `
@@ -4445,49 +4514,9 @@ function saveCg() {
   }
 }
 
-function renderCaregivers() {
-  renderAttendance();
-  renderInsurance();
-  const q      = (document.getElementById('cg-search')?.value || '').trim().toLowerCase();
-  const flt    = document.getElementById('cg-flt-status')?.value || '';
-  const clrBtn = document.getElementById('cg-search-clear');
-  if(clrBtn) clrBtn.style.display = q ? '' : 'none';
-
-  let list = [...caregivers];
-  if(flt)  list = list.filter(c=>c.workStatus===flt);
-  if(q) {
-    const qNum = q.replace(/[^0-9]/g,'');
-    list = list.filter(c=>{
-      // 매칭된 환자를 실시간으로 조회해서 이름 검색
-      const matchedPt = c.patientId ? patients.find(p=>String(p.id)===String(c.patientId)) : null;
-      return (c.name||'').toLowerCase().includes(q) ||
-        (c.hospital||'').toLowerCase().includes(q) ||
-        (c.specialty||'').toLowerCase().includes(q) ||
-        (c.phone||'').toLowerCase().includes(q) ||
-        (qNum && (c.phone||'').replace(/[^0-9]/g,'').includes(qNum)) ||
-        (c.region||'').toLowerCase().includes(q) ||
-        (matchedPt && (matchedPt.name||'').toLowerCase().includes(q));
-    });
-  }
-
-  // 정렬: 종료 간병인 맨 뒤, 나머지는 서비스시작일 순
-  list.sort((a, b) => {
-    const aEnded = a.workStatus === '종료' ? 1 : 0;
-    const bEnded = b.workStatus === '종료' ? 1 : 0;
-    if(aEnded !== bEnded) return aEnded - bEnded;
-    const da = a.startDate || '9999-99-99';
-    const db = b.startDate || '9999-99-99';
-    if(da !== db) return da.localeCompare(db);
-    return (a.startTime||'').localeCompare(b.startTime||'');
-  });
-
-  const el = document.getElementById('cg-list');
-  if(!list.length) {
-    el.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg><p>${q ? `"${q}" 검색 결과가 없어요` : '등록된 간병인이 없어요'}</p></div>`;
-    return;
-  }
+function cgRowHTML(cg) {
   const statMap={'근무중':'b-green','대기중':'b-amber','휴무':'b-gray'};
-  el.innerHTML=list.map(cg=>`
+  return `
     <div class="pt-row">
       <div class="pt-top">
         <div><div class="pt-name">${cg.name}<span>${cg.age?cg.age+'세':''} ${cg.gender}</span></div>
@@ -4550,7 +4579,82 @@ function renderCaregivers() {
             <button class="btn btn-sm" onclick="toggleReassignSelect('${cg.id}')">✕</button>
           </div>
         </div>`:''}
-    </div>`).join('');
+    </div>`;
+}
+
+let cgMainTab   = 'list'; // list | attend | ins
+let cgStatusFlt = '';     // '' | 근무중 | 대기중 | 휴무 | 종료
+
+function switchCgMainTab(tab) {
+  cgMainTab = tab;
+  document.querySelectorAll('.cg-main-tab').forEach(b => b.classList.remove('act'));
+  document.getElementById('cg-maintab-'+tab)?.classList.add('act');
+  document.getElementById('cg-panel-list').style.display   = tab === 'list'   ? '' : 'none';
+  document.getElementById('cg-panel-attend').style.display = tab === 'attend' ? '' : 'none';
+  document.getElementById('cg-panel-ins').style.display    = tab === 'ins'    ? '' : 'none';
+  renderCaregivers();
+}
+
+function switchCgStatusFlt(flt) {
+  cgStatusFlt = flt;
+  document.querySelectorAll('.cg-status-pill').forEach(b => b.classList.remove('act'));
+  document.getElementById('cg-status-'+flt)?.classList.add('act');
+  renderCaregivers();
+}
+
+function cgSearchMatch(c, q, qNum) {
+  // 매칭된 환자를 실시간으로 조회해서 이름 검색
+  const matchedPt = c.patientId ? patients.find(p=>String(p.id)===String(c.patientId)) : null;
+  return (c.name||'').toLowerCase().includes(q) ||
+    (c.hospital||'').toLowerCase().includes(q) ||
+    (c.specialty||'').toLowerCase().includes(q) ||
+    (c.phone||'').toLowerCase().includes(q) ||
+    (qNum && (c.phone||'').replace(/[^0-9]/g,'').includes(qNum)) ||
+    (c.region||'').toLowerCase().includes(q) ||
+    (matchedPt && (matchedPt.name||'').toLowerCase().includes(q));
+}
+
+function renderCaregivers() {
+  renderAttendance();
+  renderInsurance();
+  const q      = (document.getElementById('cg-search')?.value || '').trim().toLowerCase();
+  const clrBtn = document.getElementById('cg-search-clear');
+  if(clrBtn) clrBtn.style.display = q ? '' : 'none';
+
+  // 검색 결과: 탭/상태필터 구분 없이 전체 간병인 대상, 탭 위 별도 영역에 표시
+  const searchSection = document.getElementById('cg-search-section');
+  if(q) {
+    searchSection.style.display = '';
+    const qNum = q.replace(/[^0-9]/g,'');
+    const searchList = caregivers.filter(c => cgSearchMatch(c, q, qNum));
+    const searchEl = document.getElementById('cg-search-list');
+    searchEl.innerHTML = searchList.length
+      ? searchList.map(c=>cgRowHTML(c)).join('')
+      : `<div class="empty" style="padding:1rem 0"><p>"${q}" 검색 결과가 없어요</p></div>`;
+  } else {
+    searchSection.style.display = 'none';
+  }
+
+  // 목록 패널: 검색어와 무관하게 현재 선택된 상태 필터 기준으로만 표시
+  let list = cgStatusFlt ? caregivers.filter(c=>c.workStatus===cgStatusFlt) : [...caregivers];
+
+  // 정렬: 종료 간병인 맨 뒤, 나머지는 서비스시작일 순
+  list.sort((a, b) => {
+    const aEnded = a.workStatus === '종료' ? 1 : 0;
+    const bEnded = b.workStatus === '종료' ? 1 : 0;
+    if(aEnded !== bEnded) return aEnded - bEnded;
+    const da = a.startDate || '9999-99-99';
+    const db = b.startDate || '9999-99-99';
+    if(da !== db) return da.localeCompare(db);
+    return (a.startTime||'').localeCompare(b.startTime||'');
+  });
+
+  const el = document.getElementById('cg-list');
+  if(!list.length) {
+    el.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg><p>${cgStatusFlt ? cgStatusFlt+' 간병인이 없어요' : '등록된 간병인이 없어요'}</p></div>`;
+    return;
+  }
+  el.innerHTML=list.map(cg=>cgRowHTML(cg)).join('');
 }
 
 // 캘린더 지출내용 복사/토글용 임시 저장 (긴 텍스트를 onclick 속성에 직접 넣지 않기 위함)
