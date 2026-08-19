@@ -9053,6 +9053,18 @@ function checkAutoStart() {
     if(cg.workStatus !== '대기중') return;
     if(!cg.startDate) return;
 
+    // 안전장치: 이 startDate보다 "이후"에 이미 완료된 배정 이력이 있다면, 지금 보고 있는
+    // "대기중 + 이 startDate" 조합은 실제 최신 상태가 아니라 이 기기에 남아있는 낡은 데이터일
+    // 가능성이 매우 높음(논리적으로, 나중에 끝난 일이 이미 있는데 그보다 이전 날짜에 새로
+    // 시작할 수는 없으므로). 이런 경우 자동으로 "근무중" 전환하지 않고 건너뛰어서, 낡은 값이
+    // 실수로 근무중 처리되어 Firebase까지 덮어써버리는 걸 막음 — 다른 기기 동기화가 늦어졌을 때
+    // 특히 중요함
+    const staleVsHistory = (cg.assignHistory||[]).some(h => h.endDate && h.endDate > cg.startDate);
+    if(staleVsHistory) {
+      console.warn(`[자동시작 건너뜀] ${cg.name}: startDate(${cg.startDate})보다 최근에 완료된 배정 이력이 있어 낡은 데이터로 판단됨`);
+      return;
+    }
+
     // 시작일이 오늘보다 이전이면 무조건 근무중
     if(cg.startDate < todayDate) {
       cg.workStatus = '근무중';
