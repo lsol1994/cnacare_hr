@@ -521,7 +521,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   <button class="top-tab" id="tt-send" onclick="showPage('send')">단톡방 발송</button>
   <button class="top-tab" id="tt-caregiver" onclick="showPage('caregiver')">간병인 관리</button>
   <button class="top-tab" id="tt-report" onclick="showPage('report')">업체보고</button>
-  <button class="top-tab" id="tt-members" onclick="showPage('members')">협회 간병인</button>
+  <button class="top-tab" id="tt-quickmatch" onclick="showPage('quickmatch')">빠른매칭</button>
   <button class="top-tab" id="tt-blacklist" onclick="showPage('blacklist')">블랙리스트</button>
   <button class="top-tab" id="tt-calendar" onclick="showPage('calendar')">캘린더</button>
   <button class="top-tab" id="tt-memo" onclick="showPage('memo')">업무일지</button>
@@ -553,8 +553,8 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   <button class="aside-btn" id="mb-report" onclick="showPage('report')">
     <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>업체보고
   </button>
-  <button class="aside-btn" id="mb-members" onclick="showPage('members')">
-    <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>협회 간병인
+  <button class="aside-btn" id="mb-quickmatch" onclick="showPage('quickmatch')">
+    <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>빠른매칭
   </button>
   <button class="aside-btn" id="mb-blacklist" onclick="showPage('blacklist')">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>블랙리스트
@@ -993,46 +993,47 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   </div>
 </div>
 <!-- ══ MEMBERS ══ -->
-<div class="page" id="page-members">
+<div class="page" id="page-quickmatch">
   <div class="sh">
-    <div><div class="sh-title">협회 소속 간병인 관리</div><div class="sh-sub">씨앤에이케어 협회 소속 간병인 목록 · 자격증 · 회비 관리</div></div>
+    <div><div class="sh-title">빠른매칭</div><div class="sh-sub">서비스 시작 가능일 확인된 간병인 명단 · 오늘~7일 이내만 관리</div></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <div style="position:relative;display:flex;align-items:center">
         <svg viewBox="0 0 24 24" style="position:absolute;left:9px;width:14px;height:14px;stroke:var(--gray-lt);stroke-width:2;fill:none;stroke-linecap:round;pointer-events:none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" id="mem-search" placeholder="이름·연락처·자격증 검색..." oninput="renderMembers()"
+        <input type="text" id="qm-search" placeholder="이름·연락처·지역 검색..." oninput="renderQuickMatch()"
           style="padding:6px 10px 6px 28px;font-size:12px;width:180px;border:1px solid var(--border);border-radius:var(--rsm)">
       </div>
-      <select id="mem-flt-status" onchange="renderMembers()" style="width:auto;padding:6px 28px 6px 10px;font-size:12px">
-        <option value="">전체</option><option value="활동중">활동중</option>
-        <option value="휴식중">휴식중</option><option value="탈퇴">탈퇴</option>
-      </select>
-      <button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue);font-weight:700" onclick="openMemberModal()">
-        <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>간병인 등록
+      <button class="btn btn-sm" onclick="downloadQuickMatchExcel()">
+        <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>엑셀 다운로드
       </button>
-      <button class="btn btn-sm" onclick="downloadMembersCSV()">
-        <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>목록 다운로드
+      <button class="btn btn-teal btn-sm" onclick="openQuickMatchModal()">
+        <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>후보 등록
       </button>
     </div>
   </div>
-  <div class="g4" style="margin-bottom:1.25rem">
-    <div class="stat"><div class="n" id="mem-total" style="color:var(--blue)">0</div><div class="l">전체 소속</div></div>
-    <div class="stat"><div class="n" id="mem-active" style="color:var(--green)">0</div><div class="l">활동중</div></div>
-    <div class="stat"><div class="n" id="mem-fee-ok" style="color:var(--teal)">0</div><div class="l">회비납부</div></div>
-    <div class="stat"><div class="n" id="mem-cert-count" style="color:var(--amber)">0</div><div class="l">자격증 보유</div></div>
+
+  <div style="background:var(--teal-lt);border-radius:var(--rsm);padding:10px 14px;font-size:12px;color:var(--teal);margin-bottom:1.25rem">
+    ⏱ 오늘부터 7일 이내 시작 가능한 후보만 관리해요. 지난 날짜는 접속할 때마다 자동으로 정리돼요.
   </div>
-  <div id="member-list"></div>
+
+  <div class="g3" style="margin-bottom:1.25rem">
+    <div class="stat"><div class="n" id="qm-total" style="color:var(--teal)">0</div><div class="l">등록된 후보</div></div>
+    <div class="stat"><div class="n" id="qm-today" style="color:var(--green)">0</div><div class="l">오늘 시작 가능</div></div>
+    <div class="stat"><div class="n" id="qm-soon" style="color:var(--amber)">0</div><div class="l">3일 내 만료</div></div>
+  </div>
+
+  <div id="quickmatch-list"></div>
 </div>
 
-<!-- 협회 간병인 등록/수정 모달 -->
-<div class="overlay" id="member-overlay" onclick="closeOverlay('member-overlay',event)">
-  <div class="modal" style="max-width:620px">
+<!-- 빠른매칭 후보 등록 모달 -->
+<div class="overlay" id="quickmatch-overlay" onclick="closeOverlay('quickmatch-overlay',event)">
+  <div class="modal" style="max-width:440px">
     <div class="modal-hd">
-      <div class="modal-title" id="member-modal-title">협회 간병인 등록</div>
-      <button class="btn btn-icon" onclick="closeOverlay('member-overlay')">
+      <div class="modal-title">빠른매칭 후보 등록</div>
+      <button class="btn btn-icon" onclick="closeOverlay('quickmatch-overlay')">
         <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
-    <div id="member-form-body"></div>
+    <div id="quickmatch-form-body"></div>
   </div>
 </div>
 
@@ -1578,7 +1579,7 @@ function defaultHolidays() {
   return ["2026-01-01 신정","2026-02-16 설날연휴","2026-02-17 설날","2026-02-18 설날연휴","2026-03-01 삼일절","2026-03-02 대체공휴일(삼일절)","2026-05-05 어린이날","2026-05-24 부처님오신날","2026-05-25 대체공휴일(부처님오신날)","2026-06-03 지방선거일","2026-06-06 현충일","2026-07-17 제헌절","2026-08-15 광복절","2026-08-17 대체공휴일(광복절)","2026-09-24 추석연휴","2026-09-25 추석","2026-09-26 추석연휴","2026-10-03 개천절","2026-10-05 대체공휴일(개천절)","2026-10-09 한글날","2026-12-25 성탄절"];
 }
 if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays();
-let members    = JSON.parse(localStorage.getItem('cnc_members')   || '[]');
+let quickMatch    = JSON.parse(localStorage.getItem('cnc_quickmatch')   || '[]');
 let blacklist  = JSON.parse(localStorage.getItem('cnc_blacklist') || '[]');
 let memos      = JSON.parse(localStorage.getItem('cnc_memos')     || '[]');
 let notices    = JSON.parse(localStorage.getItem('cnc_notices')   || '[]');
@@ -1588,7 +1589,7 @@ let editCgId       = null;
 let remindTimer    = null;
 let insuranceTimer = null;
 let roomsCollapsed = true;
-let editMemberId   = null;
+let editQuickMatchId   = null;
 let editBlacklistId = null;
 let rptType        = 'all';
 let selRptPt       = null;
@@ -1596,7 +1597,7 @@ let _fbReady       = false;
 let _fbPause       = false;
 
 // ─── Firebase 부분 업데이트(update()) 를 위한 마지막 동기화 스냅샷 ───
-// id 키 컬렉션(patients/caregivers/logs/attendance/reportLogs/members/memos/notices):
+// id 키 컬렉션(patients/caregivers/logs/attendance/reportLogs/quickMatch/memos/notices):
 //   { 컬렉션명 → { id(String) → JSON 문자열 } }
 // id 없는 컬렉션(rooms/cfg): { 컬렉션명 → JSON 문자열 }
 // 비어있는 상태(최초 실행)에서는 save() 최초 1회가 전체 데이터를 update()로 올림
@@ -1605,7 +1606,7 @@ let _lastSyncedById = (function() {
     const saved = JSON.parse(localStorage.getItem('cnc_lastSyncedById') || 'null');
     if(saved && typeof saved === 'object') return saved;
   } catch(e) {}
-  return { patients:{}, caregivers:{}, logs:{}, attendance:{}, reportLogs:{}, members:{}, blacklist:{}, memos:{}, notices:{} };
+  return { patients:{}, caregivers:{}, logs:{}, attendance:{}, reportLogs:{}, quickMatch:{}, blacklist:{}, memos:{}, notices:{} };
 })();
 // _lastSyncedById를 localStorage에도 저장 (새로고침/재접속해도 "이미 동기화된 적 있음" 기록이 유지되도록)
 function persistLastSyncedSnapshot() {
@@ -1621,7 +1622,7 @@ let _newLocalCgIds = new Set();
 // 최근 로컬에서 수정된 항목 ID + 시각 (Firebase 덮어쓰기 방지) - 전체 컬렉션 공통 처리
 const _editedMaps = {
   patients: new Map(), caregivers: new Map(), attendance: new Map(), logs: new Map(),
-  reportLogs: new Map(), members: new Map(), blacklist: new Map(), memos: new Map(), notices: new Map()
+  reportLogs: new Map(), quickMatch: new Map(), blacklist: new Map(), memos: new Map(), notices: new Map()
 };
 const EDIT_PROTECT_MS = 120000; // 2분 보호 (기존 10초는 너무 짧아서, 직원이 화면을 좀 오래 보거나 네트워크가 느리면 그 사이 낡은 동기화가 방금 한 수정을 덮어써버리는 문제가 있었음)
 
@@ -1658,7 +1659,7 @@ function getCollectionArray(name) {
     case 'attendance': return attendance;
     case 'logs':       return logs;
     case 'reportLogs': return reportLogs;
-    case 'members':    return members;
+    case 'quickMatch':    return quickMatch;
     case 'blacklist':  return blacklist;
     case 'memos':      return memos;
     case 'notices':    return notices;
@@ -1683,8 +1684,8 @@ function markLogEdited(id) { markEdited('logs', id); }
 function isLogEditProtected(id) { return isEditProtected('logs', id); }
 function markReportLogEdited(id) { markEdited('reportLogs', id); }
 function isReportLogEditProtected(id) { return isEditProtected('reportLogs', id); }
-function markMemberEdited(id) { markEdited('members', id); }
-function isMemberEditProtected(id) { return isEditProtected('members', id); }
+function markQuickMatchEdited(id) { markEdited('quickMatch', id); }
+function isQuickMatchEditProtected(id) { return isEditProtected('quickMatch', id); }
 function markBlacklistEdited(id) { markEdited('blacklist', id); }
 function isBlacklistEditProtected(id) { return isEditProtected('blacklist', id); }
 function markMemoEdited(id) { markEdited('memos', id); }
@@ -1823,7 +1824,7 @@ function safeKey(id) {
 
 // ─── 배열 ↔ 객체(id 키 기반) 변환 헬퍼 ───
 // Firebase에는 배열이 아닌 { [id]: item } 형태의 객체로 저장 → 항목 단위 update() 가능
-// 대상: patients, caregivers, logs, attendance, reportLogs, members, memos, notices
+// 대상: patients, caregivers, logs, attendance, reportLogs, quickMatch, memos, notices
 function arrToObjById(arr) {
   const obj = {};
   (arr || []).forEach(item => {
@@ -1861,7 +1862,7 @@ function getIdKeyedCollections() {
     logs:       logs,
     attendance: attendance,
     reportLogs: reportLogs,
-    members:    members,
+    quickMatch:    quickMatch,
     blacklist:  blacklist,
     memos:      memos,
     notices:    notices
@@ -1944,7 +1945,7 @@ function save() {
   localStorage.setItem('cnc_attend',    JSON.stringify(attendance));
   localStorage.setItem('cnc_rptlogs',   JSON.stringify(reportLogs));
   localStorage.setItem('cnc_cfg',       JSON.stringify(cfg));
-  localStorage.setItem('cnc_members',   JSON.stringify(members));
+  localStorage.setItem('cnc_quickmatch',   JSON.stringify(quickMatch));
   localStorage.setItem('cnc_blacklist', JSON.stringify(blacklist));
   localStorage.setItem('cnc_memos',     JSON.stringify(memos));
   localStorage.setItem('cnc_notices',   JSON.stringify(notices));
@@ -2064,7 +2065,6 @@ function attachFirebaseListener() {
     const legacyLogArray = Array.isArray(d.logs);
     const legacyAttArray = Array.isArray(d.attendance);
     const legacyRptArray = Array.isArray(d.reportLogs);
-    const legacyMemArray = Array.isArray(d.members);
     const legacyBlkArray = Array.isArray(d.blacklist);
     const legacyMemoArray = Array.isArray(d.memos);
     const legacyNotiArray = Array.isArray(d.notices);
@@ -2075,7 +2075,7 @@ function attachFirebaseListener() {
     const fbLogs        = objToArrById(d.logs);
     const fbAttendance  = objToArrById(d.attendance);
     const fbReportLogs  = objToArrById(d.reportLogs);
-    const fbMembers     = objToArrById(d.members);
+    const fbQuickMatch     = objToArrById(d.quickMatch);
     const fbBlacklist   = objToArrById(d.blacklist);
     const fbMemos       = objToArrById(d.memos);
     const fbNotices     = objToArrById(d.notices);
@@ -2238,9 +2238,9 @@ function attachFirebaseListener() {
       reportLogs = mergeIdCollection(reportLogs, fbReportLogs, 'reportLogs');
       localStorage.setItem('cnc_rptlogs', JSON.stringify(reportLogs));
     }
-    if(fbMembers.length > 0) {
-      members = mergeIdCollection(members, fbMembers, 'members');
-      localStorage.setItem('cnc_members', JSON.stringify(members));
+    if(fbQuickMatch.length > 0) {
+      quickMatch = mergeIdCollection(quickMatch, fbQuickMatch, 'quickMatch');
+      localStorage.setItem('cnc_quickmatch', JSON.stringify(quickMatch));
     }
     if(fbBlacklist.length > 0) {
       blacklist = mergeIdCollection(blacklist, fbBlacklist, 'blacklist');
@@ -2300,10 +2300,6 @@ function attachFirebaseListener() {
       db.ref('cnc/reportLogs').set(arrToObjById(reportLogs))
         .catch(e => console.warn('업체보고 구조 마이그레이션 실패:', e));
     }
-    if(legacyMemArray && members.length) {
-      db.ref('cnc/members').set(arrToObjById(members))
-        .catch(e => console.warn('협회간병인 구조 마이그레이션 실패:', e));
-    }
     if(legacyBlkArray && blacklist.length) {
       db.ref('cnc/blacklist').set(arrToObjById(blacklist))
         .catch(e => console.warn('블랙리스트 구조 마이그레이션 실패:', e));
@@ -2338,7 +2334,7 @@ function attachFirebaseListener() {
         if(ap==='page-send')      renderSend();
         if(ap==='page-log')       renderLog();
         if(ap==='page-report')    renderReport();
-        if(ap==='page-members')   renderMembers();
+        if(ap==='page-quickmatch')   renderQuickMatch();
         if(ap==='page-blacklist') renderBlacklist();
         if(ap==='page-calendar')  renderCalendar();
         updateSidebar(); renderDashboard();
@@ -2527,7 +2523,7 @@ function showPage(name, fromHistory) {
   if(m) m.classList.add('act');
   const tt=document.getElementById('tt-'+name);
   if(tt) tt.classList.add('act');
-  const fns={dashboard:renderDashboard,patients:renderPatients,send:renderSend,caregiver:renderCaregivers,log:renderLog,settings:loadSettings,report:renderReport,members:renderMembers,blacklist:renderBlacklist,memo:initMemoPage,calendar:initCalendar};
+  const fns={dashboard:renderDashboard,patients:renderPatients,send:renderSend,caregiver:renderCaregivers,log:renderLog,settings:loadSettings,report:renderReport,quickmatch:renderQuickMatch,blacklist:renderBlacklist,memo:initMemoPage,calendar:initCalendar};
   if(fns[name]) fns[name]();
   updateSidebar();
   // 뒤로가기 지원: 메뉴를 직접 눌러서 이동한 경우에만 브라우저 기록에 새로 남김
@@ -4184,7 +4180,7 @@ function renderCgForm(cg, p) {
     <div class="g2">
       <div class="field"><label>등록일</label><input type="date" id="cg-regDate" value="${cg?v('regDate'):today}"></div>
       <div class="field"><label>근무상태</label>
-        <select id="cg-workStatus"><option ${v('workStatus')==='근무중'?'selected':''}>근무중</option><option ${v('workStatus')==='대기중'?'selected':''}>대기중</option><option ${v('workStatus')==='휴무'?'selected':''}>휴무</option></select>
+        <select id="cg-workStatus"><option ${v('workStatus')==='근무중'?'selected':''}>근무중</option><option ${v('workStatus')==='대기중'?'selected':''}>대기중</option><option ${v('workStatus')==='휴무'?'selected':''}>휴무</option><option ${v('workStatus')==='종료'?'selected':''}>종료</option></select>
       </div>
       <div class="field"><label>간병인 이름 <span class="req">*</span></label><input type="text" id="cg-name" placeholder="홍길동" value="${v('name')}"></div>
       <div class="field"><label>성별</label>
@@ -4430,9 +4426,34 @@ function saveCg() {
 
   if(editCgId){
     const idx=caregivers.findIndex(x=>String(x.id)===String(editCgId));
-    // 폼에 없는 필드(assignHistory, 컴플레인, 선지급, 배상보험 정보 등)가 통째로 사라지지 않도록
-    // 기존 레코드 위에 폼에서 받은 값만 덮어씀 (완전 교체 금지)
-    if(idx>-1) caregivers[idx] = Object.assign({}, caregivers[idx], cg);
+    if(idx>-1) {
+      const before = caregivers[idx]; // 병합 전 원래 상태 (전환 감지용)
+      const wasActiveMatch  = before.patientId && before.workStatus !== '종료';
+      const becomingEnded   = cg.workStatus === '종료' && before.workStatus !== '종료';
+
+      // 폼에 없는 필드(assignHistory, 컴플레인, 선지급, 배상보험 정보 등)가 통째로 사라지지 않도록
+      // 기존 레코드 위에 폼에서 받은 값만 덮어씀 (완전 교체 금지)
+      caregivers[idx] = Object.assign({}, before, cg);
+
+      // 상태 드롭다운으로 직접 "종료"를 선택한 경우, 매칭된 환자가 있었다면 "중도종료"와
+      // 동일하게 정리해줌 — 안 그러면 간병인은 "종료"인데 매칭 환자는 그대로 남아있는
+      // 앞뒤가 안 맞는 상태가 됨(환자 쪽엔 담당 간병인이 없는 것처럼 보이는 문제로 이어짐)
+      if(becomingEnded && wasActiveMatch) {
+        const cgObj = caregivers[idx];
+        cgObj.earlyEndPatientId = String(before.patientId); // 나중에 "종료취소"로 복원 가능하도록
+        saveToAssignHistory(cgObj); // patientId 지우기 전에 먼저 이력 기록
+        const pt = patients.find(p=>String(p.id)===String(before.patientId));
+        if(pt && pt.status !== '종료') {
+          pt.status = '종료';
+          pt.recruited = true;
+          pt.caregiverName = '';
+          markPtEdited(pt.id);
+        }
+        cgObj.patientId = '';
+        cg.patientId = ''; // 폼에서 읽은 원본 변수도 같이 비워야, 아래쪽 "환자 연결" 블록이 이 patientId로 재매칭하지 않음
+        toast(`ℹ️ ${cgObj.name} 님 매칭이 자동으로 해제되고, 환자도 종료 처리됐어요`);
+      }
+    }
     markCgEdited(editCgId); // Firebase 덮어쓰기 방지 (10초)
   } else {
     cg._ts = Date.now(); // 동기화 충돌 해결(최신 우선)을 위한 저장 시각
@@ -4530,7 +4551,7 @@ function saveCg() {
 }
 
 function cgRowHTML(cg) {
-  const statMap={'근무중':'b-green','대기중':'b-amber','휴무':'b-gray'};
+  const statMap={'근무중':'b-green','대기중':'b-amber','휴무':'b-gray','종료':'b-gray'};
   return `
     <div class="pt-row">
       <div class="pt-top">
@@ -7024,188 +7045,122 @@ function renderReportLog() {
 
 
 
-function renderMembers() {
-  const q   = (document.getElementById('mem-search')?.value||'').trim().toLowerCase();
-  const flt = document.getElementById('mem-flt-status')?.value||'';
-  let list  = [...members];
-  if(flt) list = list.filter(m=>m.status===flt);
-  if(q)   list = list.filter(m=>
+// 오늘보다 이전 시작가능일은 자동으로 지움(휘발성 데이터 원칙). 뭔가 지워졌으면 true 반환
+function purgeExpiredQuickMatch() {
+  const today = todayStr();
+  const before = quickMatch.length;
+  quickMatch = quickMatch.filter(m => m.availableDate && m.availableDate >= today);
+  return quickMatch.length !== before;
+}
+
+function renderQuickMatch() {
+  if(purgeExpiredQuickMatch()) { localStorage.setItem('cnc_quickmatch', JSON.stringify(quickMatch)); save(); }
+
+  const q = (document.getElementById('qm-search')?.value||'').trim().toLowerCase();
+  let list = [...quickMatch];
+  if(q) list = list.filter(m=>
     (m.name||'').toLowerCase().includes(q)||
     (m.phone||'').includes(q)||
-    (m.cert||'').toLowerCase().includes(q)||
-    (m.certNo||'').includes(q)||
-    (m.specialty||'').toLowerCase().includes(q)
+    (m.region||'').toLowerCase().includes(q)
   );
-  const totalEl  = document.getElementById('mem-total');
-  const activeEl = document.getElementById('mem-active');
-  const feeEl    = document.getElementById('mem-fee-ok');
-  const certEl   = document.getElementById('mem-cert-count');
-  if(totalEl)  totalEl.textContent  = members.length;
-  if(activeEl) activeEl.textContent = members.filter(m=>m.status==='활동중').length;
-  if(feeEl)    feeEl.textContent    = members.filter(m=>m.feePaid).length;
-  if(certEl)   certEl.textContent   = members.filter(m=>m.cert).length;
-  const el = document.getElementById('member-list');
+  list.sort((a,b)=>(a.availableDate||'').localeCompare(b.availableDate||''));
+
+  const today = todayStr();
+  const soonCutoff = toLocalDateStr(new Date(Date.now() + 3*86400000));
+  const totalEl = document.getElementById('qm-total');
+  const todayEl = document.getElementById('qm-today');
+  const soonEl  = document.getElementById('qm-soon');
+  if(totalEl) totalEl.textContent = quickMatch.length;
+  if(todayEl) todayEl.textContent = quickMatch.filter(m=>m.availableDate===today).length;
+  if(soonEl)  soonEl.textContent  = quickMatch.filter(m=>m.availableDate && m.availableDate<=soonCutoff).length;
+
+  const el = document.getElementById('quickmatch-list');
   if(!list.length){
-    el.innerHTML=`<div class="empty"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>${q?`"${q}" 검색 결과 없음`:'등록된 협회 소속 간병인이 없어요'}</p></div>`;
+    el.innerHTML=`<div class="empty"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>${q?`"${q}" 검색 결과 없음`:'등록된 후보가 없어요'}</p></div>`;
     return;
   }
-  const sc={'활동중':'b-green','휴식중':'b-amber','탈퇴':'b-gray'};
-  el.innerHTML=list.map(m=>`
+  el.innerHTML=list.map(m=>{
+    const isToday = m.availableDate === today;
+    const isSoon  = !isToday && m.availableDate <= soonCutoff;
+    const dayLabel = getDayLabel(m.availableDate);
+    const dayShort = dayLabel ? dayLabel.replace('요일','') : '';
+    const dateBadgeClass = isToday ? 'b-green' : isSoon ? 'b-amber' : 'b-gray';
+    const dateBadgeText = isToday ? `${m.availableDate}(오늘)` : `${m.availableDate}(${dayShort})`;
+    return `
     <div class="pt-row">
       <div class="pt-top">
-        <div>
-          <div class="pt-name">${m.name}<span>${m.gender||''} ${m.age?m.age+'세':''}</span></div>
-          <div style="font-size:11px;color:var(--gray);margin-top:2px">가입일: ${m.joinDate||'—'} · 수정: ${m.updatedAt||'—'}</div>
-        </div>
-        <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-          <span class="badge ${sc[m.status]||'b-gray'}">${m.status||'—'}</span>
-          ${m.feePaid?`<span class="badge b-teal">회비✓</span>`:`<span class="badge b-red" style="background:var(--red-lt);color:var(--red)">회비미납</span>`}
-          ${m.cert?`<span class="badge b-blue" style="font-size:10px">${m.cert}</span>`:''}
-        </div>
+        <div><div class="pt-name">${m.name}</div>
+          <div style="font-size:11px;color:var(--gray);margin-top:2px">등록일: ${m.createdAt||'—'}</div></div>
+        <span class="badge ${dateBadgeClass}">${dateBadgeText}</span>
       </div>
       <div class="pt-meta">
         <span>📞 <b>${formatPhone(m.phone)||'—'}</b></span>
         <span>📍 ${m.region||'—'}</span>
-        <span>💼 경력 ${m.career||'—'}</span>
-        ${m.specialty?`<span>⭐ ${m.specialty}</span>`:''}
-        ${m.certNo?`<span>📋 ${m.certNo}</span>`:''}
       </div>
-      ${m.bankName?`<div style="font-size:11px;color:var(--gray);margin:.25rem 0">${m.bankName} ${m.bankAccount||''} (${m.bankHolder||''})</div>`:''}
-      ${m.memo?`<div style="font-size:11px;color:var(--gray);background:var(--surface2);border-radius:4px;padding:4px 8px;margin-top:4px">📝 ${m.memo}</div>`:''}
       <div class="pt-foot" style="margin-top:.5rem">
         <span></span>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-sm" onclick="openMemberModal('${m.id}')">수정</button>
-          <button class="btn btn-sm btn-red" onclick="deleteMember('${m.id}')">삭제</button>
-        </div>
+        <button class="btn btn-sm btn-red" onclick="deleteQuickMatch('${m.id}')">삭제</button>
       </div>
-    </div>`).join('');
-}
-
-function openMemberModal(id) {
-  editMemberId = id||null;
-  const m = id ? (members.find(x=>String(x.id)===String(id))||{}) : {};
-  const v = k=>m[k]||'';
-  document.getElementById('member-modal-title').textContent = id?'협회 간병인 수정':'협회 간병인 등록';
-  document.getElementById('member-form-body').innerHTML=`
-    <div class="card-hd" style="margin-bottom:.75rem"><span class="dot"></span>기본 정보</div>
-    <div class="g2">
-      <div class="field"><label>이름 <span class="req">*</span></label><input type="text" id="mem-name" value="${v('name')}" placeholder="홍길동"></div>
-      <div class="field"><label>성별</label>
-        <select id="mem-gender"><option value="">선택</option><option value="여성" ${v('gender')==='여성'?'selected':''}>여성</option><option value="남성" ${v('gender')==='남성'?'selected':''}>남성</option></select>
-      </div>
-      <div class="field"><label>생년월일 (6자리)</label><input type="text" id="mem-birth" value="${v('birth')}" placeholder="840321" maxlength="6" oninput="calcMemberAge()"></div>
-      <div class="field"><label>나이 <span style="font-size:10px;color:var(--teal)">(자동계산)</span></label><input type="text" id="mem-age" value="${v('age')}" readonly style="background:var(--surface2)"></div>
-      <div class="field"><label>연락처</label><input type="tel" id="mem-phone" value="${v('phone')}" placeholder="010-0000-0000"></div>
-      <div class="field"><label>거주지 (시·군·구)</label><input type="text" id="mem-region" value="${v('region')}" placeholder="서울시 강남구"></div>
-    </div>
-    <div class="hr"></div>
-    <div class="card-hd" style="margin-bottom:.75rem"><span class="dot"></span>협회 정보</div>
-    <div class="g2">
-      <div class="field"><label>가입일</label><input type="date" id="mem-joinDate" value="${v('joinDate')||todayStr()}"></div>
-      <div class="field"><label>활동 상태</label>
-        <select id="mem-status">
-          <option value="활동중" ${v('status')==='활동중'||!v('status')?'selected':''}>활동중</option>
-          <option value="휴식중" ${v('status')==='휴식중'?'selected':''}>휴식중</option>
-          <option value="탈퇴" ${v('status')==='탈퇴'?'selected':''}>탈퇴</option>
-        </select>
-      </div>
-    </div>
-    <label class="ck-wrap" style="margin-bottom:.875rem"><input type="checkbox" id="mem-feePaid" ${v('feePaid')?'checked':''} style="width:16px;height:16px;accent-color:var(--teal)"> 회비 납부 완료</label>
-    <div class="g2">
-      <div class="field"><label>자격증 종류</label>
-        <select id="mem-cert">
-          <option value="">없음</option>
-          <option value="요양보호사" ${v('cert')==='요양보호사'?'selected':''}>요양보호사</option>
-          <option value="간호조무사" ${v('cert')==='간호조무사'?'selected':''}>간호조무사</option>
-          <option value="사회복지사" ${v('cert')==='사회복지사'?'selected':''}>사회복지사</option>
-          <option value="간호사" ${v('cert')==='간호사'?'selected':''}>간호사</option>
-          <option value="기타" ${v('cert')==='기타'?'selected':''}>기타</option>
-        </select>
-      </div>
-      <div class="field"><label>자격증 번호</label><input type="text" id="mem-certNo" value="${v('certNo')}" placeholder="자격증 번호"></div>
-    </div>
-    <div class="hr"></div>
-    <div class="card-hd" style="margin-bottom:.75rem"><span class="dot"></span>경력 및 전문 분야</div>
-    <div class="g2">
-      <div class="field"><label>경력</label><input type="text" id="mem-career" value="${v('career')}" placeholder="예: 5년"></div>
-      <div class="field"><label>특화 분야</label><input type="text" id="mem-specialty" value="${v('specialty')}" placeholder="예: 재활, 치매, 중증"></div>
-    </div>
-    <div class="hr"></div>
-    <div class="card-hd" style="margin-bottom:.75rem"><span class="dot"></span>입금 계좌</div>
-    <div class="g3">
-      <div class="field"><label>은행명</label><input type="text" id="mem-bankName" value="${v('bankName')}" placeholder="국민은행"></div>
-      <div class="field"><label>계좌번호</label><input type="text" id="mem-bankAccount" value="${v('bankAccount')}" placeholder="000-000-000000"></div>
-      <div class="field"><label>예금주</label><input type="text" id="mem-bankHolder" value="${v('bankHolder')}" placeholder="홍길동"></div>
-    </div>
-    <div class="field"><label>메모</label><textarea id="mem-memo" style="min-height:55px">${v('memo')}</textarea></div>
-    <div style="display:flex;gap:8px;margin-top:1rem">
-      <button class="btn" style="flex:1;justify-content:center;background:var(--blue);color:#fff;border-color:var(--blue)" onclick="saveMember()">저장</button>
-      <button class="btn" onclick="closeOverlay('member-overlay')">취소</button>
     </div>`;
-  document.getElementById('member-overlay').classList.add('open');
-  if(v('birth')) calcMemberAge();
+  }).join('');
 }
 
-function calcMemberAge() {
-  const birth = document.getElementById('mem-birth')?.value||'';
-  const ageEl = document.getElementById('mem-age');
-  if(!ageEl) return;
-  if(birth.length<6){ageEl.value='';return;}
-  const yy=parseInt(birth.substring(0,2)),mm2=parseInt(birth.substring(2,4)),dd=parseInt(birth.substring(4,6));
-  const cy=new Date().getFullYear();
-  const fy=(2000+yy)>cy?1900+yy:2000+yy;
-  const bDate=new Date(fy,mm2-1,dd);const today2=new Date();
-  let age=today2.getFullYear()-bDate.getFullYear();
-  if(today2.getMonth()<mm2-1||(today2.getMonth()===mm2-1&&today2.getDate()<dd))age--;
-  ageEl.value=(age>0&&age<120)?age+'세':'';
+function openQuickMatchModal() {
+  editQuickMatchId = null;
+  const maxDate = toLocalDateStr(new Date(Date.now() + 7*86400000));
+  document.getElementById('quickmatch-form-body').innerHTML=`
+    <div class="field"><label>이름 <span class="req">*</span></label><input type="text" id="qm-name" placeholder="홍길동"></div>
+    <div class="field"><label>연락처</label><input type="tel" id="qm-phone" placeholder="010-0000-0000"></div>
+    <div class="field"><label>근무 가능 지역</label><input type="text" id="qm-region" placeholder="예: 강남·서초만 가능"></div>
+    <div class="field"><label>서비스 시작 가능일 <span class="req">*</span></label>
+      <input type="date" id="qm-availableDate" min="${todayStr()}" max="${maxDate}" value="${todayStr()}">
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">오늘부터 7일 이내만 등록할 수 있어요</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:1rem">
+      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveQuickMatch()">저장</button>
+      <button class="btn" onclick="closeOverlay('quickmatch-overlay')">취소</button>
+    </div>`;
+  document.getElementById('quickmatch-overlay').classList.add('open');
 }
 
-function saveMember() {
-  const name=document.getElementById('mem-name').value.trim();
-  if(!name){toast('이름은 필수입니다',true);return;}
-  const m={
-    id: editMemberId||Date.now(),
-    name, gender:document.getElementById('mem-gender').value,
-    birth:document.getElementById('mem-birth').value.trim(),
-    age:document.getElementById('mem-age').value.replace('세','').trim(),
-    phone:document.getElementById('mem-phone').value.trim(),
-    region:document.getElementById('mem-region').value.trim(),
-    joinDate:document.getElementById('mem-joinDate').value,
-    status:document.getElementById('mem-status').value,
-    feePaid:document.getElementById('mem-feePaid').checked,
-    cert:document.getElementById('mem-cert').value,
-    certNo:document.getElementById('mem-certNo').value.trim(),
-    career:document.getElementById('mem-career').value.trim(),
-    specialty:document.getElementById('mem-specialty').value.trim(),
-    bankName:document.getElementById('mem-bankName').value.trim(),
-    bankAccount:document.getElementById('mem-bankAccount').value.trim(),
-    bankHolder:document.getElementById('mem-bankHolder').value.trim(),
-    memo:document.getElementById('mem-memo').value.trim(),
-    updatedAt:new Date().toLocaleDateString('ko-KR'),
+function saveQuickMatch() {
+  const name = document.getElementById('qm-name').value.trim();
+  if(!name) { toast('이름은 필수입니다', true); return; }
+  const availableDate = document.getElementById('qm-availableDate').value;
+  if(!availableDate) { toast('서비스 시작 가능일은 필수입니다', true); return; }
+  const today = todayStr();
+  const maxDate = toLocalDateStr(new Date(Date.now() + 7*86400000));
+  if(availableDate < today || availableDate > maxDate) {
+    toast('빠른매칭은 오늘부터 7일 이내 시작 가능한 건만 등록할 수 있어요', true);
+    return;
+  }
+  const m = {
+    id: genId(),
+    name,
+    phone: document.getElementById('qm-phone').value.trim(),
+    region: document.getElementById('qm-region').value.trim(),
+    availableDate,
+    createdAt: todayStr(),
+    _ts: Date.now(),
   };
-  if(editMemberId){const idx=members.findIndex(x=>String(x.id)===String(editMemberId));if(idx>-1)members[idx]=Object.assign({},members[idx],m);else members.unshift(m);}
-  else members.unshift(m);
-  markMemberEdited(m.id);
-  saveMem();closeOverlay('member-overlay');renderMembers();
-  toast(`✅ ${name} 등록/수정 완료`);
+  quickMatch.unshift(m);
+  markQuickMatchEdited(m.id);
+  save(); closeOverlay('quickmatch-overlay'); renderQuickMatch();
+  toast(`✅ ${name} 님 등록 완료`);
 }
 
-function deleteMember(id){
+function deleteQuickMatch(id){
   if(!confirm('삭제할까요?'))return;
-  members=members.filter(m=>String(m.id)!==String(id));
-  saveMem();renderMembers();toast('삭제됐어요');
+  quickMatch=quickMatch.filter(m=>String(m.id)!==String(id));
+  save();renderQuickMatch();toast('삭제됐어요');
 }
 
-function downloadMembersCSV(){
-  const headers=['이름','성별','생년월일','나이','연락처','거주지','가입일','활동상태',
-    '회비납부','자격증','자격증번호','경력','특화분야','은행','계좌번호','예금주','메모'];
-  const rows=members.map(m=>[m.name||'',m.gender||'',m.birth||'',m.age||'',
-    String(m.phone||''),m.region||'',m.joinDate||'',m.status||'',
-    m.feePaid?'납부':'미납',m.cert||'',m.certNo||'',
-    m.career||'',m.specialty||'',m.bankName||'',m.bankAccount||'',m.bankHolder||'',m.memo||'']);
-  downloadFile('씨앤에이케어_협회간병인목록.csv',toCSV(headers,rows));
-  toast('✅ 협회 간병인 목록 다운로드 완료');
+function downloadQuickMatchExcel(){
+  purgeExpiredQuickMatch();
+  const headers=['이름','연락처','근무가능지역','서비스시작가능일','등록일'];
+  const rows=quickMatch.map(m=>[m.name||'',String(m.phone||''),m.region||'',m.availableDate||'',m.createdAt||'']);
+  downloadFile('씨앤에이케어_빠른매칭명단.csv',toCSV(headers,rows));
+  toast('✅ 빠른매칭 명단 다운로드 완료');
 }
 
 // ─── 블랙리스트 ───
