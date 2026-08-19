@@ -2029,10 +2029,13 @@ function resyncLastSyncedSnapshot() {
 }
 
 // ─── Firebase 실시간 리스너 ───
+let _fbReconnectTimer = null;
 function attachFirebaseListener() {
   if(!db) return;
   db.ref('cnc').off(); // 기존 리스너 제거 후 재연결
   db.ref('cnc').on('value', snap => {
+    // 정상적으로 데이터를 받았으므로 재연결 시도 타이머는 더 이상 필요 없음
+    if(_fbReconnectTimer) { clearTimeout(_fbReconnectTimer); _fbReconnectTimer = null; }
     if(_fbPause) return;
 
     const d = snap.val();
@@ -2343,8 +2346,15 @@ function attachFirebaseListener() {
       showSyncStatus('동기화됨');
     }
   }, err => {
-    showSyncStatus('연결 실패');
-    console.warn('Firebase 오류:', err);
+    // 실시간 갱신 연결이 끊긴 상태 — 화면엔 계속 예전 데이터가 남아있는데 티가 안 나는 게
+    // 제일 위험해서, 사라지지 않는 경고를 띄우고 자동으로 재연결을 계속 시도함
+    console.warn('Firebase 리스너 오류:', err);
+    showSyncStatus('연결 끊김');
+    if(_fbReconnectTimer) clearTimeout(_fbReconnectTimer);
+    _fbReconnectTimer = setTimeout(() => {
+      _fbReconnectTimer = null;
+      attachFirebaseListener(); // 재시도. 성공하면 위쪽 성공 콜백이 다시 '연결됨'으로 상태를 덮어씀
+    }, 15000);
   });
 }
 
@@ -2466,6 +2476,7 @@ function showSyncStatus(msg, isErr) {
   const isSaved   = msg.includes('저장됨');
   const isFail    = msg.includes('실패');
   const isOffline = msg.includes('오프라인');
+  const isConnLost = msg.includes('연결 끊김');
 
   if(isSaving) {
     el.textContent   = '☁️ 데이터베이스 저장 중...';
@@ -2473,6 +2484,9 @@ function showSyncStatus(msg, isErr) {
   } else if(isSaved) {
     el.textContent   = '✅ 데이터베이스 저장 완료!';
     el.style.background = '#0B7A6E';
+  } else if(isConnLost) {
+    el.textContent   = '🔴 실시간 연결이 끊겼어요 — 새로고침 해주세요';
+    el.style.background = '#dc2626';
   } else if(isFail) {
     el.textContent   = '❌ 데이터베이스 저장 실패!';
     el.style.background = '#dc2626';
@@ -2487,9 +2501,10 @@ function showSyncStatus(msg, isErr) {
   el.style.color   = '#fff';
   el.style.opacity = '1';
 
-  const duration = isFail ? 5000 : isSaving ? 10000 : isSaved ? 3000 : 1500;
+  // 연결 끊김 경고는 실수로 놓치지 않도록 자동으로 안 사라지게 함 (재연결 성공 시 attachFirebaseListener가 다른 상태 메시지로 덮어씀)
+  const duration = isConnLost ? null : isFail ? 5000 : isSaving ? 10000 : isSaved ? 3000 : 1500;
   if(el._hideTimer) clearTimeout(el._hideTimer);
-  el._hideTimer = setTimeout(()=>{ el.style.opacity='0'; }, duration);
+  if(duration !== null) el._hideTimer = setTimeout(()=>{ el.style.opacity='0'; }, duration);
 }
 
 // ─── TOAST ───
@@ -6307,11 +6322,24 @@ function setRptType(type) {
 
 function renderReport() {
   const q = (document.getElementById('rpt-search')?.value||'').trim().toLowerCase();
-  const matchedPts = patients.filter(p => p.status==='매칭완료' || (p.recruited && p.status!=='종료'));
-  const endedPts   = patients.filter(p => p.status==='종료');
+  let matchedPts = patients.filter(p => p.status==='매칭완료' || (p.recruited && p.status!=='종료'));
+  let endedPts   = patients.filter(p => p.status==='종료');
   // 교체보고: reportLogs에 replace 타입 기록 있는 환자
   const replacePtIds = [...new Set(reportLogs.filter(l=>l.type==='replace').map(l=>l.patientId))];
-  const replacePts = patients.filter(p=>replacePtIds.includes(String(p.id)));
+  let replacePts = patients.filter(p=>replacePtIds.includes(String(p.id)));
+
+  // 매칭보고: 서비스 시작일이 가장 최근인 환자가 위로 (= 가장 최근에 매칭되어 근무를 시작한 환자)
+  matchedPts.sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
+
+  // 교체보고: 그 환자의 가장 최근 교체보고 기록(id는 생성 시각 기반이라 클수록 최근) 순
+  const latestReplaceId = ptId => {
+    const logs = reportLogs.filter(l=>String(l.patientId)===String(ptId)&&l.type==='replace');
+    return logs.length ? Math.max(...logs.map(l=>Number(l.id)||0)) : 0;
+  };
+  replacePts.sort((a,b) => latestReplaceId(b.id) - latestReplaceId(a.id));
+
+  // 종료보고: 환자 종료일이 가장 최근인 환자가 위로
+  endedPts.sort((a,b) => (b.endDate||'').localeCompare(a.endDate||''));
 
   let list = [];
   if(rptType === 'all')     list = [...new Map([...matchedPts,...replacePts,...endedPts].map(p=>[p.id,p])).values()];
@@ -8939,6 +8967,11 @@ function startRemind() {
   setInterval(autoFillAllAttendance, 60 * 60 * 1000);
   // 5분마다 자동저장
   setInterval(autoSave, 5 * 60 * 1000);
+  // 실시간 연결이 오류 콜백조차 없이 조용히 끊기는 드문 경우까지 대비해서,
+  // 10분마다 리스너를 통째로 다시 연결함 (정상 연결 상태에서도 안전하게 반복 가능한 가벼운 작업)
+  setInterval(() => {
+    if(db && !_fbPause) attachFirebaseListener();
+  }, 10 * 60 * 1000);
   // 저장이 아직 서버에 확정되지 않은 상태에서 탭을 닫으려 하면 브라우저 기본 경고창 표시
   // (경고 문구 자체는 브라우저가 보안상 자체 문구로 대체하므로 커스텀 텍스트는 무시됨)
   window.addEventListener('beforeunload', function(e) {
