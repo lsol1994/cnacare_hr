@@ -788,11 +788,15 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         </div>
         <div class="field"><label>금액 (일급, 원)</label><input type="number" id="p-pay" placeholder="130000"></div>
       </div>
-      <div class="field"><label>요청사항</label>
+      <div class="field"><label>요청사항 <span style="font-size:10px;font-weight:400;color:var(--gray)">(환자·업체 전달사항)</span></label>
         <textarea id="p-request" placeholder="예: 깔끔한 여자 간병사, 5일 병실 입실 예정" oninput="updateNPPreview()"></textarea>
       </div>
-      <div class="field"><label>환자 메모 <span style="font-size:10px;font-weight:400;color:var(--gray)">(내부관리용, 공고 미노출)</span></label>
-        <textarea id="p-memo" placeholder="이 환자에 대한 메모를 남겨주세요..."></textarea>
+    </div>
+
+    <div class="card" style="border-color:var(--teal-mid);background:var(--teal-lt)">
+      <div class="card-hd"><span class="dot"></span>📝 협회 메모 <span style="font-size:10px;font-weight:400;color:var(--gray);text-transform:none;letter-spacing:0">(내부관리용, 공고 미노출)</span></div>
+      <div class="field" style="margin-bottom:0">
+        <textarea id="p-memo" placeholder="협회 직원끼리 참고할 메모를 남겨주세요..."></textarea>
       </div>
     </div>
   </div>
