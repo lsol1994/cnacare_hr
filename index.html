@@ -1143,7 +1143,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 </div>
 
 <!-- 빠른매칭 후보 등록 모달 -->
-<div class="overlay" id="quickmatch-overlay" onclick="closeOverlay('quickmatch-overlay',event)">
+<div class="overlay" id="quickmatch-overlay">
   <div class="modal" style="max-width:440px">
     <div class="modal-hd">
       <div class="modal-title">빠른매칭 후보 등록</div>
@@ -1182,7 +1182,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 </div>
 
 <!-- 블랙리스트 등록/수정 모달 -->
-<div class="overlay" id="blacklist-overlay" onclick="closeOverlay('blacklist-overlay',event)">
+<div class="overlay" id="blacklist-overlay">
   <div class="modal" style="max-width:520px">
     <div class="modal-hd">
       <div class="modal-title" id="blacklist-modal-title" style="color:var(--red)">블랙리스트 등록</div>
@@ -1195,7 +1195,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 </div>
 
 <!-- 매칭 간병인 없는 환자 진단 결과 -->
-<div class="overlay" id="audit-overlay" onclick="closeOverlay('audit-overlay',event)">
+<div class="overlay" id="audit-overlay">
   <div class="modal" style="max-width:760px">
     <div class="modal-hd">
       <div class="modal-title" style="color:var(--red)">🔍 매칭 간병인 없는 환자 진단 결과</div>
@@ -1582,7 +1582,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 </div>
 
 <!-- ══ 간병일지 선택 모달 ══ -->
-<div class="overlay" id="journal-overlay" onclick="closeOverlay('journal-overlay',event)">
+<div class="overlay" id="journal-overlay">
   <div class="modal" style="max-width:480px">
     <div class="modal-hd">
       <div class="modal-title" id="journal-modal-title">간병일지 다운로드</div>
@@ -1607,14 +1607,14 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 </div>
 
 <!-- ══ PATIENT DETAIL MODAL ══ -->
-<div class="overlay" id="pt-overlay" onclick="closeOverlay('pt-overlay',event)">
+<div class="overlay" id="pt-overlay">
   <div class="modal"><div class="modal-hd"><div class="modal-title" id="pt-modal-title">환자 상세</div>
     <button class="btn btn-icon" onclick="closeOverlay('pt-overlay')"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div><div id="pt-modal-body"></div></div>
 </div>
 
 <!-- ══ CAREGIVER MODAL ══ -->
-<div class="overlay" id="dup-cg-overlay" onclick="closeOverlay('dup-cg-overlay',event)">
+<div class="overlay" id="dup-cg-overlay">
   <div class="overlay-card" style="max-width:560px;max-height:85vh;overflow-y:auto" onclick="event.stopPropagation()">
     <div class="overlay-hd">
       <h3>👥 중복 간병인 정리</h3>
@@ -1627,7 +1627,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 </div>
 
 <!-- ══ 연장 모달 ══ -->
-<div class="overlay" id="extend-overlay" onclick="closeOverlay('extend-overlay',event)">
+<div class="overlay" id="extend-overlay">
   <div class="overlay-card" style="max-width:400px" onclick="event.stopPropagation()">
     <div class="overlay-hd">
       <h3 id="extend-title">📅 서비스 연장</h3>
@@ -1640,7 +1640,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 </div>
 
 <!-- ══ 예정 교체 간병인 등록 모달 ══ -->
-<div class="overlay" id="replace-overlay" onclick="closeOverlay('replace-overlay',event)">
+<div class="overlay" id="replace-overlay">
   <div class="overlay-card" style="max-width:420px" onclick="event.stopPropagation()">
     <div class="overlay-hd">
       <h3 id="replace-title">🔜 예정 교체 간병인</h3>
@@ -1652,7 +1652,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   </div>
 </div>
 
-<div class="overlay" id="cg-overlay" onclick="closeOverlay('cg-overlay',event)">
+<div class="overlay" id="cg-overlay">
   <div class="modal" style="max-width:680px">
     <div class="modal-hd">
       <div class="modal-title" id="cg-modal-title">간병인 등록</div>
