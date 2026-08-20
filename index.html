@@ -2081,8 +2081,24 @@ function save() {
       _fbPause = true;
       db.ref('cnc').off();
       showSyncStatus('저장 중...');
+      // 안전장치: update()의 응답이 네트워크 문제 등으로 영영 안 오면 _fbPause가 계속 true로
+      // 남아서 리스너가 다시는 안 붙는(=다른 기기 변경사항을 영영 못 받는) 심각한 문제가 있었음.
+      // 일정 시간 지나도 응답이 없으면 강제로 복구시킴
+      let _writeSettled = false;
+      const forceRecoverTimer = setTimeout(() => {
+        if(_writeSettled) return;
+        _writeSettled = true;
+        console.warn('Firebase 저장 응답이 오래 걸려서 강제로 리스너를 복구함');
+        _fbPause = false;
+        _pendingSave = false;
+        attachFirebaseListener();
+        showSyncStatus('연결 끊김');
+      }, 20000);
       db.ref('cnc').update(updates)
         .then(() => {
+          if(_writeSettled) return; // 이미 강제복구 타이머가 실행된 뒤라면 중복 처리 안 함
+          _writeSettled = true;
+          clearTimeout(forceRecoverTimer);
           commitSyncSnapshot(pendingById, pendingMisc);
           showSyncStatus('저장됨');
           _pendingSave = false;
@@ -2092,6 +2108,9 @@ function save() {
             attachFirebaseListener();
           }, 2000); // 1초→2초로 늘려 구 캐시 스냅샷 수신 방지
         }).catch(e => {
+          if(_writeSettled) return;
+          _writeSettled = true;
+          clearTimeout(forceRecoverTimer);
           _fbPause = false;
           _pendingSave = false;
           attachFirebaseListener();
@@ -2492,11 +2511,11 @@ function loginWithEmail() {
   }
   btnEl.disabled = true;
   statusEl.textContent = '로그인 중...';
-  // 로그인 유지 방식을 "이 탭에서만" 유지되도록 설정 — 탭이나 브라우저를 닫으면
-  // 로그인이 자동으로 풀림 (기본값은 브라우저를 완전히 꺼도 계속 로그인 상태가 유지돼서,
-  // 공용 계정을 여러 컴퓨터에서 쓰는 경우 위험할 수 있었음)
-  firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION)
-    .then(() => firebase.auth().signInWithEmailAndPassword(email, password))
+  // 예전엔 "탭 닫으면 로그아웃"(SESSION 방식)으로 되어있었는데, 모바일/PWA에서는 앱을 잠깐
+  // 백그라운드로 보내기만 해도 브라우저가 세션 저장소를 비워버리는 경우가 많아서, 그때마다
+  // 로그인이 풀려 저장이 조용히 실패하는 심각한 문제가 있었음(데이터가 하나도 안 올라감).
+  // 그래서 기본값(LOCAL 방식 — 브라우저를 꺼도 로그인 유지)으로 되돌림
+  firebase.auth().signInWithEmailAndPassword(email, password)
     .catch(e => {
       btnEl.disabled = false;
       statusEl.textContent = '';
