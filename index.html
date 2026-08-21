@@ -2319,11 +2319,27 @@ function attachFirebaseListener() {
           // 보험 정보는 승자와 무관하게, 값이 있는 쪽을 항상 보존
           if(local.insuranceActive && !winner.insuranceActive) {
             winner.insuranceActive     = local.insuranceActive;
+            winner.insuranceStartDate  = local.insuranceStartDate;
             winner.insuranceExpiry     = local.insuranceExpiry;
             winner.insuranceMemo       = local.insuranceMemo;
             winner.insuranceTerminated = local.insuranceTerminated;
           }
           if(local._snapshot && !winner._snapshot) winner._snapshot = local._snapshot;
+
+          // 과거 근무건 보험 이력(insuranceHistory)도 assignHistory와 마찬가지로 계속
+          // 쌓이기만 해야 하는 기록이라, 승자와 무관하게 양쪽을 항상 합쳐서 보존함
+          const localInsHist = local.insuranceHistory || [];
+          const dcInsHist    = dc.insuranceHistory    || [];
+          if(localInsHist.length || dcInsHist.length) {
+            const insHistKey = h => String(h.id || (String(h.patientId)+'|'+(h.archivedAt||'')));
+            const seenIns = new Set();
+            const combinedIns = [];
+            [...localInsHist, ...dcInsHist].forEach(h => {
+              const k = insHistKey(h);
+              if(!seenIns.has(k)) { seenIns.add(k); combinedIns.push(h); }
+            });
+            winner.insuranceHistory = combinedIns;
+          }
 
           // 과거 담당 환자 이력(assignHistory)은 계속 쌓이기만 해야 하는 기록이라,
           // 승자가 어느 쪽이든 상관없이 양쪽을 항상 합쳐서 보존함 (유실 절대 방지)
@@ -2954,15 +2970,42 @@ function parseVendorMessageForRegistration(text) {
   if(durMatch) duration = durMatch[1] + '일 이상';
 
   // 서비스시작일: "2026.08.21일" → "2026-08-21"
+  // 입실시간은 날짜 뒤에 같이 적혀있거나("2026-08-21 14:00", "8/21 오후 2시") 별도로
+  // "입실시간:"/"시작시간:" 항목으로 오는 경우가 있어 둘 다 인식해서 채워줌
+  // (예전엔 날짜만 뽑고 시간은 항상 무시해서, 메시지에 시간이 적혀 있어도 입실시간 칸이 채워지지 않는 오류가 있었음)
   const startRaw = getLine('서비스시작일', '입실일', '시작일', '간병시작일');
   let startDate = '';
   const dMatch = startRaw.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
   if(dMatch) startDate = dMatch[1] + '-' + dMatch[2].padStart(2,'0') + '-' + dMatch[3].padStart(2,'0');
+  const startTimeTail = dMatch ? startRaw.slice(dMatch.index + dMatch[0].length) : startRaw;
+  const startTime = extractTimeFromText(startTimeTail) || extractTimeFromText(getLine('입실시간', '시작시간'));
 
   const pay = getLine('금액', '일당', '가격').replace(/[^\d]/g,'');
   const request = getLine('요청사항', '요청');
 
-  return { name, gender, age, hospital, room, contact, diagnosis, height, weight, duration, startDate, pay, request };
+  return { name, gender, age, hospital, room, contact, diagnosis, height, weight, duration, startDate, startTime, pay, request };
+}
+
+// 텍스트에서 시간 표현을 찾아 "HH:MM"(24시간제)으로 변환. 못 찾으면 빈 문자열 반환.
+// 지원 형식: "14:00", "14시", "14시 30분", "오후 2시", "오전 9시 30분"
+function extractTimeFromText(str) {
+  if(!str) return '';
+  str = String(str);
+  let m = str.match(/(오전|오후)\s*(\d{1,2})\s*시\s*(?:(\d{1,2})\s*분)?/);
+  if(m) {
+    let h = parseInt(m[2]); const min = parseInt(m[3]||0);
+    if(m[1]==='오후' && h!==12) h += 12;
+    if(m[1]==='오전' && h===12) h = 0;
+    return String(h).padStart(2,'0')+':'+String(min).padStart(2,'0');
+  }
+  m = str.match(/\b([01]?\d|2[0-3])\s*:\s*([0-5]\d)\b/);
+  if(m) return m[1].padStart(2,'0')+':'+m[2];
+  m = str.match(/(\d{1,2})\s*시\s*(?:(\d{1,2})\s*분)?/);
+  if(m) {
+    const h = parseInt(m[1]); const min = parseInt(m[2]||0);
+    if(h>=0 && h<=23) return String(h).padStart(2,'0')+':'+String(min).padStart(2,'0');
+  }
+  return '';
 }
 
 function applyVendorMessageToForm() {
@@ -2980,6 +3023,7 @@ function applyVendorMessageToForm() {
   if(p.height) document.getElementById('p-height').value = p.height;
   if(p.weight) document.getElementById('p-weight').value = p.weight;
   if(p.startDate) document.getElementById('p-start-date').value = p.startDate;
+  if(p.startTime) document.getElementById('p-start-time').value = p.startTime;
   if(p.pay) document.getElementById('p-pay').value = p.pay;
   if(p.request) document.getElementById('p-request').value = p.request;
   if(p.duration) {
@@ -4732,6 +4776,7 @@ function saveCg() {
           pt.caregiverName = '';
           markPtEdited(pt.id);
         }
+        syncInsuranceForPatientChange(cgObj, before.patientId, '', pt ? pt.name : ''); // 배상보험도 이번 근무건 이력으로 보관
         cgObj.patientId = '';
         cg.patientId = ''; // 폼에서 읽은 원본 변수도 같이 비워야, 아래쪽 "환자 연결" 블록이 이 patientId로 재매칭하지 않음
         toast(`ℹ️ ${cgObj.name} 님 매칭이 자동으로 해제되고, 환자도 종료 처리됐어요`);
@@ -6259,7 +6304,15 @@ function confirmEarlyTerminate(cgId) {
     endDate,
     endTime,
     reason,
-    snapshotAt:    new Date().toLocaleDateString('ko-KR')
+    snapshotAt:    new Date().toLocaleDateString('ko-KR'),
+    // 종료취소 시 배상보험도 그대로 복원할 수 있도록, 이력으로 넘기기 전 현재 상태를 미리 보관
+    insurance: {
+      active:     cg.insuranceActive || false,
+      startDate:  cg.insuranceStartDate || '',
+      expiry:     cg.insuranceExpiry || '',
+      memo:       cg.insuranceMemo || '',
+      terminated: cg.insuranceTerminated || false,
+    }
   };
 
   // 연결된 환자 상태도 저장
@@ -6290,6 +6343,12 @@ function confirmEarlyTerminate(cgId) {
   } else {
     cg.endDate = endDate;
     cg.endTime = endTime;
+  }
+  // 배상보험도 이번에 종료된 근무 건의 기록으로 이력에 보관 (patientId를 지우기 전에
+  // 먼저 정리해야, 어느 환자 건이었는지 정보가 유실되지 않고 "과거 근무건 보험 이력"에 남음
+  syncInsuranceForPatientChange(cg, cg.patientId, '', pt ? pt.name : '');
+  if(cg.insuranceHistory && cg.insuranceHistory.length) {
+    cg.earlyEndSnapshot.archivedInsuranceHistoryId = cg.insuranceHistory[0].id; // 종료취소 시 중복 방지용
   }
   cg.patientId  = ''; // 정상 연결 해제 (중도종료 환자는 earlyEndPatientId로 보존)
   if(reason) cg.feedback = (cg.feedback ? cg.feedback + ' / ' : '') + '[중도종료] ' + reason;
@@ -6424,6 +6483,20 @@ function cancelEarlyTerminate(cgId) {
     cg.feedback = cg.feedback.split(' / ')
       .filter(f=>!f.startsWith('[중도종료]'))
       .join(' / ');
+  }
+
+  // 배상보험도 중도종료 전 상태로 복원 (종료 처리 때 "과거 근무건 이력"으로 넘어갔던
+  // 항목은 다시 현재 진행중인 건으로 되돌아온 것이므로, 중복되지 않게 이력에서는 제거)
+  if(snap && snap.insurance) {
+    cg.insuranceActive    = snap.insurance.active;
+    cg.insuranceStartDate = snap.insurance.startDate;
+    cg.insuranceExpiry    = snap.insurance.expiry;
+    cg.insuranceMemo      = snap.insurance.memo;
+    cg.insuranceTerminated= snap.insurance.terminated;
+    cg.insurancePatientId = ptId;
+    if(snap.archivedInsuranceHistoryId && cg.insuranceHistory) {
+      cg.insuranceHistory = cg.insuranceHistory.filter(h => String(h.id) !== String(snap.archivedInsuranceHistoryId));
+    }
   }
 
   // ── 환자 복원 ──
@@ -9090,8 +9163,8 @@ function syncInsuranceForPatientChange(cg, oldPatientId, newPatientId, prevPatie
   newPatientId = newPatientId ? String(newPatientId) : '';
   if(oldPatientId === newPatientId) return; // 같은 환자 그대로면(단순 정보 수정 등) 유지
 
-  // 이전에 뭔가 등록되어 있었으면(가입여부/메모/만료일 중 하나라도) 이력에 보관
-  if(cg.insuranceActive || cg.insuranceExpiry || cg.insuranceMemo) {
+  // 이전에 뭔가 등록되어 있었으면(가입여부/메모/만료일/가입일 중 하나라도) 이력에 보관
+  if(cg.insuranceActive || cg.insuranceExpiry || cg.insuranceMemo || cg.insuranceStartDate) {
     if(!cg.insuranceHistory) cg.insuranceHistory = [];
     const oldPt = oldPatientId ? patients.find(p=>String(p.id)===oldPatientId) : null;
     cg.insuranceHistory.unshift({
@@ -9099,6 +9172,7 @@ function syncInsuranceForPatientChange(cg, oldPatientId, newPatientId, prevPatie
       patientId: oldPatientId,
       patientName: oldPt ? oldPt.name : (prevPatientNameOverride || ''),
       active: cg.insuranceActive || false,
+      startDate: cg.insuranceStartDate || '',
       expiry: cg.insuranceExpiry || '',
       memo: cg.insuranceMemo || '',
       terminated: cg.insuranceTerminated || false,
@@ -9107,6 +9181,7 @@ function syncInsuranceForPatientChange(cg, oldPatientId, newPatientId, prevPatie
   }
   // 새 배정을 위해 현재 보험 상태 초기화(=이 건은 "가입전"부터 다시 시작)
   cg.insuranceActive = false;
+  cg.insuranceStartDate = '';
   cg.insuranceExpiry = '';
   cg.insuranceMemo = '';
   cg.insuranceTerminated = false;
@@ -9122,7 +9197,42 @@ function migrateInsuranceDataOnce() {
   const today = new Date(); today.setHours(0,0,0,0);
   let changed = false;
   caregivers.forEach(cg => {
-    if(!cg.patientId) return; // 매칭된 환자가 없으면 정리할 필요 없음
+    if(!cg.patientId) {
+      // 지금은 매칭된 환자가 없는(종료/재사용대기) 간병인인데, "과거 근무건 보험 이력"
+      // 관리가 생기기 전에 입력해뒀던 보험 정보가 정리되지 못하고 "현재" 칸에 그대로
+      // 남아있는 경우 — earlyEndPatientId(중도종료 시 보존) → insurancePatientId →
+      // assignHistory 최근 기록 순으로 "누구 것이었는지" 추정해서, 지금이라도 환자별
+      // 과거 보험 이력으로 옮겨줌 (patientId===newPatientId=='' 이라 syncInsuranceForPatientChange가
+      // 그냥 넘어가버리는 경우까지 대비해 여기서는 직접 이력에 기록함)
+      const hasCurrentIns = cg.insuranceActive || cg.insuranceExpiry || cg.insuranceMemo || cg.insuranceStartDate;
+      if(hasCurrentIns) {
+        const lastAssign = (cg.assignHistory||[])[0];
+        const guessId  = cg.earlyEndPatientId || cg.insurancePatientId || (lastAssign ? String(lastAssign.patientId) : '') || '';
+        const guessPt  = guessId ? patients.find(p=>String(p.id)===guessId) : null;
+        const guessName = guessPt ? guessPt.name
+          : (lastAssign && String(lastAssign.patientId)===guessId ? lastAssign.patientName : '');
+        if(!cg.insuranceHistory) cg.insuranceHistory = [];
+        cg.insuranceHistory.unshift({
+          id: genId(),
+          patientId: guessId,
+          patientName: guessName,
+          active: cg.insuranceActive || false,
+          startDate: cg.insuranceStartDate || '',
+          expiry: cg.insuranceExpiry || '',
+          memo: cg.insuranceMemo || '',
+          terminated: cg.insuranceTerminated || false,
+          archivedAt: todayStr(),
+        });
+        cg.insuranceActive = false;
+        cg.insuranceStartDate = '';
+        cg.insuranceExpiry = '';
+        cg.insuranceMemo = '';
+        cg.insuranceTerminated = false;
+        cg.insurancePatientId = '';
+        changed = true;
+      }
+      return;
+    }
     if(cg.insurancePatientId) {
       if(String(cg.insurancePatientId) !== String(cg.patientId)) {
         syncInsuranceForPatientChange(cg, cg.insurancePatientId, cg.patientId);
@@ -9205,6 +9315,7 @@ function renderInsurance() {
           <div style="font-size:13px;font-weight:700">${c.name}</div>
           <div style="font-size:11px;color:var(--gray);margin-top:2px">
             ${c.insuranceActive?'✅ 가입':'❌ 미가입'}
+            ${c.insuranceStartDate?'· 가입일 '+c.insuranceStartDate:''}
             ${c.insuranceExpiry?'· 만료 '+c.insuranceExpiry:''}
           </div>
           ${c.insuranceMemo?`<div style="font-size:11px;color:var(--teal);margin-top:2px;font-family:var(--mono)">🔖 ${c.insuranceMemo}</div>`:''}
@@ -9229,9 +9340,12 @@ function renderInsurance() {
         </button>
         <div id="ins-hist-${c.id}" style="display:none;margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm)">
           ${c.insuranceHistory.map(h => `
-            <div style="font-size:11px;color:var(--gray);padding:4px 0;border-bottom:1px solid var(--border)">
-              <b style="color:var(--black)">${h.patientName||'(환자 정보 없음)'}</b> · ${h.active?'가입':'미가입'}${h.expiry?' · 만료 '+h.expiry:''}${h.terminated?' · 만료처리됨':''}
-              ${h.memo?`<div style="color:var(--teal);font-family:var(--mono);margin-top:2px">🔖 ${h.memo}</div>`:''}
+            <div style="font-size:11px;color:var(--gray);padding:4px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+              <div style="flex:1;min-width:0">
+                <b style="color:var(--black)">${h.patientName||'(환자 정보 없음)'}</b> · ${h.active?'가입':'미가입'}${h.startDate?' · 가입일 '+h.startDate:''}${h.expiry?' · 만료 '+h.expiry:''}${h.terminated?' · 만료처리됨':''}
+                ${h.memo?`<div style="color:var(--teal);font-family:var(--mono);margin-top:2px">🔖 ${h.memo}</div>`:''}
+              </div>
+              <button class="btn btn-sm" style="font-size:10px;padding:2px 7px;flex-shrink:0" onclick="editInsuranceHistory('${c.id}','${h.id}')">수정</button>
             </div>`).join('')}
         </div>
       </div>` : ''}
@@ -9253,6 +9367,7 @@ function editInsurance(cgId) {
   if(!cg) return;
   // 인라인 수정 팝업
   const active = !!cg.insuranceActive;
+  const startDate = cg.insuranceStartDate||'';
   const expiry = cg.insuranceExpiry||'';
   document.getElementById('cg-modal-title').textContent = cg.name+' — 배상보험 관리';
   document.getElementById('cg-form-body').innerHTML=`
@@ -9265,6 +9380,10 @@ function editInsurance(cgId) {
         <input type="checkbox" id="ins-active" ${active?'checked':''} style="width:16px;height:16px;accent-color:var(--teal)">
         배상보험 가입됨
       </label>
+    </div>
+    <div class="field">
+      <label>보험 가입일</label>
+      <input type="date" id="ins-start" value="${startDate}">
     </div>
     <div class="field">
       <label>보험 만료일 <span style="font-size:10px;font-weight:400;color:var(--gray)">(해지 리마인드 기준일)</span></label>
@@ -9292,11 +9411,68 @@ function terminateInsurance(cgId, checked) {
 function saveInsurance(cgId) {
   const cg = caregivers.find(c=>String(c.id)===cgId);
   if(!cg) return;
-  cg.insuranceActive = document.getElementById('ins-active').checked;
-  cg.insuranceExpiry = document.getElementById('ins-expiry').value;
-  cg.insuranceMemo   = document.getElementById('ins-memo').value.trim();
+  cg.insuranceActive    = document.getElementById('ins-active').checked;
+  cg.insuranceStartDate = document.getElementById('ins-start').value;
+  cg.insuranceExpiry    = document.getElementById('ins-expiry').value;
+  cg.insuranceMemo      = document.getElementById('ins-memo').value.trim();
   save(); closeOverlay('cg-overlay'); renderInsurance();
   toast('✅ 배상보험 정보 저장됐어요');
+}
+
+// 과거 근무건 보험 이력(insuranceHistory) 항목을 개별 수정
+function editInsuranceHistory(cgId, histId) {
+  const cg = caregivers.find(c=>String(c.id)===cgId);
+  if(!cg || !cg.insuranceHistory) return;
+  const h = cg.insuranceHistory.find(x=>String(x.id)===String(histId));
+  if(!h) return;
+  document.getElementById('cg-modal-title').textContent = (h.patientName||'(환자 정보 없음)')+' — 과거 배상보험 이력 수정';
+  document.getElementById('cg-form-body').innerHTML=`
+    <div style="font-size:13px;color:var(--gray);margin-bottom:1rem;line-height:1.7">
+      과거 근무건(${h.patientName||'환자 정보 없음'})의 배상보험 기록을 수정합니다.
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:13px;font-weight:600;letter-spacing:0;cursor:pointer">
+        <input type="checkbox" id="ins-h-active" ${h.active?'checked':''} style="width:16px;height:16px;accent-color:var(--teal)">
+        배상보험 가입됨
+      </label>
+    </div>
+    <div class="field">
+      <label>보험 가입일</label>
+      <input type="date" id="ins-h-start" value="${h.startDate||''}">
+    </div>
+    <div class="field">
+      <label>보험 만료일</label>
+      <input type="date" id="ins-h-expiry" value="${h.expiry||''}">
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:13px;font-weight:600;letter-spacing:0;cursor:pointer">
+        <input type="checkbox" id="ins-h-terminated" ${h.terminated?'checked':''} style="width:16px;height:16px;accent-color:var(--teal)">
+        만료처리 완료
+      </label>
+    </div>
+    <div class="field">
+      <label>보험사 / 보험번호 (선택)</label>
+      <input type="text" id="ins-h-memo" value="${h.memo||''}">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:1rem">
+      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveInsuranceHistory('${cgId}','${histId}')">저장</button>
+      <button class="btn" onclick="closeOverlay('cg-overlay')">취소</button>
+    </div>`;
+  document.getElementById('cg-overlay').classList.add('open');
+}
+
+function saveInsuranceHistory(cgId, histId) {
+  const cg = caregivers.find(c=>String(c.id)===cgId);
+  if(!cg || !cg.insuranceHistory) return;
+  const h = cg.insuranceHistory.find(x=>String(x.id)===String(histId));
+  if(!h) return;
+  h.active     = document.getElementById('ins-h-active').checked;
+  h.startDate  = document.getElementById('ins-h-start').value;
+  h.expiry     = document.getElementById('ins-h-expiry').value;
+  h.terminated = document.getElementById('ins-h-terminated').checked;
+  h.memo       = document.getElementById('ins-h-memo').value.trim();
+  save(); closeOverlay('cg-overlay'); renderInsurance();
+  toast('✅ 과거 보험 이력이 수정됐어요');
 }
 function startRemind() {
   if(remindTimer) clearInterval(remindTimer);
@@ -9503,6 +9679,7 @@ function checkAutoEnd() {
     if(isReturningCg) saveToAssignHistory(cg);
     cg.workStatus = isReturningCg ? '대기중' : '종료';
     if(isReturningCg) {
+      syncInsuranceForPatientChange(cg, cg.patientId, '', pt ? pt.name : ''); // 배상보험도 이번 근무건 이력으로 보관 (patientId 지우기 전에 먼저 정리)
       cg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
       cg._returnedToPoolAt = cg.endDate; // 재처리 방지용 플래그 (endDate는 캘린더 계산을 위해 그대로 유지)
     }
@@ -9596,6 +9773,7 @@ function checkAutoEnd() {
       if(isReturningCg) {
         cg.earlyEndPatientId = String(pt.id); // "종료취소"가 이 경로로 끝난 경우도 복원할 수 있도록
         saveToAssignHistory(cg);
+        syncInsuranceForPatientChange(cg, cg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관 (patientId 지우기 전에 먼저 정리)
         cg.workStatus = '대기중';
         cg.patientId  = '';
         cg._returnedToPoolAt = cg.endDate;
