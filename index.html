@@ -9362,7 +9362,10 @@ function renderInsuranceSearchResults(el, year, month) {
           </div>
           ${r.memo ? `<div style="font-size:11px;color:var(--teal);margin-top:2px;font-family:var(--mono)">🔖 ${r.memo}</div>` : ''}
         </div>
-        <button class="btn btn-sm" onclick="${r.type==='current' ? `editInsurance('${r.cgId}')` : `editInsuranceHistory('${r.cgId}','${r.histId}')`}">수정</button>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-sm" onclick="${r.type==='current' ? `editInsurance('${r.cgId}')` : `editInsuranceHistory('${r.cgId}','${r.histId}')`}">수정</button>
+          ${r.type==='history' ? `<button class="btn btn-sm btn-red" onclick="deleteInsuranceHistory('${r.cgId}','${r.histId}')">삭제</button>` : ''}
+        </div>
       </div>`).join('');
 }
 
@@ -9473,7 +9476,10 @@ function renderInsurance() {
               <b style="color:var(--black)">${h.patientName||'(환자 정보 없음)'}</b> · ${h.active?'가입':'미가입'}${h.startDate?' · 가입일 '+h.startDate:''}${h.expiry?' · 만료 '+h.expiry:''}${h.terminated?' · 만료처리됨':''}
               ${h.memo?`<div style="color:var(--teal);font-family:var(--mono);margin-top:2px">🔖 ${h.memo}</div>`:''}
             </div>
-            <button class="btn btn-sm" style="font-size:10px;padding:2px 7px;flex-shrink:0" onclick="editInsuranceHistory('${c.id}','${h.id}')">수정</button>
+            <div style="display:flex;gap:4px;flex-shrink:0">
+              <button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="editInsuranceHistory('${c.id}','${h.id}')">수정</button>
+              <button class="btn btn-sm btn-red" style="font-size:10px;padding:2px 7px" onclick="deleteInsuranceHistory('${c.id}','${h.id}')">삭제</button>
+            </div>
           </div>`).join('')}
       </div>` : ''}
     </div>`;
@@ -9605,6 +9611,19 @@ function saveInsuranceHistory(cgId, histId) {
   h.memo       = document.getElementById('ins-h-memo').value.trim();
   save(); closeOverlay('cg-overlay'); renderInsurance();
   toast('✅ 과거 보험 이력이 수정됐어요');
+}
+
+// 과거 근무건 보험 이력 한 건 삭제 (잘못 추가됐거나 더 이상 필요 없는 기록 정리용)
+function deleteInsuranceHistory(cgId, histId) {
+  const cg = caregivers.find(c=>String(c.id)===cgId);
+  if(!cg || !cg.insuranceHistory) return;
+  const h = cg.insuranceHistory.find(x=>String(x.id)===String(histId));
+  if(!h) return;
+  const label = h.patientName ? `'${h.patientName}' 건` : '이 기록';
+  if(!confirm(`${cg.name}님의 ${label}(과거 배상보험 이력)을 삭제할까요?\n삭제하면 되돌릴 수 없어요.`)) return;
+  cg.insuranceHistory = cg.insuranceHistory.filter(x=>String(x.id)!==String(histId));
+  save(); renderInsurance();
+  toast('🗑️ 과거 보험 이력이 삭제됐어요');
 }
 
 // 과거 근무건 보험 이력을 새로 수동 추가 (자동으로 근무건이 넘어갈 때뿐 아니라,
