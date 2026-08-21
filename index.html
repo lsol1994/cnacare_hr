@@ -1051,13 +1051,23 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   <!-- 패널: 배상보험 현황 (기존 카드 내용 그대로) -->
   <div id="cg-panel-ins" style="display:none">
     <div class="card" style="margin-bottom:1rem">
-      <div class="card-hd" style="justify-content:space-between">
+      <div class="card-hd" style="justify-content:space-between;flex-wrap:wrap">
         <div><span class="dot"></span>🛡 배상보험 현황</div>
         <div style="display:flex;gap:5px;flex-wrap:wrap">
           <button id="ins-flt-all"     class="btn btn-sm" onclick="setInsFlt('all')"     style="font-size:11px">전체</button>
           <button id="ins-flt-none"    class="btn btn-sm btn-teal" onclick="setInsFlt('none')"    style="font-size:11px">가입전</button>
           <button id="ins-flt-active"  class="btn btn-sm btn-teal" onclick="setInsFlt('active')"  style="font-size:11px">가입</button>
           <button id="ins-flt-expired" class="btn btn-sm" onclick="setInsFlt('expired')" style="font-size:11px">만료</button>
+        </div>
+        <div id="ins-search-row" style="display:none;width:100%;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px;padding-top:8px;border-top:1px dashed var(--border)">
+          <span style="font-size:11px;color:var(--gray);font-weight:700;text-transform:none;letter-spacing:0">📅 만료 이력 검색</span>
+          <select id="ins-search-year" onchange="renderInsurance()" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--black);text-transform:none;font-weight:400">
+            <option value="">연도 전체</option>
+          </select>
+          <select id="ins-search-month" onchange="renderInsurance()" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--black);text-transform:none;font-weight:400">
+            <option value="">월 전체</option>
+          </select>
+          <button class="btn btn-sm" style="font-size:11px;text-transform:none;letter-spacing:0" onclick="resetInsSearch()">초기화</button>
         </div>
       </div>
       <div id="insurance-list">
@@ -9257,10 +9267,125 @@ function migrateInsuranceDataOnce() {
   if(changed) save();
 }
 
+// 만료 이력 검색용 연도 옵션을 실제 데이터(현재 만료일 + 과거 이력 만료일) 기준으로 채움.
+// 월 옵션은 고정(1~12월)이라 한 번만 채우면 됨.
+function refreshInsSearchOptions() {
+  const yearSel = document.getElementById('ins-search-year');
+  if(!yearSel) return;
+  const years = new Set();
+  caregivers.forEach(c => {
+    if(c.insuranceExpiry) years.add(c.insuranceExpiry.slice(0,4));
+    (c.insuranceHistory||[]).forEach(h => { if(h.expiry) years.add(h.expiry.slice(0,4)); });
+  });
+  const sortedYears = [...years].sort((a,b)=>b.localeCompare(a));
+  const optionsKey = sortedYears.join(',');
+  if(yearSel.dataset.built !== optionsKey) {
+    const prevVal = yearSel.value;
+    yearSel.innerHTML = '<option value="">연도 전체</option>' + sortedYears.map(y=>`<option value="${y}">${y}년</option>`).join('');
+    yearSel.dataset.built = optionsKey;
+    yearSel.value = sortedYears.includes(prevVal) ? prevVal : '';
+  }
+  const monthSel = document.getElementById('ins-search-month');
+  if(monthSel && !monthSel.dataset.built) {
+    monthSel.innerHTML = '<option value="">월 전체</option>' +
+      Array.from({length:12}, (_,i)=>String(i+1).padStart(2,'0')).map(m=>`<option value="${m}">${parseInt(m)}월</option>`).join('');
+    monthSel.dataset.built = '1';
+  }
+}
+
+function resetInsSearch() {
+  const y = document.getElementById('ins-search-year');
+  const m = document.getElementById('ins-search-month');
+  if(y) y.value = '';
+  if(m) m.value = '';
+  renderInsurance();
+}
+
+// 배상책임보험이 만료된 건들을(현재 만료 상태 + 과거로 보관된 이력 모두) 간병인 구분 없이
+// 한데 모아, 선택된 연/월(만료일 기준)로 검색해서 보여줌. '전체'/'만료' 탭 공통으로 사용.
+function renderInsuranceSearchResults(el, year, month) {
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  function isExpiredCurrent(c) {
+    if(!c.insuranceActive) return false;
+    if(c.insuranceTerminated) return true;
+    if(!c.insuranceExpiry) return false;
+    const exp = parseLocalDate(c.insuranceExpiry);
+    return !!(exp && exp < today);
+  }
+  function matchYM(dateStr) {
+    if(!dateStr) return false;
+    if(year  && dateStr.slice(0,4) !== year)  return false;
+    if(month && dateStr.slice(5,7) !== month) return false;
+    return true;
+  }
+
+  const rows = [];
+  caregivers.forEach(c => {
+    if(isExpiredCurrent(c) && matchYM(c.insuranceExpiry)) {
+      const pt = c.insurancePatientId ? patients.find(p=>String(p.id)===String(c.insurancePatientId)) : null;
+      rows.push({
+        type: 'current', cgId: c.id, cgName: c.name,
+        patientName: pt ? pt.name : '',
+        startDate: c.insuranceStartDate, expiry: c.insuranceExpiry,
+        memo: c.insuranceMemo, terminated: c.insuranceTerminated,
+      });
+    }
+    (c.insuranceHistory||[]).forEach(h => {
+      if(matchYM(h.expiry)) {
+        rows.push({
+          type: 'history', cgId: c.id, cgName: c.name, histId: h.id,
+          patientName: h.patientName, startDate: h.startDate, expiry: h.expiry,
+          memo: h.memo, terminated: h.terminated,
+        });
+      }
+    });
+  });
+
+  rows.sort((a,b) => (b.expiry||'').localeCompare(a.expiry||''));
+
+  if(!rows.length) {
+    el.innerHTML = '<div class="empty" style="padding:1rem 0"><p style="font-size:13px">해당 기간에 만료된 이력이 없어요</p></div>';
+    return;
+  }
+
+  el.innerHTML = `<div style="font-size:11px;color:var(--gray);margin-bottom:6px">🔍 검색 결과 ${rows.length}건</div>` +
+    rows.map(r => `
+      <div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px">
+          <div style="font-size:13px;font-weight:700">${r.cgName}
+            <span style="font-weight:400;color:var(--gray);font-size:11px">${r.type==='current' ? '(현재 건)' : '(과거 이력)'}</span>
+          </div>
+          <div style="font-size:11px;color:var(--gray);margin-top:2px">
+            ${r.patientName ? '담당 환자: '+r.patientName+' · ' : ''}
+            ${r.startDate ? '가입일 '+r.startDate+' · ' : ''}만료 ${r.expiry}${r.terminated ? ' · 만료처리됨' : ''}
+          </div>
+          ${r.memo ? `<div style="font-size:11px;color:var(--teal);margin-top:2px;font-family:var(--mono)">🔖 ${r.memo}</div>` : ''}
+        </div>
+        <button class="btn btn-sm" onclick="${r.type==='current' ? `editInsurance('${r.cgId}')` : `editInsuranceHistory('${r.cgId}','${r.histId}')`}">수정</button>
+      </div>`).join('');
+}
+
 function renderInsurance() {
   const el = document.getElementById('insurance-list');
   if(!el) return;
+
+  // 만료 이력 월별/연도별 검색 UI는 '전체'/'만료' 탭에서만 노출
+  refreshInsSearchOptions();
+  const searchRow = document.getElementById('ins-search-row');
+  const showSearch = (insFlt === 'all' || insFlt === 'expired');
+  if(searchRow) searchRow.style.display = showSearch ? 'flex' : 'none';
+  const searchYear  = showSearch ? (document.getElementById('ins-search-year')?.value || '')  : '';
+  const searchMonth = showSearch ? (document.getElementById('ins-search-month')?.value || '') : '';
+
   if(!caregivers.length){ el.innerHTML='<div class="empty" style="padding:1rem 0"><p>등록된 간병인이 없어요</p></div>'; return; }
+
+  // 연도/월이 하나라도 선택되면, 만료된 건(현재 만료 상태 + 과거 보관 이력)만 모아서
+  // 검색 결과 형태로 따로 보여줌 (전체/만료 탭 공통)
+  if(searchYear || searchMonth) {
+    renderInsuranceSearchResults(el, searchYear, searchMonth);
+    return;
+  }
 
   const today = new Date(); today.setHours(0,0,0,0);
 
@@ -9333,21 +9458,23 @@ function renderInsurance() {
           </button>
         </div>
       </div>
-      ${histCount ? `
-      <div style="margin-top:6px">
+      <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        ${histCount ? `
         <button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="toggleInsHistory('${c.id}')">
           📋 과거 근무건 보험 이력 (${histCount}건) <span id="ins-hist-arrow-${c.id}">▾</span>
-        </button>
-        <div id="ins-hist-${c.id}" style="display:none;margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm)">
-          ${c.insuranceHistory.map(h => `
-            <div style="font-size:11px;color:var(--gray);padding:4px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-              <div style="flex:1;min-width:0">
-                <b style="color:var(--black)">${h.patientName||'(환자 정보 없음)'}</b> · ${h.active?'가입':'미가입'}${h.startDate?' · 가입일 '+h.startDate:''}${h.expiry?' · 만료 '+h.expiry:''}${h.terminated?' · 만료처리됨':''}
-                ${h.memo?`<div style="color:var(--teal);font-family:var(--mono);margin-top:2px">🔖 ${h.memo}</div>`:''}
-              </div>
-              <button class="btn btn-sm" style="font-size:10px;padding:2px 7px;flex-shrink:0" onclick="editInsuranceHistory('${c.id}','${h.id}')">수정</button>
-            </div>`).join('')}
-        </div>
+        </button>` : `<span style="font-size:11px;color:var(--gray-lt)">과거 보험 이력 없음</span>`}
+        <button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="addInsuranceHistory('${c.id}')">➕ 과거 이력 추가</button>
+      </div>
+      ${histCount ? `
+      <div id="ins-hist-${c.id}" style="display:none;margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm)">
+        ${c.insuranceHistory.map(h => `
+          <div style="font-size:11px;color:var(--gray);padding:4px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div style="flex:1;min-width:0">
+              <b style="color:var(--black)">${h.patientName||'(환자 정보 없음)'}</b> · ${h.active?'가입':'미가입'}${h.startDate?' · 가입일 '+h.startDate:''}${h.expiry?' · 만료 '+h.expiry:''}${h.terminated?' · 만료처리됨':''}
+              ${h.memo?`<div style="color:var(--teal);font-family:var(--mono);margin-top:2px">🔖 ${h.memo}</div>`:''}
+            </div>
+            <button class="btn btn-sm" style="font-size:10px;padding:2px 7px;flex-shrink:0" onclick="editInsuranceHistory('${c.id}','${h.id}')">수정</button>
+          </div>`).join('')}
       </div>` : ''}
     </div>`;
   }).join('');
@@ -9431,6 +9558,10 @@ function editInsuranceHistory(cgId, histId) {
       과거 근무건(${h.patientName||'환자 정보 없음'})의 배상보험 기록을 수정합니다.
     </div>
     <div class="field">
+      <label>담당 환자명</label>
+      <input type="text" id="ins-h-patientname" placeholder="예: 홍길동" value="${h.patientName||''}">
+    </div>
+    <div class="field">
       <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:13px;font-weight:600;letter-spacing:0;cursor:pointer">
         <input type="checkbox" id="ins-h-active" ${h.active?'checked':''} style="width:16px;height:16px;accent-color:var(--teal)">
         배상보험 가입됨
@@ -9441,7 +9572,7 @@ function editInsuranceHistory(cgId, histId) {
       <input type="date" id="ins-h-start" value="${h.startDate||''}">
     </div>
     <div class="field">
-      <label>보험 만료일</label>
+      <label>보험 만료일 <span style="font-size:10px;font-weight:400;color:var(--gray)">(월별/연도별 검색 기준일)</span></label>
       <input type="date" id="ins-h-expiry" value="${h.expiry||''}">
     </div>
     <div class="field">
@@ -9466,6 +9597,7 @@ function saveInsuranceHistory(cgId, histId) {
   if(!cg || !cg.insuranceHistory) return;
   const h = cg.insuranceHistory.find(x=>String(x.id)===String(histId));
   if(!h) return;
+  h.patientName= document.getElementById('ins-h-patientname')?.value.trim() ?? h.patientName;
   h.active     = document.getElementById('ins-h-active').checked;
   h.startDate  = document.getElementById('ins-h-start').value;
   h.expiry     = document.getElementById('ins-h-expiry').value;
@@ -9473,6 +9605,75 @@ function saveInsuranceHistory(cgId, histId) {
   h.memo       = document.getElementById('ins-h-memo').value.trim();
   save(); closeOverlay('cg-overlay'); renderInsurance();
   toast('✅ 과거 보험 이력이 수정됐어요');
+}
+
+// 과거 근무건 보험 이력을 새로 수동 추가 (자동으로 근무건이 넘어갈 때뿐 아니라,
+// 예전에 놓친 기록이나 다른 곳에서 관리하던 과거 이력을 직접 입력하고 싶을 때 사용)
+function addInsuranceHistory(cgId) {
+  const cg = caregivers.find(c=>String(c.id)===cgId);
+  if(!cg) return;
+  document.getElementById('cg-modal-title').textContent = cg.name+' — 과거 배상보험 이력 추가';
+  document.getElementById('cg-form-body').innerHTML=`
+    <div style="font-size:13px;color:var(--gray);margin-bottom:1rem;line-height:1.7">
+      예전 근무건의 배상보험 기록을 직접 추가합니다. 만료일을 입력해두면 만료 이력 검색(월별/연도별)에서 찾을 수 있어요.
+    </div>
+    <div class="field">
+      <label>담당 환자명</label>
+      <input type="text" id="ins-h-patientname" placeholder="예: 홍길동">
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:13px;font-weight:600;letter-spacing:0;cursor:pointer">
+        <input type="checkbox" id="ins-h-active" checked style="width:16px;height:16px;accent-color:var(--teal)">
+        배상보험 가입됨
+      </label>
+    </div>
+    <div class="field">
+      <label>보험 가입일</label>
+      <input type="date" id="ins-h-start">
+    </div>
+    <div class="field">
+      <label>보험 만료일 <span style="font-size:10px;font-weight:400;color:var(--gray)">(월별/연도별 검색 기준일)</span></label>
+      <input type="date" id="ins-h-expiry">
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:13px;font-weight:600;letter-spacing:0;cursor:pointer">
+        <input type="checkbox" id="ins-h-terminated" checked style="width:16px;height:16px;accent-color:var(--teal)">
+        만료처리 완료
+      </label>
+    </div>
+    <div class="field">
+      <label>보험사 / 보험번호 (선택)</label>
+      <input type="text" id="ins-h-memo" placeholder="예: KB2025개인간병인배상책임보험(3천)/2025-3561946-1">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:1rem">
+      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveNewInsuranceHistory('${cgId}')">추가</button>
+      <button class="btn" onclick="closeOverlay('cg-overlay')">취소</button>
+    </div>`;
+  document.getElementById('cg-overlay').classList.add('open');
+}
+
+function saveNewInsuranceHistory(cgId) {
+  const cg = caregivers.find(c=>String(c.id)===cgId);
+  if(!cg) return;
+  const expiry = document.getElementById('ins-h-expiry').value;
+  const startDate = document.getElementById('ins-h-start').value;
+  if(!expiry && !startDate) {
+    if(!confirm('가입일/만료일을 모두 입력하지 않았어요. 이대로 추가할까요?\\n(만료일이 없으면 나중에 월별/연도별 검색에는 나오지 않아요)')) return;
+  }
+  if(!cg.insuranceHistory) cg.insuranceHistory = [];
+  cg.insuranceHistory.unshift({
+    id: genId(),
+    patientId: '',
+    patientName: document.getElementById('ins-h-patientname').value.trim(),
+    active: document.getElementById('ins-h-active').checked,
+    startDate: startDate,
+    expiry: expiry,
+    memo: document.getElementById('ins-h-memo').value.trim(),
+    terminated: document.getElementById('ins-h-terminated').checked,
+    archivedAt: todayStr(),
+  });
+  save(); closeOverlay('cg-overlay'); renderInsurance();
+  toast('✅ 과거 보험 이력이 추가됐어요');
 }
 function startRemind() {
   if(remindTimer) clearInterval(remindTimer);
