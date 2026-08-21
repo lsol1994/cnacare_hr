@@ -9437,10 +9437,11 @@ function renderInsurance() {
       : diff === 0 ? '오늘 만료'
       : `D-${diff}`;
     const histCount = (c.insuranceHistory||[]).length;
+    const curPt = c.patientId ? patients.find(p=>String(p.id)===String(c.patientId)) : null;
     return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <div style="flex:1;min-width:100px">
-          <div style="font-size:13px;font-weight:700">${c.name}</div>
+          <div style="font-size:13px;font-weight:700">${c.name}${curPt?` <span style="font-weight:400;color:var(--gray);font-size:11px">— ${curPt.name} 담당중</span>`:''}</div>
           <div style="font-size:11px;color:var(--gray);margin-top:2px">
             ${c.insuranceActive?'✅ 가입':'❌ 미가입'}
             ${c.insuranceStartDate?'· 가입일 '+c.insuranceStartDate:''}
@@ -9502,11 +9503,17 @@ function editInsurance(cgId) {
   const active = !!cg.insuranceActive;
   const startDate = cg.insuranceStartDate||'';
   const expiry = cg.insuranceExpiry||'';
+  const curPt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
   document.getElementById('cg-modal-title').textContent = cg.name+' — 배상보험 관리';
   document.getElementById('cg-form-body').innerHTML=`
     <div style="font-size:13px;color:var(--gray);margin-bottom:1rem;line-height:1.7">
       배상보험 가입 여부와 만료일을 입력하세요.<br>
       만료일이 가까워지면 자동으로 알림을 드려요.
+    </div>
+    <div style="font-size:12px;background:var(--surface2);padding:8px 10px;border-radius:var(--rsm);margin-bottom:1rem;line-height:1.6">
+      👤 담당 환자: <b>${curPt ? curPt.name : '(현재 매칭된 환자 없음)'}</b>
+      <div style="font-size:11px;color:var(--gray);margin-top:2px">이 값은 <b>환자 관리</b>에서 실제 매칭된 환자와 자동으로 연동돼서, 여기서 직접 입력/수정할 수 없어요.
+      담당 환자가 바뀌면 지금 이 보험 기록은 자동으로 '과거 이력'에 보관되고, 새 근무건은 '가입전'부터 다시 시작해요.</div>
     </div>
     <div class="field">
       <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:13px;font-weight:600;letter-spacing:0;cursor:pointer">
