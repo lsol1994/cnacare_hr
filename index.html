@@ -2469,6 +2469,7 @@ function attachFirebaseListener() {
         normalizeTimes(); autoMatch(); updateSidebar();
         renderDashboard(); renderRooms(); checkAutoEnd();
         checkAutoStart(); // Firebase 로드 완료 후 대기중→근무중 체크
+        migrateInsuranceDataOnce(); // 배상보험 이력 관리 도입 전 낡은 데이터 1회성 정리
         setTimeout(autoFillAllAttendance, 1000);
       } catch(e) { console.warn('렌더 오류:', e); }
     } else {
@@ -4662,6 +4663,9 @@ function getCgData() {
 function saveCg() {
   const cg=getCgData();
   if(!cg.name){toast('간병인 이름은 필수입니다',true);return;}
+  // 보험 이력 정리를 위해, 병합되기 전 "원래" patientId를 미리 기억해둠
+  // (아래에서 cg가 기존 레코드와 병합되고 나면 더 이상 예전 값을 알 수 없기 때문)
+  const originalPatientId = editCgId ? (caregivers.find(x=>String(x.id)===String(editCgId))?.patientId || '') : '';
 
   const timeOk=t=>/^([01]\d|2[0-3]):[0-5]\d$/.test(t);
   if(cg.startTime&&!timeOk(cg.startTime)){toast('시작 시간이 올바르지 않아요 (00:00~23:59)',true);return;}
@@ -4746,6 +4750,11 @@ function saveCg() {
   if(cg.patientId) {
     pt = patients.find(x=>String(x.id)===String(cg.patientId));
     if(pt) {
+      // 실제로 배열에 저장된 레코드(수정이면 위에서 새로 병합된 caregivers[idx], 신규 등록이면
+      // cg 자신)를 대상으로 보험 이력을 정리해야 함 — 수정 케이스에서 cg 자체를 고치면 이미
+      // 별도 객체로 병합되어 배열에 들어간 caregivers[idx]에는 반영이 안 되는 문제가 있었음
+      const savedCg = editCgId ? caregivers.find(x=>String(x.id)===String(editCgId)) : cg;
+      if(savedCg) syncInsuranceForPatientChange(savedCg, originalPatientId, pt.id); // 배상보험도 이전 환자 건 이력 보관 + 새 배정용 초기화
       // 중도종료 이력이 있으면 교체 상황
       isReplace = !!(pt.recruitHistory && pt.recruitHistory.length > 0);
       // 예약교체가 이미 진행 중이었는지(=recruitInfo/pendingReplacement가 있었는지) 삭제 전에 미리 확인
@@ -6029,6 +6038,7 @@ function confirmReassign(cgId) {
 
   // 현재 담당 환자 이력 저장 (재배정 전)
   saveToAssignHistory(cg);
+  syncInsuranceForPatientChange(cg, cg.patientId, pt.id); // 배상보험도 이전 환자 건 이력 보관 + 새 배정용 초기화
 
   // 간병인 재활성화
   cg.workStatus = '대기중';
@@ -9071,6 +9081,72 @@ function setInsFlt(flt) {
   renderInsurance();
 }
 
+// 이 간병인의 담당 환자가 바뀌면(재배정, 신규 매칭 등), 이전 환자에 대한 배상보험 기록을
+// 이력에 보관하고 새 배정을 위해 현재 보험 상태를 초기화함. 배상보험은 근무 건(환자)마다
+// 개별로 가입·해지되는 것이라, 새 환자로 넘어갈 때 예전 기록 위에 그냥 덮어쓰면 안 됨 —
+// 예전엔 이 처리가 없어서 이력이 하나도 안 남고 항상 "최종 건"만 보이는 문제가 있었음
+function syncInsuranceForPatientChange(cg, oldPatientId, newPatientId, prevPatientNameOverride) {
+  oldPatientId = oldPatientId ? String(oldPatientId) : '';
+  newPatientId = newPatientId ? String(newPatientId) : '';
+  if(oldPatientId === newPatientId) return; // 같은 환자 그대로면(단순 정보 수정 등) 유지
+
+  // 이전에 뭔가 등록되어 있었으면(가입여부/메모/만료일 중 하나라도) 이력에 보관
+  if(cg.insuranceActive || cg.insuranceExpiry || cg.insuranceMemo) {
+    if(!cg.insuranceHistory) cg.insuranceHistory = [];
+    const oldPt = oldPatientId ? patients.find(p=>String(p.id)===oldPatientId) : null;
+    cg.insuranceHistory.unshift({
+      id: genId(),
+      patientId: oldPatientId,
+      patientName: oldPt ? oldPt.name : (prevPatientNameOverride || ''),
+      active: cg.insuranceActive || false,
+      expiry: cg.insuranceExpiry || '',
+      memo: cg.insuranceMemo || '',
+      terminated: cg.insuranceTerminated || false,
+      archivedAt: todayStr(),
+    });
+  }
+  // 새 배정을 위해 현재 보험 상태 초기화(=이 건은 "가입전"부터 다시 시작)
+  cg.insuranceActive = false;
+  cg.insuranceExpiry = '';
+  cg.insuranceMemo = '';
+  cg.insuranceTerminated = false;
+  cg.insurancePatientId = newPatientId;
+}
+
+// 배상보험 이력 관리 도입 전 데이터 정리(1회성): 이미 새 환자로 매칭되어 있는데
+// insurancePatientId가 없는(이 필드 도입 전) 예전 데이터 중, 현재 근무 중/시작 예정인데
+// (=종료 아닌데) 보험이 "만료처리 완료" 또는 이미 지난 만료일로 남아있으면, 이건 예전
+// 근무건의 낡은 기록이 그대로 남아있는 것(근무 중인데 보험이 이미 해지되어 있을 리 없음)
+// 이므로 안전하게 이력으로 옮기고 이번 건은 "가입전"부터 다시 시작하게 정리함
+function migrateInsuranceDataOnce() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  let changed = false;
+  caregivers.forEach(cg => {
+    if(!cg.patientId) return; // 매칭된 환자가 없으면 정리할 필요 없음
+    if(cg.insurancePatientId) {
+      if(String(cg.insurancePatientId) !== String(cg.patientId)) {
+        syncInsuranceForPatientChange(cg, cg.insurancePatientId, cg.patientId);
+        changed = true;
+      }
+      return;
+    }
+    if(cg.workStatus !== '종료') {
+      const exp = cg.insuranceExpiry ? parseLocalDate(cg.insuranceExpiry) : null;
+      const isStale = cg.insuranceTerminated || (exp && exp < today);
+      if(isStale) {
+        // 예전 데이터에는 "이 보험이 어느 환자 것이었는지" 추적하는 필드가 없었으므로,
+        // assignHistory의 가장 최근 기록에서 이전 환자 이름을 유추해서 채워줌
+        const lastAssign = (cg.assignHistory||[])[0];
+        syncInsuranceForPatientChange(cg, '', cg.patientId, lastAssign ? lastAssign.patientName : '');
+        changed = true; return;
+      }
+    }
+    cg.insurancePatientId = String(cg.patientId); // 정상 데이터로 보이면 트래킹만 시작
+    changed = true;
+  });
+  if(changed) save();
+}
+
 function renderInsurance() {
   const el = document.getElementById('insurance-list');
   if(!el) return;
@@ -9122,29 +9198,54 @@ function renderInsurance() {
       : diff < 0  ? `만료됨 (${Math.abs(diff)}일 전)`
       : diff === 0 ? '오늘 만료'
       : `D-${diff}`;
-    return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
-      <div style="flex:1;min-width:100px">
-        <div style="font-size:13px;font-weight:700">${c.name}</div>
-        <div style="font-size:11px;color:var(--gray);margin-top:2px">
-          ${c.insuranceActive?'✅ 가입':'❌ 미가입'}
-          ${c.insuranceExpiry?'· 만료 '+c.insuranceExpiry:''}
+    const histCount = (c.insuranceHistory||[]).length;
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:100px">
+          <div style="font-size:13px;font-weight:700">${c.name}</div>
+          <div style="font-size:11px;color:var(--gray);margin-top:2px">
+            ${c.insuranceActive?'✅ 가입':'❌ 미가입'}
+            ${c.insuranceExpiry?'· 만료 '+c.insuranceExpiry:''}
+          </div>
+          ${c.insuranceMemo?`<div style="font-size:11px;color:var(--teal);margin-top:2px;font-family:var(--mono)">🔖 ${c.insuranceMemo}</div>`:''}
         </div>
-        ${c.insuranceMemo?`<div style="font-size:11px;color:var(--teal);margin-top:2px;font-family:var(--mono)">🔖 ${c.insuranceMemo}</div>`:''}
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span class="badge" style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44">${statusTxt}</span>
+          ${c.insuranceActive && diff !== null && diff >= 0 ? `
+          <label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer">
+            <input type="checkbox" ${c.insuranceTerminated?'checked':''} style="width:15px;height:15px;accent-color:var(--teal)"
+              onchange="terminateInsurance('${c.id}',this.checked)">
+            <span style="color:var(--gray)">만료처리</span>
+          </label>` : ''}
+          <button class="btn btn-sm" onclick="editInsurance('${c.id}')">
+            <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>수정
+          </button>
+        </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span class="badge" style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44">${statusTxt}</span>
-        ${c.insuranceActive && diff !== null && diff >= 0 ? `
-        <label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer">
-          <input type="checkbox" ${c.insuranceTerminated?'checked':''} style="width:15px;height:15px;accent-color:var(--teal)"
-            onchange="terminateInsurance('${c.id}',this.checked)">
-          <span style="color:var(--gray)">만료처리</span>
-        </label>` : ''}
-        <button class="btn btn-sm" onclick="editInsurance('${c.id}')">
-          <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>수정
+      ${histCount ? `
+      <div style="margin-top:6px">
+        <button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="toggleInsHistory('${c.id}')">
+          📋 과거 근무건 보험 이력 (${histCount}건) <span id="ins-hist-arrow-${c.id}">▾</span>
         </button>
-      </div>
+        <div id="ins-hist-${c.id}" style="display:none;margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm)">
+          ${c.insuranceHistory.map(h => `
+            <div style="font-size:11px;color:var(--gray);padding:4px 0;border-bottom:1px solid var(--border)">
+              <b style="color:var(--black)">${h.patientName||'(환자 정보 없음)'}</b> · ${h.active?'가입':'미가입'}${h.expiry?' · 만료 '+h.expiry:''}${h.terminated?' · 만료처리됨':''}
+              ${h.memo?`<div style="color:var(--teal);font-family:var(--mono);margin-top:2px">🔖 ${h.memo}</div>`:''}
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
     </div>`;
   }).join('');
+}
+
+function toggleInsHistory(cgId) {
+  const box = document.getElementById('ins-hist-'+cgId);
+  const arrow = document.getElementById('ins-hist-arrow-'+cgId);
+  if(!box) return;
+  const open = box.style.display === 'none';
+  box.style.display = open ? '' : 'none';
+  if(arrow) arrow.textContent = open ? '▴' : '▾';
 }
 
 function editInsurance(cgId) {
