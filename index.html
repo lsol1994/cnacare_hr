@@ -9906,6 +9906,7 @@ function checkAutoEnd() {
     if(isReturningCg) saveToAssignHistory(cg);
     cg.workStatus = isReturningCg ? '대기중' : '종료';
     if(isReturningCg) {
+      if(pt) cg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록 (② 루프와 동일하게 맞춤)
       syncInsuranceForPatientChange(cg, cg.patientId, '', pt ? pt.name : ''); // 배상보험도 이번 근무건 이력으로 보관 (patientId 지우기 전에 먼저 정리)
       cg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
       cg._returnedToPoolAt = cg.endDate; // 재처리 방지용 플래그 (endDate는 캘린더 계산을 위해 그대로 유지)
@@ -10020,20 +10021,22 @@ function checkAutoEnd() {
     });
 
     if(newItems.length > 0) {
-      // 종료보고 메시지 생성
-      const msgs = newItems.map(({pt, cg}) => {
+      // 종료보고 메시지 생성 (환자별 개별 메시지를 먼저 만들고, 팝업 알림용으로만 합침)
+      const itemMsgs = newItems.map(({pt, cg}) => {
         const cgName  = cg ? cg.name : (pt ? pt.caregiverName : '');
         const endDate = pt ? (pt.endDate||cg.endDate||'') : (cg ? cg.endDate : '');
         const endTime = pt ? (pt.endTime||cg.endTime||'') : (cg ? cg.endTime : '');
         // buildEndReport에 실제 종료일 전달
-        return pt ? buildEndReport(pt, endDate, endTime)
+        const msg = pt ? buildEndReport(pt, endDate, endTime)
           : `-환자명 : (${cg.hospital||''})\n-간병인명 : ${cgName}\n-종료일시 : ${endDate?formatReportDate(endDate,endTime):'________'} 종료(퇴원)`;
-      }).join('\n\n');
+        return { pt, msg };
+      });
+      const msgs = itemMsgs.map(x=>x.msg).join('\n\n');
 
-      // 종료보고 로그 자동 저장 (한 번만)
+      // 종료보고 로그 자동 저장 (한 번만) — 환자마다 자기 자신의 개별 메시지만 저장 (다른 환자 정보 섞이지 않도록)
       const now2 = new Date();
       const timeStr = now2.toLocaleDateString('ko-KR')+' '+now2.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
-      newItems.forEach(({pt}) => {
+      itemMsgs.forEach(({pt, msg}) => {
         if(!pt) return;
         const _rptId5 = genId();
         reportLogs.unshift({
@@ -10042,7 +10045,7 @@ function checkAutoEnd() {
           patientName: pt.name,
           type:        'ended',
           time:        timeStr,
-          msg:         msgs,
+          msg:         msg,
           auto:        true
         });
         markReportLogEdited(_rptId5);
