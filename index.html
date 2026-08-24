@@ -4879,6 +4879,37 @@ function saveCg() {
   if(cg.patientId) {
     pt = patients.find(x=>String(x.id)===String(cg.patientId));
     if(pt) {
+      // ══ 맞교체(직접등록): 이 환자에게 이미 다른 활성(미종료) 간병인이 매칭되어 있는데
+      // 예약교체(🔀 맞교체 버튼) 절차 없이 그냥 새 간병인을 바로 등록하는 경우 — 이전
+      // 간병인의 마감일시를 이 새 간병인의 시작일시로 강제 동기화한다. 두 값을 각각 수기로
+      // 입력하게 두면 미세하게 어긋나는 문제가 있었으므로(오타/누락 등), 사람이 입력한 값을
+      // 신뢰하지 않고 여기서 항상 강제로 맞춘다. (겹침 자체는 findOverlappingCaregiver가
+      // 이미 위에서 걸러줬으므로, 여기 도달했다는 건 이전 간병인 마감이 새 간병인 시작과
+      // 같거나 그 이전이라는 뜻 — 그 값을 정확히 일치시키기만 하면 됨)
+      if(cg.startDate) {
+        const prevCg = caregivers.find(c =>
+          String(c.patientId) === String(pt.id) &&
+          c.workStatus !== '종료' &&
+          String(c.id) !== String(cg.id)
+        );
+        if(prevCg) {
+          prevCg.endDate = cg.startDate;
+          prevCg.endTime = cg.startTime || '';
+          autoFillAttendance(String(prevCg.id)); // 이전 간병인 간병일지도 마감일까지 동기화 (상태 전환 전에 먼저)
+          const isReturningCg = !!(prevCg.assignHistory && prevCg.assignHistory.length);
+          saveToAssignHistory(prevCg);
+          if(isReturningCg) {
+            prevCg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록
+            syncInsuranceForPatientChange(prevCg, prevCg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관
+            prevCg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
+            prevCg.workStatus = '대기중';
+          } else {
+            prevCg.workStatus = '종료';
+          }
+          markCgEdited(prevCg.id); // Firebase 덮어쓰기 방지 (10초)
+        }
+      }
+
       // 실제로 배열에 저장된 레코드(수정이면 위에서 새로 병합된 caregivers[idx], 신규 등록이면
       // cg 자신)를 대상으로 보험 이력을 정리해야 함 — 수정 케이스에서 cg 자체를 고치면 이미
       // 별도 객체로 병합되어 배열에 들어간 caregivers[idx]에는 반영이 안 되는 문제가 있었음
@@ -6361,8 +6392,24 @@ function confirmReassign(cgId) {
 
   markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
   markPtEdited(pt.id);
+
+  // ── 재배정 시작일이 이전 환자와의 마지막 근무일과 같은 날(당일 재배정)이면, 같은 간병인
+  // id를 그대로 재사용하기 때문에 autoFillAttendance()가 그 날짜의 "기존 기록"을 이전 환자의
+  // 것으로 착각해 그대로 덮어써버릴 위험이 있음 — 과거(이전 환자) 간병일지는 절대 건드리지
+  // 않고, 새 환자 몫은 반드시 새 기록으로 등록한다.
+  if(cg.startDate) {
+    const boundaryRec = attendance.find(a=>a.cgId===String(cg.id) && (a.inDate===cg.startDate || a.date===cg.startDate));
+    if(boundaryRec) {
+      boundaryRec.auto = false; // 이전 환자 몫 기록 보호 — 이후 자동 동기화가 다시는 건드리지 않도록 고정
+      markAttendEdited(boundaryRec.id);
+      const newRec = { id: genId(), cgId: String(cg.id), inDate: cg.startDate, inTime: cg.startTime||'', outDate: cg.startDate, outTime: '23:59', auto: true };
+      attendance.push(newRec);
+      markAttendEdited(newRec.id);
+    }
+  }
+
   save();
-  autoFillAttendance(String(cg.id)); // 재배정된 새 일정에 맞춰 간병일지 동기화
+  autoFillAttendance(String(cg.id)); // 재배정된 새 일정에 맞춰 간병일지 동기화 (신규 추가분만 채움 — 당일 겹침은 위에서 이미 새로 등록됨)
   refreshCalendarIfOpen();
   renderCaregivers();
   renderPatients();
@@ -9565,24 +9612,15 @@ function autoFillAttendance(cgId) {
     cur.setDate(cur.getDate() + 1);
   }
 
-  // ── 마감일이 (맞교체/연장 등으로) 나중에 단축된 경우, 예전(더 길었던) 마감일 기준으로
-  // 이미 만들어진 자동 생성 기록 중 새 마감일보다 뒤 날짜에 남은 "유령" 기록을 정리한다.
-  // 예: 처음 등록 시 환자의 전체 계약기간 기준으로 마감일이 자동 계산돼서 더 먼 미래까지
-  // 채워졌다가, 이후 맞교체로 마감일이 앞당겨진 경우 — 뒤쪽 날짜의 00:00~23:59 placeholder가
-  // 안 지워지고 남아있다가, 같은 간병인 id가 재사용되어 그 날짜에 새 배정이 들어오면
-  // "새 배정의 첫날인데 00:00으로 나오는" 문제로 이어짐.
-  // 수기로 직접 입력/수정한 기록(auto!==true)은 실제 근무 데이터일 수 있으므로 절대 지우지 않는다.
-  if(hasEnded) {
-    for(let i = attendance.length - 1; i >= 0; i--) {
-      const a = attendance[i];
-      if(a.cgId !== String(cgId) || a.auto !== true) continue;
-      const aDate = a.inDate || a.date;
-      if(aDate && aDate > endDate) {
-        attendance.splice(i, 1);
-        added++;
-      }
-    }
-  }
+  // ⚠️ [제거됨] 예전엔 여기서 "마감일보다 뒤 날짜에 남은 자동생성 유령 기록"을 지우는 정리
+  // 로직이 있었으나, 이 함수가 간병인 재배정 이력 전체에 걸쳐(같은 간병인 id가 여러 환자에게
+  // 반복 재사용되는 구조 + 앱 시작 시 autoFillAllAttendance()가 전체 간병인을 주기적으로
+  // 훑는 구조) 반복 호출되기 때문에, "현재(live) endDate보다 뒤 날짜"라는 판단 기준이 안전하지
+  // 않았음 — 나중에 이 간병인이 전혀 다른 환자로 다시 배정되면서 endDate가 갱신될 때마다,
+  // 그 시점 기준으로 지나간 "진짜 과거 근무 이력"(이미 완료된 이전 환자 건)까지 함께 삭제
+  // 대상에 걸릴 수 있었음. 재배정 시 과거 간병일지를 절대 변경/삭제하지 않는다는 원칙과
+  // 정면으로 배치되므로 완전히 제거함. 유령 기록 자체는 발생 시점(맞교체 등)에 간병인 마감일시를
+  // 항상 정확히 강제 동기화해서(saveCg() 참고) 애초에 만들어지지 않도록 막는다.
 
   if(added > 0) save();
   return added;
