@@ -4856,8 +4856,15 @@ function saveCg() {
       if(savedCg) syncInsuranceForPatientChange(savedCg, originalPatientId, pt.id); // 배상보험도 이전 환자 건 이력 보관 + 새 배정용 초기화
       // 중도종료 이력이 있으면 교체 상황
       isReplace = !!(pt.recruitHistory && pt.recruitHistory.length > 0);
-      // 예약교체가 이미 진행 중이었는지(=recruitInfo/pendingReplacement가 있었는지) 삭제 전에 미리 확인
-      const hadPendingReplacement = !!(pt.recruitInfo || pt.pendingReplacement);
+      // 예약교체가 이미 진행 중이었는지 확인 (삭제 전에 미리 판단).
+      // ⚠️ recruitInfo만으로 판단하면 안 됨: "연장 후 예약교체"(기존 간병인이 계속 근무 중이며
+      // pt.status==='매칭완료'로 유지된 채 recruitInfo/pendingReplacement가 붙는 경우)와,
+      // "중도종료 후 일반 재모집"(대체 간병인을 못 구해 pt.status==='모집중'으로 바뀐 경우)이
+      // 둘 다 recruitInfo를 쓰기 때문. 일반 재모집인데 이 값을 true로 잘못 판단하면 아래에서
+      // 새 간병인의 시작일/마감일이 환자에게 동기화되지 않아 pt.endDate가 빈 값으로 남고,
+      // checkAutoEnd()가 과거의 startDate+duration으로 마감일을 계산해 매칭 직후 환자를
+      // 곧바로 "종료" 처리해버리는 버그가 있었음 → pt.status로 두 케이스를 구분해서 판단.
+      const hadPendingReplacement = !!(pt.pendingReplacement || (pt.recruitInfo && pt.status === '매칭완료'));
       pt.caregiverName = cg.name;
       pt.status        = '매칭완료';
       pt.recruited     = true;
@@ -6194,13 +6201,21 @@ function confirmReassign(cgId) {
   saveToAssignHistory(cg);
   syncInsuranceForPatientChange(cg, cg.patientId, pt.id); // 배상보험도 이전 환자 건 이력 보관 + 새 배정용 초기화
 
+  // 중도종료 후 "재모집중"(pt.recruitInfo 있음)인 환자면, pt.startDate/duration은 최초 매칭 때의
+  // 낡은 전체 기간이 그대로 남아있고 pt.endDate는 중도종료 시점에 비워진 상태라, 이 값을 그대로
+  // 복사하면 시작일은 이미 지난 과거로 들어가고 마감일은 빈 값으로 남음 → checkAutoEnd()가
+  // (빈 마감일이라 낡은 startDate+duration으로 마감일을 역산해버려서) 재배정 직후 곧바로 환자를
+  // "종료" 처리해버리는 문제가 있었음. recruitInfo가 있으면 그 값(재모집 시작일~원래 합의된
+  // 마감일)을 사용해야 함.
+  const ri = pt.recruitInfo;
+
   // 간병인 재활성화
   cg.workStatus = '대기중';
   cg.patientId  = String(pt.id);
-  cg.startDate  = pt.startDate || '';
-  cg.startTime  = pt.startTime || '';
-  cg.endDate    = pt.endDate   || '';
-  cg.endTime    = pt.endTime   || '';
+  cg.startDate  = (ri ? ri.startDate : pt.startDate) || '';
+  cg.startTime  = (ri ? ri.startTime : pt.startTime) || '';
+  cg.endDate    = (ri ? ri.endDate   : pt.endDate)   || '';
+  cg.endTime    = pt.endTime || '';
   // 환자의 마감일이 오늘보다 이전(예전 계획이 그대로 남아있는 경우 등)이면 무효화.
   // 그대로 두면 재배정 직후 자동종료 점검 로직이 "이미 마감일 지남"으로 오판해서
   // 근무 시작 전에 곧바로 다시 "종료"로 되돌려버리는 문제가 있었음.
@@ -6218,6 +6233,13 @@ function confirmReassign(cgId) {
   pt.status        = '매칭완료';
   pt.recruited     = true;
   pt.caregiverName = cg.name;
+  if(ri) {
+    // 재모집 시작일~원래 합의된 마감일로 환자 일정도 함께 갱신 (duration도 재계산해서
+    // 아래 "마감일 무효화" 이후 fallback 계산에 낡은 duration이 쓰이지 않게 함)
+    pt.startDate = ri.startDate || pt.startDate;
+    pt.startTime = ri.startTime || pt.startTime;
+    if(ri.endDate) { pt.endDate = ri.endDate; recalcDuration(pt, ri.endDate); }
+  }
   delete pt.recruitInfo;
   // 환자 쪽에도 예전 계획의 과거 마감일이 그대로 남아있으면 같이 무효화 (위와 동일한 이유 —
   // 자동종료 점검이 간병인뿐 아니라 환자의 마감일 기준으로도 별도로 검사하기 때문에,
