@@ -5072,6 +5072,7 @@ function cgRowHTML(cg) {
         <div style="display:flex;gap:6px">
           <button class="btn btn-sm" onclick="openCgDetail('${cg.id}')">상세</button>
           <button class="btn btn-sm" onclick="editCg('${cg.id}')">수정</button>
+          <button class="btn btn-sm" style="border-color:var(--gray);color:var(--gray)" onclick="openQuickEditCgEndTime('${cg.id}')">🕐 마감일시</button>
           ${cg.patientId&&cg.workStatus==='근무중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openEarlyTerminate('${cg.id}')">중도종료</button>`:''}
           ${cg.patientId&&cg.workStatus==='대기중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openPreStartCancel('${cg.id}')">🚫 시작 전 취소</button>`:''}
           ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="cancelEarlyTerminate('${cg.id}')">↩ 종료취소</button>`:''}
@@ -5548,8 +5549,14 @@ function saveQuickEditCgEndTime(cgId) {
   cg.endTime = newEndTime;
   markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
 
-  // 연결된 환자도 같이 맞춰줌 (표시 일관성 유지)
-  const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
+  // 연결된 환자도 같이 맞춰줌 (표시 일관성 유지) — 단, 이 간병인이 그 환자의 유일한 활성
+  // 매칭일 때만. 이미 다른 간병인이 새로 매칭돼 있는데 이 간병인의 patientId가 아직 안
+  // 지워진 채로 남아있는 경우(예: 직접등록으로 교체된 뒤 정리가 안 된 케이스)까지 여기서
+  // 환자 정보를 건드리면, 지금 실제로 근무 중인 새 간병인 쪽 정보를 덮어써버리게 됨.
+  const otherActiveCg = cg.patientId
+    ? caregivers.find(c => String(c.patientId) === String(cg.patientId) && c.workStatus !== '종료' && String(c.id) !== String(cg.id))
+    : null;
+  const pt = (cg.patientId && !otherActiveCg) ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
   if(pt) {
     pt.endDate = newEndDate;
     pt.endTime = newEndTime;
