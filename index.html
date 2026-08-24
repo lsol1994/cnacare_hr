@@ -9643,6 +9643,12 @@ function checkOut(cgId) {
 // ─── 배상보험 ───
 let insFlt = 'default'; // default=가입전+가입, all, none, active, expired
 
+// 배상보험현황에는 대기중/근무중/종료 간병인만 대상으로 함.
+// 예비(한번도 매칭된 적 없음)·휴무 간병인은 보험 관리 대상이 아니므로 어떤 탭/검색에서도 노출되지 않아야 함.
+function isInsEligible(c) {
+  return c.workStatus === '대기중' || c.workStatus === '근무중' || c.workStatus === '종료';
+}
+
 function setInsFlt(flt) {
   insFlt = flt;
   ['all','none','active','expired'].forEach(t=>{
@@ -9780,7 +9786,7 @@ function refreshInsSearchOptions() {
   const yearSel = document.getElementById('ins-search-year');
   if(!yearSel) return;
   const years = new Set();
-  caregivers.forEach(c => {
+  caregivers.filter(isInsEligible).forEach(c => {
     if(c.insuranceExpiry) years.add(c.insuranceExpiry.slice(0,4));
     (c.insuranceHistory||[]).forEach(h => { if(h.expiry) years.add(h.expiry.slice(0,4)); });
   });
@@ -9828,7 +9834,7 @@ function renderInsuranceSearchResults(el, year, month) {
   }
 
   const rows = [];
-  caregivers.forEach(c => {
+  caregivers.filter(isInsEligible).forEach(c => {
     if(isExpiredCurrent(c) && matchYM(c.insuranceExpiry)) {
       const pt = c.insurancePatientId ? patients.find(p=>String(p.id)===String(c.insurancePatientId)) : null;
       rows.push({
@@ -9910,12 +9916,12 @@ function renderInsurance() {
     return 'active'; // 가입중
   }
 
-  // 전체 간병인 대상 (종료 포함) - 필터로 구분
-  let list = [...caregivers];
+  // 대상: 대기중/근무중/종료 간병인만 (예비·휴무 제외) - 필터로 세부 구분
+  let list = caregivers.filter(isInsEligible);
   if(insFlt === 'none')         list = list.filter(c=>c.workStatus!=='종료' && getInsStatus(c)==='none');
   else if(insFlt === 'active')  list = list.filter(c=>c.workStatus!=='종료' && getInsStatus(c)==='active');
   else if(insFlt === 'expired') list = list.filter(c=>getInsStatus(c)==='expired' || c.workStatus==='종료');
-  else if(insFlt === 'all')     { /* 전체 */ }
+  else if(insFlt === 'all')     { /* 전체 (대기중/근무중/종료) */ }
   else {
     // default: 현역(종료 아닌) 중 가입전+가입만 표시
     list = list.filter(c=>c.workStatus!=='종료' && getInsStatus(c)!=='expired');
