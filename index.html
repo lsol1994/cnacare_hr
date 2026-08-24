@@ -9565,6 +9565,25 @@ function autoFillAttendance(cgId) {
     cur.setDate(cur.getDate() + 1);
   }
 
+  // ── 마감일이 (맞교체/연장 등으로) 나중에 단축된 경우, 예전(더 길었던) 마감일 기준으로
+  // 이미 만들어진 자동 생성 기록 중 새 마감일보다 뒤 날짜에 남은 "유령" 기록을 정리한다.
+  // 예: 처음 등록 시 환자의 전체 계약기간 기준으로 마감일이 자동 계산돼서 더 먼 미래까지
+  // 채워졌다가, 이후 맞교체로 마감일이 앞당겨진 경우 — 뒤쪽 날짜의 00:00~23:59 placeholder가
+  // 안 지워지고 남아있다가, 같은 간병인 id가 재사용되어 그 날짜에 새 배정이 들어오면
+  // "새 배정의 첫날인데 00:00으로 나오는" 문제로 이어짐.
+  // 수기로 직접 입력/수정한 기록(auto!==true)은 실제 근무 데이터일 수 있으므로 절대 지우지 않는다.
+  if(hasEnded) {
+    for(let i = attendance.length - 1; i >= 0; i--) {
+      const a = attendance[i];
+      if(a.cgId !== String(cgId) || a.auto !== true) continue;
+      const aDate = a.inDate || a.date;
+      if(aDate && aDate > endDate) {
+        attendance.splice(i, 1);
+        added++;
+      }
+    }
+  }
+
   if(added > 0) save();
   return added;
 }
@@ -10245,6 +10264,30 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
   const rep = pt.pendingReplacement;
   const prevCgName = pt.caregiverName || ''; // 인계 전 기존 간병인 이름 보존
   const isDirectSwap = !!(pt.recruitInfo && pt.recruitInfo.reason === '맞교체(예약)'); // 삭제 전에 미리 판단
+
+  // ── 퇴장하는 기존 간병인 마감 처리 (journal + 상태) ──
+  // ⚠️ 이 함수는 checkAutoEnd() 루프①(정상 케이스 — 거기서 이미 기존 간병인을 먼저 마감
+  // 처리한 뒤 호출함)뿐 아니라, 인계 시각이 이미 지난 뒤에 saveReplacementInfo()의
+  // "즉시 인계" 분기나 ①-보완 캐치업 루프에서도 직접 호출된다. 후자의 경로들은 기존
+  // 간병인을 전혀 손대지 않은 채 이 함수만 부르므로, 여기서 안전하게(이미 마감 처리된
+  // 경우엔 아래 find가 아무것도 못 찾아 그냥 넘어가므로 중복 처리 걱정 없음) 마무리해준다.
+  const outgoingCg = caregivers.find(c=>String(c.patientId)===String(pt.id) && c.workStatus!=='종료');
+  if(outgoingCg) {
+    outgoingCg.endDate = outgoingEndDate || outgoingCg.endDate || '';
+    outgoingCg.endTime = outgoingEndTime || outgoingCg.endTime || '';
+    autoFillAttendanceUntilEnd(String(outgoingCg.id), outgoingCg.endDate); // 마감일까지 간병일지 자동 채우기 (상태 변경 전에 먼저)
+    const isReturningCg = !!(outgoingCg.assignHistory && outgoingCg.assignHistory.length);
+    if(isReturningCg) saveToAssignHistory(outgoingCg);
+    outgoingCg.workStatus = isReturningCg ? '대기중' : '종료';
+    if(isReturningCg) {
+      outgoingCg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록
+      syncInsuranceForPatientChange(outgoingCg, outgoingCg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관
+      outgoingCg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
+      outgoingCg._returnedToPoolAt = outgoingCg.endDate; // 재처리 방지용 플래그
+    }
+    markCgEdited(outgoingCg.id); // Firebase 덮어쓰기 방지 (10초)
+  }
+
   const newCg = {
     id: genId(),
     patientId: String(pt.id),
