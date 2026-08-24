@@ -3995,10 +3995,26 @@ function deletePatient(id) {
   if(!confirm('이 환자를 삭제할까요?')) return;
   addDeletedPtId(String(id)); // Firebase 복원 방지
   patients = patients.filter(x=>String(x.id)!==String(id));
-  // 연결된 간병인 patientId 클리어
+  // 연결된 간병인 정보 클리어 — patientId/workStatus뿐 아니라 이번 매칭 건의 기간·시간 정보까지
+  // 함께 지워야 함. patientId만 비우고 startDate/endDate를 남겨두면, 환자는 이미 삭제됐는데도
+  // 간병인 레코드에 낡은 기간이 그대로 남아있어 캘린더(급여 지급일 계산)에 계속 표시되는 문제가
+  // 있었음. 이미 완료·기록된 과거 근무건(assignHistory)은 여기서 건드리지 않고, "현재 매칭
+  // 중이던" 값들만 지운다.
   caregivers.forEach(cg => {
-    if(String(cg.patientId)===String(id)) { cg.patientId=''; cg.workStatus='대기중'; }
-    if(String(cg.earlyEndPatientId)===String(id)) { delete cg.earlyEndPatientId; delete cg.earlyEndSnapshot; }
+    if(String(cg.patientId)===String(id)) {
+      cg.patientId  = '';
+      cg.workStatus = '대기중';
+      cg.startDate  = '';
+      cg.startTime  = '';
+      cg.endDate    = '';
+      cg.endTime    = '';
+      cg.duration   = '';
+      markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
+    }
+    if(String(cg.earlyEndPatientId)===String(id)) {
+      delete cg.earlyEndPatientId; delete cg.earlyEndSnapshot;
+      markCgEdited(cg.id);
+    }
   });
   save(); closeOverlay('pt-overlay'); renderPatients(); renderCaregivers(); updateSidebar();
   toast('삭제됐어요');
@@ -8413,6 +8429,18 @@ function showCalDetail(dateStr) {
       const estimateNote = isEstimate
         ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚠️ 예전 데이터라 선지급/차감 내역까지는 반영 못한 추정 금액이에요 — 지급 전 확인해주세요</div>'
         : '';
+      let expenseHtml = '';
+      const expenseMsg = buildExpenseMemoFromHistory(cg, h, { label: '최종 정산', amount: settleAmount });
+      if(expenseMsg) {
+        _calExpenseMsgs.push(expenseMsg);
+        const histIdx = _calExpenseMsgs.length - 1;
+        expenseHtml = '<div style="margin-top:6px">'
+          + '<div id="cal-expense-text-' + histIdx + '" style="white-space:pre-wrap;font-size:11px;line-height:1.6;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:6px;margin-bottom:4px">' + expenseMsg + '</div>'
+          + '<div style="display:flex;gap:6px">'
+          + '<button class="btn btn-sm" id="cal-expense-toggle-' + histIdx + '" style="flex:1;justify-content:center" onclick="toggleCalExpense(' + histIdx + ')">🙈 숨기기</button>'
+          + '<button class="btn btn-sm" style="flex:1;justify-content:center" onclick="copyCalExpenseMsg(' + histIdx + ')">📋 복사</button>'
+          + '</div></div>';
+      }
       payEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 최종 정산 (이력에서 복구됨)</div>'
@@ -8421,6 +8449,7 @@ function showCalDetail(dateStr) {
         + '<div style="font-size:11px;color:var(--gray);margin-top:2px">간병인의 현재 상태가 이 근무 이력과 어긋나 있어요 — 간병인 카드에서 상태를 확인해주세요</div>'
         + estimateNote
         + bankHtml
+        + expenseHtml
         + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="markAssignHistorySettled(\'' + cg.id + '\',\'' + h.patientId + '\',\'' + h.startDate + '\')">✅ 정산 완료 처리</button>'
         + '</div>' });
     });
@@ -8449,6 +8478,18 @@ function showCalDetail(dateStr) {
           : '';
         var bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
         var reserveStr = vp.isReserve ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">원래 지급일: ' + (vp.payDate||vp.endDate) + '</div>' : '';
+        var expenseHtml = '';
+        var expenseMsg = buildExpenseMemoFromHistory(cg, h, vp);
+        if(expenseMsg) {
+          _calExpenseMsgs.push(expenseMsg);
+          var histIdx2 = _calExpenseMsgs.length - 1;
+          expenseHtml = '<div style="margin-top:6px">'
+            + '<div id="cal-expense-text-' + histIdx2 + '" style="white-space:pre-wrap;font-size:11px;line-height:1.6;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:6px;margin-bottom:4px">' + expenseMsg + '</div>'
+            + '<div style="display:flex;gap:6px">'
+            + '<button class="btn btn-sm" id="cal-expense-toggle-' + histIdx2 + '" style="flex:1;justify-content:center" onclick="toggleCalExpense(' + histIdx2 + ')">🙈 숨기기</button>'
+            + '<button class="btn btn-sm" style="flex:1;justify-content:center" onclick="copyCalExpenseMsg(' + histIdx2 + ')">📋 복사</button>'
+            + '</div></div>';
+        }
         payEvents.push({ time: '', html:
           '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
           + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 ' + vp.label + (vp.isReserve?' [주말·공휴일 조정]':'') + ' (이력에서 복구됨)</div>'
@@ -8458,6 +8499,7 @@ function showCalDetail(dateStr) {
           + '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚠️ 선지급/차감 내역은 반영 안 된 금액이에요 — 실제 지급 여부는 별도로 확인해주세요</div>'
           + bankHtml
           + reserveStr
+          + expenseHtml
           + '</div>' });
       });
     });
@@ -9133,6 +9175,64 @@ function buildExpenseMemo(cg, pt, payEntry) {
     if(pt._originalEndDate && rangeEnd > pt._originalEndDate) {
       reasonLabel += '_연장';
     }
+  }
+
+  const startStr = fmtMD(rangeStart, rangeStartTime);
+  const endStr   = fmtMD(rangeEnd, rangeEndTime);
+
+  return `${ptName}_${hospital} 간병인(${cgName}) 간병비 입금\n${startStr} ~ ${endStr} 총 ${totalDays}일 ${amount.toLocaleString()}원(${reasonLabel})`;
+}
+
+// ── assignHistory 복구 급여 카드용 지출내용 생성 ──
+// buildExpenseMemo와 형식은 동일하지만, 라이브 pt 객체 없이(재배정 등으로 이미 다른 환자로
+// 덮어써진 뒤라 없음) assignHistory에 저장된 값(h: patientName/hospital/startDate/endDate/
+// startTime/endTime/pay)만으로 구성함. 캘린더의 "이력에서 복구됨" 급여 카드 전용
+function buildExpenseMemoFromHistory(cg, h, payEntry) {
+  if(!cg || !h || !payEntry) return '';
+  const ptName   = h.patientName || '';
+  const hospital = h.hospital || '';
+  const cgName   = cg.name || '';
+  const amount   = payEntry.amount || 0;
+
+  function fmtMD(dateStr, timeStr) {
+    const d = parseLocalDate(dateStr);
+    if(!d) return (dateStr||'') + (timeStr?' '+timeStr:'');
+    return (d.getMonth()+1) + '/' + d.getDate() + (timeStr ? ' '+timeStr : '');
+  }
+
+  // 환자 기록이 아직 남아있으면(삭제되지 않고 종료 처리만 된 경우) 종료사유/매칭상태를 참고
+  const pt = patients.find(p=>String(p.id)===String(h.patientId));
+
+  let rangeStart, rangeStartTime, rangeEnd, rangeEndTime, totalDays, reasonLabel;
+
+  if(payEntry.label === '단기 급여') {
+    rangeStart = h.startDate; rangeStartTime = h.startTime;
+    rangeEnd   = h.endDate;   rangeEndTime   = h.endTime;
+    totalDays  = Math.round((parseLocalDate(rangeEnd) - parseLocalDate(rangeStart)) / 86400000);
+    reasonLabel = (pt && pt.endReason) ? pt.endReason : '퇴실';
+  } else if(/^최종/.test(payEntry.label || '')) {
+    // 최종 정산(이력복구): 이력에 남은 기간으로 마지막 완료 주차를 다시 계산
+    const virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
+    const allDates = calcPayDates(virtualCg).filter(d=>d.week);
+    const lastWeekEntry = allDates.sort((a,b)=>b.week-a.week)[0];
+    rangeStart     = lastWeekEntry ? (lastWeekEntry.payDate||lastWeekEntry.date) : h.startDate;
+    rangeStartTime = h.startTime;
+    rangeEnd       = h.endDate; rangeEndTime = h.endTime;
+    totalDays      = Math.round((parseLocalDate(rangeEnd) - parseLocalDate(rangeStart)) / 86400000);
+    const lastWeek  = lastWeekEntry ? lastWeekEntry.week + 1 : 1;
+    const isReplace = !!(pt && pt.status !== '종료');
+    reasonLabel = lastWeek + '주차 주급_' + (isReplace ? '교체' : '퇴실');
+  } else {
+    // 정규 N주차 주급(이력복구)
+    const week = payEntry.week || 1;
+    const wkStart = parseLocalDate(h.startDate);
+    if(wkStart) wkStart.setDate(wkStart.getDate() + (week-1)*7);
+    rangeStart = wkStart ? toLocalDateStr(wkStart) : h.startDate;
+    rangeStartTime = h.startTime;
+    rangeEnd   = payEntry.payDate || payEntry.date;
+    rangeEndTime = (h.endDate && rangeEnd === h.endDate) ? (h.endTime || h.startTime) : h.startTime;
+    totalDays  = 7;
+    reasonLabel = payEntry.label;
   }
 
   const startStr = fmtMD(rangeStart, rangeStartTime);
