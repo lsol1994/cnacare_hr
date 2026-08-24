@@ -1675,6 +1675,19 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   </div>
 </div>
 
+<!-- ══ 맞교체 모달 (연장 없이 간병인만 교체) ══ -->
+<div class="overlay" id="swap-overlay">
+  <div class="overlay-card" style="max-width:400px" onclick="event.stopPropagation()">
+    <div class="overlay-hd">
+      <h3 id="swap-title">🔀 간병인 맞교체</h3>
+      <button class="btn btn-icon" onclick="closeOverlay('swap-overlay')">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="swap-body"></div>
+  </div>
+</div>
+
 <!-- ══ 예정 교체 간병인 등록 모달 ══ -->
 <div class="overlay" id="replace-overlay">
   <div class="overlay-card" style="max-width:420px" onclick="event.stopPropagation()">
@@ -3296,6 +3309,7 @@ function ptRowHTML(p) {
           </label>
         </div>
         ${p.status==='매칭완료'?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="openExtendPatient('${p.id}')">📅 연장</button>`:''}
+        ${(p.status==='매칭완료' && !p.recruitInfo)?`<button class="btn btn-sm" style="border-color:var(--green);color:var(--green)" onclick="openDirectSwap('${p.id}')">🔀 맞교체</button>`:''}
         <button class="btn btn-sm" onclick="doCopy(patients.find(x=>String(x.id)==='${p.id}')?._editedPost || buildPost(patients.find(x=>String(x.id)==='${p.id}')))">
           <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>복사
         </button>
@@ -3452,7 +3466,7 @@ function openPatient(id) {
     <div style="font-size:12px;color:var(--gray-lt);padding:6px 0">아직 매칭된 간병인이 없어요</div>`}
     ${p.status==='매칭완료' && p.recruitInfo ? `
     <div class="hr"></div>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--amber);margin-bottom:8px">🔜 연장 후 예약 교체 진행중</div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--amber);margin-bottom:8px">${p.recruitInfo.reason==='맞교체(예약)'?'🔀 맞교체 예정':'🔜 연장 후 예약 교체 진행중'}</div>
     <div style="background:var(--amber-lt);border-radius:var(--rsm);padding:10px 14px;margin-bottom:8px;font-size:12px;color:#92400e">
       새 간병인 시작 예정일: <b>${p.recruitInfo.startDate||'—'} ${p.recruitInfo.startTime||''}</b><br>
       (기존 간병인 근무 종료 후 자동으로 교체돼요)
@@ -6063,6 +6077,86 @@ function confirmExtend(ptId) {
   }
 }
 
+// ══ 맞교체: 연장 없이 간병인만 교체 (환자 마감일은 그대로 유지) ══
+// "연장" 모달과 완전히 분리된 별도 진입점. 내부 데이터는 예약교체와 동일하게
+// p.recruitInfo + p.pendingReplacement를 사용해서 checkAutoEnd()의 자동 인계 로직을
+// 그대로 재사용한다 (인계 로직 자체는 recruitInfo.reason 값과 무관하게 동작함).
+// 차이점: 연장은 "환자 마감일을 미래로 늘리고 기존 간병인 마감일은 그대로" 두는 반면,
+// 맞교체는 "환자 마감일은 그대로 두고 기존 간병인 마감일만 앞당겨" 교체 시점을 만든다.
+function openDirectSwap(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  if(!p) return;
+  const cg = caregivers.find(c=>String(c.patientId)===String(ptId)&&c.workStatus!=='종료');
+  if(!cg) { toast('현재 매칭된 간병인이 없어요', true); return; }
+  if(!p.endDate) { toast('환자 마감일을 먼저 등록해주세요', true); return; }
+  document.getElementById('swap-title').textContent = '🔀 ' + p.name + ' 간병인 맞교체';
+  const ptEndStr = p.endDate + ' ' + (p.endTime||'');
+  const ptIdEsc = String(ptId).replace(/'/g,"\\'");
+  document.getElementById('swap-body').innerHTML = '<div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;margin-bottom:1rem;font-size:12px;color:var(--gray)">'
+    + '<div>현재 담당 간병인: <b style="color:var(--black)">' + cg.name + '</b></div>'
+    + '<div>환자 계약 마감일: <b style="color:var(--black)">' + ptEndStr + '</b> <span style="color:var(--teal)">(그대로 유지)</span></div>'
+    + '</div>'
+    + '<div class="field"><label>맞교체 예정일 <span style="color:var(--red)">*</span></label>'
+    + '<input type="date" id="swap-date" oninput="onSwapDateChange(&quot;' + ptIdEsc + '&quot;)"></div>'
+    + '<div class="field"><label>맞교체 예정시간</label>'
+    + '<input type="time" id="swap-time"></div>'
+    + '<div style="background:var(--teal-lt);border-radius:var(--rsm);padding:8px 12px;margin-bottom:.875rem;font-size:12px;color:var(--teal);font-weight:600;min-height:32px" id="swap-preview"></div>'
+    + '<div style="font-size:11px;color:var(--gray);margin-bottom:.875rem">이 날짜부터 <b>' + cg.name + '</b>님 근무가 마감되고, 등록할 새 간병인이 이어서 근무해요. 환자 계약 마감일은 변경되지 않아요.</div>'
+    + '<div style="display:flex;gap:8px;margin-top:1rem">'
+    + '<button class="btn btn-teal" style="flex:1;justify-content:center" onclick="confirmDirectSwap(&quot;' + ptIdEsc + '&quot;)">맞교체 예약</button>'
+    + '<button class="btn" onclick="closeOverlay(&quot;swap-overlay&quot;)">취소</button></div>';
+  document.getElementById('swap-overlay').classList.add('open');
+}
+
+function onSwapDateChange(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  const d = document.getElementById('swap-date') && document.getElementById('swap-date').value;
+  const prev = document.getElementById('swap-preview');
+  if(!prev) return;
+  if(!d || !p || !p.endDate) { prev.textContent=''; return; }
+  const days = Math.round((parseLocalDate(p.endDate)-parseLocalDate(d))/86400000);
+  if(days < 0) { prev.textContent='⚠️ 환자 마감일보다 늦을 수 없어요'; prev.style.color='var(--red)'; }
+  else { prev.textContent='→ 새 간병인 근무기간: '+days+'일'; prev.style.color='var(--teal)'; }
+}
+
+function confirmDirectSwap(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  if(!p) return;
+  const cg = caregivers.find(c=>String(c.patientId)===String(ptId)&&c.workStatus!=='종료');
+  if(!cg) { toast('현재 매칭된 간병인이 없어요', true); return; }
+  const swapDate = document.getElementById('swap-date') && document.getElementById('swap-date').value;
+  const swapTime = (document.getElementById('swap-time') && document.getElementById('swap-time').value) || '';
+  if(!swapDate) { toast('맞교체 예정일을 입력해주세요', true); return; }
+  if(!p.endDate) { toast('환자 마감일이 없어요', true); return; }
+  if(parseLocalDate(swapDate) > parseLocalDate(p.endDate)) {
+    toast('맞교체 예정일은 환자 마감일보다 늦을 수 없어요', true); return;
+  }
+  if(cg.startDate && parseLocalDate(swapDate) < parseLocalDate(cg.startDate)) {
+    toast('맞교체 예정일은 현재 간병인 시작일보다 빠를 수 없어요', true); return;
+  }
+  const repDays = Math.round((parseLocalDate(p.endDate)-parseLocalDate(swapDate))/86400000);
+
+  // 기존 간병인 마감일만 맞교체일로 단축 (환자 마감일은 건드리지 않음 → 연장과의 핵심 차이)
+  cg.endDate = swapDate; cg.endTime = swapTime;
+  if(cg.startDate) {
+    const cgDays = Math.round((parseLocalDate(swapDate)-parseLocalDate(cg.startDate))/86400000);
+    if(cgDays >= 0) cg.duration = cgDays+'일';
+  }
+
+  p.recruitInfo = {
+    startDate: swapDate, startTime: swapTime, endDate: p.endDate,
+    duration: repDays+'일', reason: '맞교체(예약)'
+  };
+  // p.status/caregiverName/recruited는 그대로 둠 → 기존 간병인이 계속 매칭 간병인으로 표시됨
+  markCgEdited(cg.id); // Firebase 덮어쓰기 방지
+  markPtEdited(p.id);
+  save();
+  autoFillAttendance(String(cg.id)); // 단축된 마감일에 맞춰 간병일지 동기화 (신규 추가분만 채움 — 아래 참고)
+  refreshCalendarIfOpen();
+  closeOverlay('swap-overlay'); renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
+  toast('✅ 맞교체 예약됐어요. '+cg.name+'님은 '+swapDate+'까지 근무하고, 이후 교체할 간병인 공고를 올려주세요.');
+}
+
 // ── 예정 교체 간병인 정보 입력/수정 (기존 간병인 근무 종료 시 자동 인계) ──
 function openReplacementForm(ptId) {
   const p = patients.find(x=>String(x.id)===String(ptId));
@@ -8124,7 +8218,7 @@ function showCalDetail(dateStr) {
       + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병 시작 (교체 간병인)' + (p.recruitInfo.startTime?' · '+p.recruitInfo.startTime:'') + '</div>'
       + '<div style="font-size:14px;font-weight:700">' + p.name + '</div>'
       + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (p.hospital||'') + (p.room?' ('+p.room+')':'') + ' / 간병인: ' + (rep.name||'') + '</div>'
-      + '<div style="font-size:11px;color:var(--gray);margin-top:2px">연장 후 예약 교체</div>'
+      + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (p.recruitInfo.reason==='맞교체(예약)'?'맞교체':'연장 후 예약 교체') + '</div>'
       + '</div>' });
   });
 
@@ -10050,6 +10144,7 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
   if(!pt || !pt.pendingReplacement) return null;
   const rep = pt.pendingReplacement;
   const prevCgName = pt.caregiverName || ''; // 인계 전 기존 간병인 이름 보존
+  const isDirectSwap = !!(pt.recruitInfo && pt.recruitInfo.reason === '맞교체(예약)'); // 삭제 전에 미리 판단
   const newCg = {
     id: genId(),
     patientId: String(pt.id),
@@ -10072,7 +10167,7 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
   if(!pt.recruitHistory) pt.recruitHistory = [];
   pt.recruitHistory.push({
     endDate: outgoingEndDate||'', recruitDate: outgoingEndDate||'',
-    reason: '연장 후 예약 교체', prevCg: prevCgName,
+    reason: isDirectSwap ? '맞교체' : '연장 후 예약 교체', prevCg: prevCgName,
     recordedAt: new Date().toLocaleDateString('ko-KR')
   });
   delete pt.pendingReplacement;
