@@ -10486,6 +10486,11 @@ function checkAutoEnd() {
       cg.endDate = endDate;
       cg.endTime = endTime || '23:59';
 
+      // 종료 처리 전에 마감일까지 간병일지 자동 채우기 (① 루프와 동일하게 처리 —
+      // 이 경로는 간병인 자체엔 endDate가 없어서 환자 마감일로 대신 종료되는 경우라
+      // 이 호출이 없으면 근무 기간 전체의 간병일지가 비어있는 채로 남게 됨)
+      autoFillAttendanceUntilEnd(String(cg.id), cg.endDate);
+
       const isReturningCg = !!(cg.assignHistory && cg.assignHistory.length);
       if(isReturningCg) {
         cg.earlyEndPatientId = String(pt.id); // "종료취소"가 이 경로로 끝난 경우도 복원할 수 있도록
@@ -10512,9 +10517,13 @@ function checkAutoEnd() {
     if(pt.status !== '종료' || !pt.endDate) return;
     const cg = caregivers.find(c=>String(c.patientId)===String(pt.id) && c.workStatus!=='종료');
     if(!cg) return;
-    cg.workStatus = '종료';
     cg.endDate = pt.endDate;
     cg.endTime = pt.endTime || cg.endTime || '';
+    // 종료 처리 전에 마감일까지 간병일지 자동 채우기 (① 루프와 동일 처리 —
+    // 이 경로는 다른 기기의 낡은 저장으로 간병인 쪽 종료가 늦게 반영되는 경우라
+    // 이 호출이 없으면 그 사이 기간의 간병일지가 비어있는 채로 남게 됨)
+    autoFillAttendanceUntilEnd(String(cg.id), cg.endDate);
+    cg.workStatus = '종료';
     recalcDuration(cg, cg.endDate);
     cg.earlyEndPatientId = String(pt.id);
     saveToAssignHistory(cg);
