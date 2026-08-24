@@ -1691,6 +1691,27 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 <div id="toast"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg><span id="toast-msg"></span></div>
 
 <script>
+// ─── 팝업(오버레이) 항상 맨 위에 표시 ───
+// 모든 .overlay가 z-index:500으로 동일해서, 기존에 열려있던 정보창(예: 간병인/환자 상세) 위에
+// 중도종료·최종마감일 등 새 팝업(예: replace-overlay, extend-overlay)이 뜨면 DOM 순서상 뒤로
+// 숨겨지는 문제가 있었음. 어떤 오버레이든 'open' 클래스가 붙는 순간 최상단 z-index를 새로 부여해서
+// 항상 가장 최근에 연 팝업이 맨 위로 오도록 함 (앞으로 추가되는 팝업에도 자동 적용됨).
+(function() {
+  let topZ = 500;
+  function watchOverlay(el) {
+    const mo = new MutationObserver(muts => {
+      muts.forEach(m => {
+        if(m.attributeName === 'class' && el.classList.contains('open')) {
+          topZ += 1;
+          el.style.zIndex = topZ;
+        }
+      });
+    });
+    mo.observe(el, { attributes: true, attributeFilter: ['class'] });
+  }
+  document.querySelectorAll('.overlay').forEach(watchOverlay);
+})();
+
 // ─── 전역 오류 핸들러 ───
 window.onerror = function(msg, src, line, col, err) {
   console.warn('오류 발생:', msg, src, line);
@@ -4819,12 +4840,24 @@ function saveCg() {
       pt.recruited     = true;
       delete pt.recruitInfo; // 재모집이 실제로 완료됐으므로 "재모집중" 표시 해제
 
+      // 간병인 시작일시도 항상 환자에게 동기화 (기존엔 마감일만 동기화되고 시작일은 빠져있어서,
+      // 간병인 카드에서 시작일을 고쳐도 환자 카드의 시작일은 낡은 채로 남아있는 비대칭 문제가 있었음)
+      // 단, 예약교체가 이미 진행 중이었다면 환자의 일정을 건드리면 안 되므로 예외
+      if(cg.startDate && !hadPendingReplacement) {
+        pt.startDate = cg.startDate;
+        pt.startTime = cg.startTime || '';
+      }
+
       // 간병인 마감일시를 항상 환자에도 동기화 (기존엔 환자에 마감일이 이미 있으면 무시했었음 →
       // 그래서 간병인 쪽에서 마감일을 고치면 환자 쪽은 안 바뀌는 비대칭 문제가 있었음. 항상 동기화로 변경)
       // 단, 예약교체가 이미 진행 중이었다면 환자의 연장된 일정을 건드리면 안 되므로 예외
       if(cg.endDate && !hadPendingReplacement) {
+        // ⚠️ endDate는 반드시 직접 대입 (시작일시와 동일한 방식). recalcDuration()에만 맡기면
+        // 환자에 startDate가 아직 없거나 새 마감일이 시작일보다 빠른 경우 duration/endDate 계산을
+        // 조용히 건너뛰어서, endTime만 바뀌고 endDate는 낡은 값 그대로 남는 불일치가 생길 수 있었음
+        pt.endDate = cg.endDate;
         pt.endTime = cg.endTime || '';
-        recalcDuration(pt, cg.endDate); // 환자 endDate + duration 동시 재계산
+        recalcDuration(pt, cg.endDate); // 가능하면 duration도 같이 재계산 (endDate 자체는 위에서 이미 확정됨)
       }
       markPtEdited(pt.id); // Firebase 덮어쓰기 방지 (10초)
     }
@@ -5540,6 +5573,19 @@ function saveToAssignHistory(cg, overridePatientId) {
   if(!pt) return;
   if(!cg.assignHistory) cg.assignHistory = [];
 
+  // 이 근무건의 "미정산 금액"을 기록 시점에 미리 계산해서 이력에 같이 남겨둠.
+  // 캘린더의 최종정산은 간병인의 현재(live) endDate/workStatus만 보고 계산하는데, 재배정이나
+  // 동기화 충돌(여러 PC에서 같은 간병인 레코드를 거의 동시에 수정 시 "더 최근 저장분"이 통째로
+  // 이기는 방식이라 낡은 값이 새 값을 덮어쓸 수 있음)로 그 값이 사라지면 캘린더에서 이 근무건의
+  // 정산 자체가 통째로 안 보이게 됨. assignHistory는 병합 시 항상 유실 없이 합쳐지므로, 여기에도
+  // 정산 여부를 남겨두면 캘린더가 이걸로 놓친 정산을 다시 찾아낼 수 있음.
+  let settleAmount = 0;
+  if(cg.pay && cg.startDate && cg.endDate) {
+    const totalOwed   = calcTotalPayAmount(cg);
+    const alreadyPaid = calcPayDates(cg).reduce((sum,p)=>sum+(p.amount||0), 0) + totalAdvance(cg);
+    settleAmount = Math.max(0, totalOwed - alreadyPaid);
+  }
+
   // 같은 환자 + 시작일이 이미 있으면 업데이트
   const existing = cg.assignHistory.find(h =>
     String(h.patientId)===String(ptId) && h.startDate===(cg.startDate||'')
@@ -5550,6 +5596,8 @@ function saveToAssignHistory(cg, overridePatientId) {
     if(!existing.diagnosis && pt.diagnosis) existing.diagnosis = pt.diagnosis; // 예전 이력에 병증이 비어있으면 지금이라도 채워둠
     existing.status     = cg.workStatus || existing.status;
     existing.recordedAt = new Date().toLocaleDateString('ko-KR');
+    // 이미 "정산완료"로 확인된 이력은 건드리지 않고, 아직이면 최신 금액으로 갱신
+    if(!existing.settled) existing.settleAmount = settleAmount;
     return;
   }
 
@@ -5564,8 +5612,24 @@ function saveToAssignHistory(cg, overridePatientId) {
     endTime:     cg.endTime   || '',
     pay:         cg.pay       || '',
     status:      cg.workStatus || '',   // 근무중/대기중/종료 상태 보존
+    settled:     false,       // 정산 여부 — 캘린더에서 "정산 완료 처리"하면 true로 바뀜
+    settleAmount,              // 기록 시점 기준 미정산 금액 (캘린더가 라이브 값 유실 시 이걸로 복구)
     recordedAt:  new Date().toLocaleDateString('ko-KR')
   });
+}
+
+// 캘린더의 "이력에서 복구됨" 최종정산을 실제로 지급 처리했을 때 정산완료로 표시
+// (patientId+startDate로 식별 — assignHistory는 동기화 병합 시 재정렬될 수 있어 배열 인덱스는 불안정함)
+function markAssignHistorySettled(cgId, patientId, startDate) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg || !cg.assignHistory) return;
+  const h = cg.assignHistory.find(x=>String(x.patientId)===String(patientId) && x.startDate===startDate);
+  if(!h) { toast('이력을 찾을 수 없어요', true); return; }
+  h.settled = true;
+  markCgEdited(cg.id);
+  save();
+  refreshCalendarIfOpen();
+  toast('✅ 정산 완료로 표시했어요');
 }
 
 // ─── 중복 간병인 정리 ───
@@ -8089,6 +8153,44 @@ function showCalDetail(dateStr) {
       + expenseHtml
       + '</div>' });
   });
+  // ── assignHistory 기반 미정산 이력 복구 ──
+  // 위 블록은 간병인의 "현재(live)" endDate/workStatus만 보고 판단하기 때문에, 재배정이나
+  // 여러 PC의 동시 편집(같은 간병인 레코드를 거의 동시에 저장하면 "더 최근 저장분"이 통째로
+  // 이기는 동기화 방식이라 낡은 값이 새로 덮어써질 수 있음)으로 그 값이 사라지면, 이미 끝난
+  // 근무의 최종정산이 캘린더에서 통째로 안 보이게 되는 문제가 있었음. assignHistory는 병합
+  // 시 항상 유실 없이 합쳐지므로, settled:false로 표시된 이력을 별도로 훑어서 놓치지 않게 함.
+  // (settled 필드가 아예 없는 예전 이력은 이 기능 도입 전 데이터라 여기서 다루지 않음)
+  caregivers.forEach(function(cg) {
+    (cg.assignHistory||[]).forEach(function(h) {
+      if(h.settled !== false) return; // settled:false로 명시된 것만 대상 (구버전 이력 제외)
+      if(!h.endDate) return;
+      const settleAmount = h.settleAmount || 0;
+      if(settleAmount <= 0) return;
+      const rawEndDate = parseLocalDate(h.endDate);
+      if(!rawEndDate) return;
+      const adjusted = adjustPayDateToMonday(rawEndDate);
+      if(toLocalDateStr(adjusted) !== dateStr) return;
+      // 라이브 cg.endDate가 이 이력의 endDate와 여전히 같으면(=재배정 등으로 아직 덮어써지지
+      // 않았으면) 위의 "당일 근무가 마감되는 간병인" 블록에서 이미 정상적으로 계산·표시됐을
+      // 것이므로 중복 방지 (그 블록은 workStatus와 무관하게 cg.endDate만 보고 판단함 —
+      // 재사용 대기(대기중)로 돌아간 간병인도 endDate는 그대로 유지되기 때문)
+      const liveCovers = !!cg.endDate && cg.endDate === h.endDate;
+      if(liveCovers) return;
+      const bankStr = (cg.bankName||cg.bankAccount)
+        ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
+        : '';
+      const bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
+      payEvents.push({ time: '', html:
+        '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+        + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 최종 정산 (이력에서 복구됨)</div>'
+        + '<div style="font-size:14px;font-weight:700">' + cg.name + ' (' + (h.patientName||'') + ')</div>'
+        + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + settleAmount.toLocaleString() + '원</div>'
+        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">간병인의 현재 상태가 이 근무 이력과 어긋나 있어요 — 간병인 카드에서 상태를 확인해주세요</div>'
+        + bankHtml
+        + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="markAssignHistorySettled(\'' + cg.id + '\',\'' + h.patientId + '\',\'' + h.startDate + '\')">✅ 정산 완료 처리</button>'
+        + '</div>' });
+    });
+  });
 
   // 시간대순 정렬 (시간 없는 항목은 맨 뒤로)
   function sortByTime(arr) {
@@ -10011,6 +10113,26 @@ function checkAutoEnd() {
       }
     }
     endedItems.push({pt, cg});
+  });
+
+  // ③ 정합성 복구: 환자는 이미 "종료" 상태인데 매칭된 간병인은 아직 종료되지 않은 경우 자동 동기화.
+  // (여러 PC에서 같은 간병인 레코드를 거의 동시에 저장하면 "더 최근 저장분"이 통째로 이기는
+  //  동기화 방식이라, 환자 종료 처리 시점에 반영된 간병인 쪽 종료 값이 나중에 다른 PC의 낡은
+  //  저장으로 덮어써질 수 있음. ①②는 "환자가 아직 종료 전"인 경우만 처리하므로 이미 종료된
+  //  환자는 다시 훑지 않아 이 어긋남을 스스로 못 고침 — 여기서 매분마다 다시 확인해서 바로잡음.
+  //  종료보고는 최초 종료 시점에 이미 나갔을 것이므로 여기서는 다시 만들지 않음)
+  patients.forEach(pt => {
+    if(pt.status !== '종료' || !pt.endDate) return;
+    const cg = caregivers.find(c=>String(c.patientId)===String(pt.id) && c.workStatus!=='종료');
+    if(!cg) return;
+    cg.workStatus = '종료';
+    cg.endDate = pt.endDate;
+    cg.endTime = pt.endTime || cg.endTime || '';
+    recalcDuration(cg, cg.endDate);
+    cg.earlyEndPatientId = String(pt.id);
+    saveToAssignHistory(cg);
+    markCgEdited(cg.id);
+    changed = true;
   });
 
   if(endedItems.length > 0) {
