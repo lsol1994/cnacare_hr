@@ -1014,6 +1014,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   <div id="cg-panel-list">
     <div style="display:flex;gap:6px;margin-bottom:1rem;flex-wrap:wrap">
       <button id="cg-status-" class="btn btn-sm cg-status-pill act" onclick="switchCgStatusFlt('')">전체</button>
+      <button id="cg-status-예비" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('예비')">예비</button>
       <button id="cg-status-근무중" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('근무중')">근무중</button>
       <button id="cg-status-대기중" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('대기중')">대기중</button>
       <button id="cg-status-휴무" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('휴무')">휴무</button>
@@ -2534,6 +2535,7 @@ function attachFirebaseListener() {
         renderDashboard(); renderRooms(); checkAutoEnd();
         checkAutoStart(); // Firebase 로드 완료 후 대기중→근무중 체크
         migrateInsuranceDataOnce(); // 배상보험 이력 관리 도입 전 낡은 데이터 1회성 정리
+        migrateReserveStatusOnce(); // 예비 상태 도입 전 낡은 데이터 1회성 정리
         setTimeout(autoFillAllAttendance, 1000);
       } catch(e) { console.warn('렌더 오류:', e); }
     } else {
@@ -4549,11 +4551,14 @@ function openCaregiverModal(patientId) {
 function renderCgForm(cg, p) {
   const today=toLocalDateStr(new Date());
   const v=n=>cg?cg[n]||'':'';
+  // 신규 등록: 환자와 함께 등록하면(p 있음) 근무중을 기본값으로, 간병인만 단독 등록하면(p 없음)
+  // 아직 매칭 전이므로 예비를 기본값으로 — 기존 레코드 수정 시에는 저장된 값 그대로 사용
+  const defaultWorkStatus = cg ? v('workStatus') : (p ? '근무중' : '예비');
   document.getElementById('cg-form-body').innerHTML=`
     <div class="g2">
       <div class="field"><label>등록일</label><input type="date" id="cg-regDate" value="${cg?v('regDate'):today}"></div>
       <div class="field"><label>근무상태</label>
-        <select id="cg-workStatus"><option ${v('workStatus')==='근무중'?'selected':''}>근무중</option><option ${v('workStatus')==='대기중'?'selected':''}>대기중</option><option ${v('workStatus')==='휴무'?'selected':''}>휴무</option><option ${v('workStatus')==='종료'?'selected':''}>종료</option></select>
+        <select id="cg-workStatus"><option ${defaultWorkStatus==='예비'?'selected':''}>예비</option><option ${defaultWorkStatus==='대기중'?'selected':''}>대기중</option><option ${defaultWorkStatus==='근무중'?'selected':''}>근무중</option><option ${defaultWorkStatus==='휴무'?'selected':''}>휴무</option><option ${defaultWorkStatus==='종료'?'selected':''}>종료</option></select>
       </div>
       <div class="field"><label>간병인 이름 <span class="req">*</span></label><input type="text" id="cg-name" placeholder="홍길동" value="${v('name')}"></div>
       <div class="field"><label>성별</label>
@@ -4947,17 +4952,16 @@ function saveCg() {
 
 function cgRowHTML(cg) {
   const statMap={'근무중':'b-green','대기중':'b-amber','휴무':'b-gray','종료':'b-gray','예비':'b-blue'};
-  // 예비: 대기중이면서 현재 매칭된 환자도 없고, 과거 매칭 이력(assignHistory)도 전혀 없는 경우
-  // → 협회에서 아직 한 번도 매칭해본 적 없는 순수 예비간병인 (재배정 대기 중인 기존 간병인과 구분)
-  const cgIsReserve = cg.workStatus==='대기중' && !cg.patientId && (!cg.assignHistory || !cg.assignHistory.length);
-  const cgStatusLabel = cgIsReserve ? '예비' : cg.workStatus;
+  // 예비/종료 상태거나, 과거에 매칭됐다가(assignHistory 있음) 지금은 환자가 없는 대기중 간병인은
+  // 새 환자에게 재배정할 수 있어야 함
+  const cgCanReassign = cg.workStatus==='종료' || cg.workStatus==='예비' || (cg.workStatus==='대기중' && !cg.patientId);
   return `
     <div class="pt-row">
       <div class="pt-top">
         <div><div class="pt-name">${cg.name}<span>${cg.age?cg.age+'세':''} ${cg.gender}</span></div>
           <div style="font-size:11px;color:var(--gray)">${cg.regDate} 등록</div></div>
         <div style="display:flex;gap:6px;align-items:center">
-          <span class="badge ${statMap[cgStatusLabel]||'b-gray'}">${cgStatusLabel}</span>
+          <span class="badge ${statMap[cg.workStatus]||'b-gray'}">${cg.workStatus}</span>
           ${(()=>{
             // 매칭된 환자가 재모집 이력(recruitHistory)이 있으면, 이 간병인은 그 자리를 이어받은
             // 교체간병인이라는 뜻 (별도 플래그 저장 없이 환자의 recruitHistory로 항상 최신 판단)
@@ -5003,11 +5007,11 @@ function cgRowHTML(cg) {
           ${cg.patientId&&cg.workStatus==='근무중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openEarlyTerminate('${cg.id}')">중도종료</button>`:''}
           ${cg.patientId&&cg.workStatus==='대기중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openPreStartCancel('${cg.id}')">🚫 시작 전 취소</button>`:''}
           ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="cancelEarlyTerminate('${cg.id}')">↩ 종료취소</button>`:''}
-          ${(cg.workStatus==='종료'||(cg.workStatus==='대기중'&&!cg.patientId))?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="toggleReassignSelect('${cg.id}')">🔄 재배정</button>`:''}
+          ${cgCanReassign?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="toggleReassignSelect('${cg.id}')">🔄 재배정</button>`:''}
           <button class="btn btn-sm btn-red" onclick="deleteCg('${cg.id}')">삭제</button>
         </div>
       </div>
-      ${cg.workStatus==='종료'?`
+      ${cgCanReassign?`
         <div id="reassign-select-${cg.id}" style="display:none;margin-top:8px;padding:10px;background:var(--teal-lt);border-radius:var(--rsm);border:1px solid rgba(11,122,110,.2)">
           <div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:6px">🔄 재배정할 환자 선택</div>
           <div style="display:flex;gap:6px;align-items:center">
@@ -5025,7 +5029,7 @@ function cgRowHTML(cg) {
 }
 
 let cgMainTab   = 'list'; // list | attend | ins
-let cgStatusFlt = '';     // '' | 근무중 | 대기중 | 휴무 | 종료
+let cgStatusFlt = '';     // '' | 예비 | 근무중 | 대기중 | 휴무 | 종료
 
 function switchCgMainTab(tab) {
   cgMainTab = tab;
@@ -5165,7 +5169,7 @@ function openCgDetail(id) {
   const cg=caregivers.find(x=>String(x.id)===String(id));
   if(!cg){toast('간병인 정보를 찾을 수 없어요',true);return;}
   const pt=cg.patientId?patients.find(p=>String(p.id)===String(cg.patientId)):null;
-  const cgIsReserve = cg.workStatus==='대기중' && !cg.patientId && (!cg.assignHistory || !cg.assignHistory.length);
+  const cgCanReassign = cg.workStatus==='종료' || cg.workStatus==='예비' || (cg.workStatus==='대기중' && !cg.patientId);
   document.getElementById('cg-modal-title').textContent=cg.name+' 간병인 상세';
   document.getElementById('cg-form-body').innerHTML=`
     <div class="g2" style="margin-bottom:.875rem">
@@ -5173,7 +5177,7 @@ function openCgDetail(id) {
         ['이름',cg.name],['나이/성별',(cg.age||'—')+'세 '+cg.gender],
         ['생년월일',birthFromSSN(cg.ssn)||'—'],
         ['연락처',cg.phone||'—'],['거주지',cg.region||'—'],
-        ['근무상태',cgIsReserve?'예비':(cg.workStatus||'—')],['일급',cg.pay?Number(cg.pay).toLocaleString()+'원':'—'],
+        ['근무상태',cg.workStatus||'—'],['일급',cg.pay?Number(cg.pay).toLocaleString()+'원':'—'],
         ['경력',cg.career||'—'],['특화분야',cg.specialty||'—'],
         ['은행',cg.bankName+' '+cg.bankAccount+' ('+cg.bankHolder+')'],
         ['사고이력',cg.accident||'—'],
@@ -5238,7 +5242,7 @@ function openCgDetail(id) {
       ${cg.patientId&&cg.workStatus==='근무중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="closeOverlay('cg-overlay');openEarlyTerminate('${cg.id}')">중도종료</button>`:''}
       ${cg.patientId&&cg.workStatus==='대기중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openPreStartCancel('${cg.id}')">🚫 시작 전 취소</button>`:''}
       ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="cancelEarlyTerminate('${cg.id}')">↩ 종료취소</button>`:''}
-      ${(cg.workStatus==='종료'||(cg.workStatus==='대기중'&&!cg.patientId))?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="closeOverlay('cg-overlay');setTimeout(()=>{const el=document.getElementById('reassign-select-${cg.id}');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'center'});}},200)">🔄 재배정</button>`:''}
+      ${cgCanReassign?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="closeOverlay('cg-overlay');setTimeout(()=>{const el=document.getElementById('reassign-select-${cg.id}');if(el){el.style.display='block';el.scrollIntoView({behavior:'smooth',block:'center'});}},200)">🔄 재배정</button>`:''}
       <button class="btn btn-red btn-sm" onclick="deleteCg('${cg.id}')">삭제</button>
     </div>
     ${(()=>{
@@ -9395,6 +9399,21 @@ function syncInsuranceForPatientChange(cg, oldPatientId, newPatientId, prevPatie
 // (=종료 아닌데) 보험이 "만료처리 완료" 또는 이미 지난 만료일로 남아있으면, 이건 예전
 // 근무건의 낡은 기록이 그대로 남아있는 것(근무 중인데 보험이 이미 해지되어 있을 리 없음)
 // 이므로 안전하게 이력으로 옮기고 이번 건은 "가입전"부터 다시 시작하게 정리함
+// 예비 상태 도입 전 낡은 데이터 1회성 정리: 대기중 + 매칭된 환자 없음 + 과거 매칭 이력도 전혀 없음
+// = 협회에서 아직 한 번도 매칭해본 적 없는 순수 예비간병인인데 예비 상태 도입 전이라 그냥 "대기중"으로
+// 저장돼있던 레코드들을 예비로 재분류. 조건 자체가 자기제한적이라(한번 예비로 바뀌면 더 이상
+// workStatus==='대기중'이 아니므로) 매 세션 재실행해도 안전함 (migrateInsuranceDataOnce와 동일 패턴)
+function migrateReserveStatusOnce() {
+  let changed = false;
+  caregivers.forEach(cg => {
+    if(cg.workStatus === '대기중' && !cg.patientId && (!cg.assignHistory || !cg.assignHistory.length)) {
+      cg.workStatus = '예비';
+      changed = true;
+    }
+  });
+  if(changed) save();
+}
+
 function migrateInsuranceDataOnce() {
   const today = new Date(); today.setHours(0,0,0,0);
   let changed = false;
