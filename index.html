@@ -3657,6 +3657,7 @@ function savePatientEdit(id) {
   p.extra     = document.getElementById('ep-extra').value.trim();
   p.startDate = document.getElementById('ep-startDate').value;
   p.startTime = document.getElementById('ep-startTime').value;
+  delete p.startCancelled; // 시작일을 직접 수정했으므로 캘린더 숨김 해제
   p.duration  = document.getElementById('ep-duration').value.trim();
   p.pay       = document.getElementById('ep-pay').value;
   p.request   = document.getElementById('ep-request').value.trim();
@@ -4839,6 +4840,7 @@ function saveCg() {
       pt.status        = '매칭완료';
       pt.recruited     = true;
       delete pt.recruitInfo; // 재모집이 실제로 완료됐으므로 "재모집중" 표시 해제
+      delete pt.startCancelled; // 새로 실제 매칭됐으므로 캘린더 숨김 해제
 
       // 간병인 시작일시도 항상 환자에게 동기화 (기존엔 마감일만 동기화되고 시작일은 빠져있어서,
       // 간병인 카드에서 시작일을 고쳐도 환자 카드의 시작일은 낡은 채로 남아있는 비대칭 문제가 있었음)
@@ -6446,6 +6448,7 @@ function confirmEarlyTerminate(cgId) {
       pt.caregiverName = '';
       if(reason) pt.endReason = reason;
       delete pt.pendingReplacement; // 혹시 예약해둔 대체 간병인이 있었다면 정리 (완전종료 선택했으므로)
+      if(wasNotStartedYet) pt.startCancelled = true; // 시작 전 취소라 캘린더에 시작/마감 카드가 뜨지 않게
       recalcDuration(pt, pt.endDate); // 실제 종료일로 duration 재계산
       sendSheets({type:'updatePatient', name:pt.name, startDate:pt.startDate, caregiverName:'', status:'종료'});
     } else if(pt.pendingReplacement) {
@@ -6491,6 +6494,7 @@ function confirmEarlyTerminate(cgId) {
       pt.endDate          = '';
       pt.endTime          = '';
       pt.recruitStartDate = endDate;
+      if(wasNotStartedYet) pt.startCancelled = true; // 시작 전 취소라 캘린더에 시작 카드가 뜨지 않게
       if(!pt.recruitHistory) pt.recruitHistory = [];
       pt.recruitHistory.push({
         endDate, recruitDate: endDate, reason: reason||'',
@@ -7933,8 +7937,10 @@ function showCalDetail(dateStr) {
   var onsiteCancelEvents = []; // 현장취소(도착 후 취소) 전용 — 간병시작/마감과 분리해서 하나로 통합 표시
   _calExpenseMsgs = []; // 지출내용 복사 버튼용 임시 저장 (렌더할 때마다 초기화)
 
-  // 환자 시작일 / 마감일
+  // 환자 시작일 / 마감일 (환자-간병인 통합 카드 — 간병인 전용 시작/마감 카드는 별도로 만들지 않음)
   patients.forEach(function(p) {
+    // 시작 전 취소(대기중 상태에서 취소)된 건은 실제로 근무한 적이 없으므로 캘린더에 아예 표시하지 않음
+    if(p.startCancelled) return;
     var cg = caregivers.find(function(c){ return String(c.patientId)===String(p.id); });
     var cgStr = cg ? ' / 간병인: ' + cg.name : '';
     // 현장취소(도착 후 취소) 환자는 "간병 시작/마감" 대신 별도의 "도착 후 취소" 섹션에서만 다룸
@@ -7943,7 +7949,7 @@ function showCalDetail(dateStr) {
         '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">🚫 현장취소' + (p.startTime?' · '+p.startTime:'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + p.name + '</div>'
-        + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (p.hospital||'') + (p.room?' ('+p.room+')':'') + '</div>'
+        + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (p.hospital||'') + (p.room?' ('+p.room+')':'') + cgStr + '</div>'
         + '</div>' });
       return; // 이 환자는 아래의 일반 시작/마감 로직을 타지 않음
     }
@@ -7963,70 +7969,28 @@ function showCalDetail(dateStr) {
       if(days) { var dd=parseLocalDate(p.startDate); if(dd){dd.setDate(dd.getDate()+days);endDate=toLocalDateStr(dd);} }
     }
     if(endDate === dateStr) {
+      // 간병시작 카드와 동일한 구성(병원/호실/간병인/기간)을 유지하고, 라벨과 시간만 마감 기준으로 교체
       endEvents.push({ time: p.endTime||'', html:
         '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:var(--red-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">■ 간병 마감' + (!p.endDate?' (예상)':'') + (p.endTime?' · '+p.endTime:'') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + p.name + '</div>'
-        + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (p.hospital||'') + cgStr + '</div>'
+        + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (p.hospital||'') + (p.room?' ('+p.room+')':'') + cgStr + '</div>'
+        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (p.duration?p.duration:'') + '</div>'
         + '</div>' });
     }
   });
 
-  // 간병인 시작/마감
-  caregivers.forEach(function(c) {
-    var pt = c.patientId ? patients.find(function(p){return String(p.id)===String(c.patientId);}) : null;
-    var ptStr = pt ? ' (' + pt.name + ')' : '';
-    // 현장취소 간병인은 "근무 시작/마감" 카드를 아예 표시하지 않음 (도착후취소 섹션에서만 다룸)
-    // c.onsiteCancelDate뿐 아니라, 매칭된 환자의 endReason도 함께 확인해서 이중으로 안전하게 걸러냄
-    if(c.onsiteCancelDate || (pt && pt.endReason === '현장 취소')) return;
-    if(c.startDate === dateStr) {
-      startEvents.push({ time: c.startTime||'', html:
-        '<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병인 근무 시작' + (c.startTime?' · '+c.startTime:'') + '</div>'
-        + '<div style="font-size:14px;font-weight:700">' + c.name + ptStr + '</div>'
-        + '</div>' });
-    }
-    if(c.endDate === dateStr) {
-      // 연장 후 예약 교체가 걸려있는 경우: "이전 간병인" 라벨로 구분 표시
-      var isHandover = !!(pt && pt.pendingReplacement && pt.recruitInfo && pt.recruitInfo.startDate === c.endDate);
-      endEvents.push({ time: c.endTime||'', html:
-        '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:var(--red-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">' + (isHandover?'■ 간병 마감 (이전 간병인)':'■ 간병인 근무 마감') + (c.endTime?' · '+c.endTime:'') + '</div>'
-        + '<div style="font-size:14px;font-weight:700">' + c.name + ptStr + '</div>'
-        + (isHandover?'<div style="font-size:11px;color:var(--gray);margin-top:2px">신규 간병인으로 교체</div>':'')
-        + '</div>' });
-    }
-  });
-
-  // ── assignHistory 기반 "간병인 근무 마감" 복구 ──
-  // 위 블록은 간병인의 "현재(live)" endDate만 보고 판단하는데, 교체종료 후 그 간병인이
-  // 다른 환자로 재배정(🔄 재배정)되거나 다시 매칭되면 live endDate가 새 근무 건 값으로
-  // 덮어써져서, 이미 끝난 근무의 "간병 마감" 카드 자체가 캘린더에서 통째로 사라지는
-  // 문제가 있었음. assignHistory는 병합 시 항상 유실 없이 쌓이므로, 여기서 훑어서
-  // live 값이 이미 다른 근무로 넘어간 지난 이력을 놓치지 않게 복구함.
-  caregivers.forEach(function(c) {
-    (c.assignHistory||[]).forEach(function(h) {
-      if(!h.endDate || h.endDate !== dateStr) return;
-      // live 값이 여전히 이 이력과 같은 마감일이면 위 블록에서 이미 정상적으로 표시됐으므로 중복 방지
-      if(c.endDate === h.endDate) return;
-      endEvents.push({ time: h.endTime||'', html:
-        '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:var(--red-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">■ 간병인 근무 마감 (이력에서 복구됨)' + (h.endTime?' · '+h.endTime:'') + '</div>'
-        + '<div style="font-size:14px;font-weight:700">' + c.name + ' (' + (h.patientName||'') + ')</div>'
-        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">간병인이 이후 다른 환자로 재배정/매칭되어 현재 상태와 달라요 — 간병인 카드의 근무 이력을 확인해주세요</div>'
-        + '</div>' });
-    });
-  });
-
-  // 연장 후 예약 교체: 등록해둔 신규 간병인의 근무 시작(=이전 간병인 마감일)
+  // 연장 후 예약 교체: 등록해둔 신규(교체) 간병인의 근무 시작 미리보기 — 환자-간병인 통합 스타일로 표시
+  // (환자 자신의 startDate/endDate는 안 바뀌는 중간 교체 건이라 위 블록엔 대응 카드가 없음)
   patients.forEach(function(p) {
     if(!p.pendingReplacement || !p.recruitInfo) return;
     if(p.recruitInfo.startDate !== dateStr) return;
     var rep = p.pendingReplacement;
     startEvents.push({ time: p.recruitInfo.startTime||'', html:
       '<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-      + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병인 근무 시작 (신규 간병인)' + (p.recruitInfo.startTime?' · '+p.recruitInfo.startTime:'') + '</div>'
-      + '<div style="font-size:14px;font-weight:700">' + (rep.name||'') + ' (' + p.name + ')</div>'
+      + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병 시작 (교체 간병인)' + (p.recruitInfo.startTime?' · '+p.recruitInfo.startTime:'') + '</div>'
+      + '<div style="font-size:14px;font-weight:700">' + p.name + '</div>'
+      + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (p.hospital||'') + (p.room?' ('+p.room+')':'') + ' / 간병인: ' + (rep.name||'') + '</div>'
       + '<div style="font-size:11px;color:var(--gray);margin-top:2px">연장 후 예약 교체</div>'
       + '</div>' });
   });
