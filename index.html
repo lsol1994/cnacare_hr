@@ -3777,6 +3777,7 @@ function savePatientEdit(id) {
   if(p._editedPost) {
     p._editedPost = smartUpdatePost(p._editedPost, p);
   }
+  refreshDateSensitiveReportLogs(p); // 이미 저장된 매칭/종료보고가 있으면 방금 수정한 날짜로 다시 최신화
   markPtEdited(id); // Firebase 덮어쓰기 방지 (10초)
   save();
   renderPatients();
@@ -4017,6 +4018,7 @@ function deletePatient(id) {
     }
   });
   save(); closeOverlay('pt-overlay'); renderPatients(); renderCaregivers(); updateSidebar();
+  refreshCalendarIfOpen(); // 삭제된 환자의 간병인 일정이 캘린더에 열려있으면 즉시 반영
   toast('삭제됐어요');
 }
 
@@ -4951,6 +4953,7 @@ function saveCg() {
         pt.endTime = cg.endTime || '';
         recalcDuration(pt, cg.endDate); // 가능하면 duration도 같이 재계산 (endDate 자체는 위에서 이미 확정됨)
       }
+      refreshDateSensitiveReportLogs(pt); // 이미 저장된 매칭/종료보고가 있으면 방금 동기화된 날짜로 다시 최신화
       markPtEdited(pt.id); // Firebase 덮어쓰기 방지 (10초)
     }
   }
@@ -5560,6 +5563,7 @@ function saveQuickEditCgEndTime(cgId) {
   if(pt) {
     pt.endDate = newEndDate;
     pt.endTime = newEndTime;
+    refreshDateSensitiveReportLogs(pt); // 이미 저장된 매칭/종료보고가 있으면 방금 수정한 날짜로 다시 최신화
     markPtEdited(pt.id);
   }
 
@@ -6891,6 +6895,7 @@ function deleteCg(id) {
       reportLogs = reportLogs.filter(l=>
         !(String(l.patientId)===String(pt.id) && l.type==='matched')
       );
+      markPtEdited(pt.id); // Firebase 덮어쓰기 방지 (10초) — 누락 시 다른 기기의 낡은 저장이 방금 되돌린 "모집중" 상태를 덮어써버릴 수 있었음
       sendSheets({type:'updatePatient', name:pt.name, startDate:pt.startDate,
         caregiverName:'', status:'모집중'});
       toast(`✅ ${cg.name} 삭제 완료. ${pt.name} 환자가 모집중으로 전환됐어요.`);
@@ -6908,6 +6913,7 @@ function deleteCg(id) {
   renderPatients();
   renderDashboard();
   updateSidebar();
+  refreshCalendarIfOpen(); // 삭제된 간병인이 캘린더에 열려있으면 즉시 반영
 }
 
 // ─── LOG ───
@@ -7773,6 +7779,28 @@ function renderReportLog() {
       </div>
     </div>`;
   }).join('');
+}
+
+// 환자의 매칭보고/종료보고가 이미 저장되어 있으면, 방금 바뀐 시작일/마감일 기준으로
+// 문구를 다시 만들어 갱신한다. 안 그러면 나중에 마감일(시작일)을 수정해도 업체보고
+// 화면·기록에는 예전 날짜가 그대로 남아있게 됨 (예: 종료된 환자의 마감일을 사후에
+// 정정했는데 이미 발송했던 종료보고 문구는 옛날 날짜 그대로인 문제).
+// 교체보고(replace)는 애초에 항상 새로 만들도록 되어 있어 여기 대상이 아님.
+function refreshDateSensitiveReportLogs(pt) {
+  if(!pt) return;
+  if(pt.status === '종료') {
+    const log = reportLogs.find(l=>String(l.patientId)===String(pt.id) && l.type==='ended');
+    if(log) {
+      const newMsg = buildEndReport(pt, pt.endDate, pt.endTime);
+      if(log.msg !== newMsg) { log.msg = newMsg; markReportLogEdited(log.id); }
+    }
+  } else if(pt.status === '매칭완료' || pt.recruited) {
+    const log = reportLogs.find(l=>String(l.patientId)===String(pt.id) && l.type==='matched');
+    if(log) {
+      const newMsg = buildMatchReport(pt);
+      if(log.msg !== newMsg) { log.msg = newMsg; markReportLogEdited(log.id); }
+    }
+  }
 }
 // ─── 협회 소속 간병인 ───
 
@@ -10403,6 +10431,7 @@ function checkAutoStart() {
     // 시작일이 오늘보다 이전이면 무조건 근무중
     if(cg.startDate < todayDate) {
       cg.workStatus = '근무중';
+      markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초) — 누락 시 다른 기기의 낡은 저장이 이 자동전환을 덮어써버릴 수 있음
       changed = true;
       changedNames.push(cg.name);
       startedCgs.push(cg);
@@ -10413,6 +10442,7 @@ function checkAutoStart() {
     if(cg.startDate === todayDate) {
       if(!cg.startTime) {
         cg.workStatus = '근무중';
+        markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
         changed = true;
         changedNames.push(cg.name);
         startedCgs.push(cg);
@@ -10421,6 +10451,7 @@ function checkAutoStart() {
         const startMin = (parts[0]||0) * 60 + (parts[1]||0);
         if(nowMin >= startMin) {
           cg.workStatus = '근무중';
+          markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
           changed = true;
           changedNames.push(cg.name + ' (' + cg.startTime + ')');
           startedCgs.push(cg);
@@ -10435,6 +10466,7 @@ function checkAutoStart() {
     renderCaregivers();
     renderDashboard();
     updateSidebar();
+    refreshCalendarIfOpen(); // 캘린더가 열려있으면 근무중 전환을 즉시 반영
     toast('✅ 근무중 자동 변경: ' + changedNames.join(', '));
   }
 
@@ -10701,6 +10733,7 @@ function checkAutoEnd() {
     if(activePage === 'page-patients')  renderPatients();
     if(activePage === 'page-dashboard') renderDashboard();
     if(activePage === 'page-report')    renderReport();
+    refreshCalendarIfOpen(); // 캘린더 화면이 열려있으면 자동종료 결과를 즉시 반영 (기존엔 누락되어 있었음)
     updateSidebar();
   }
 }
