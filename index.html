@@ -201,6 +201,16 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 .stat .n{font-family:var(--mono);font-size:26px;font-weight:500}
 .stat .l{font-size:10px;color:var(--gray);text-transform:uppercase;letter-spacing:.4px;margin-top:3px}
 
+/* STAT LINE (대시보드/캘린더 병합 메인화면 — 한 줄 요약 통계) */
+.stat-line{display:flex;align-items:center;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);box-shadow:var(--sh);padding:.6rem .9rem;overflow-x:auto}
+.stat-line .item{display:flex;align-items:baseline;gap:6px;padding:0 .9rem;white-space:nowrap}
+.stat-line .item:first-child{padding-left:0}
+.stat-line .item + .item{border-left:1px solid var(--border)}
+.stat-line .n{font-family:var(--mono);font-size:17px;font-weight:500}
+.stat-line .l{font-size:10.5px;color:var(--gray)}
+@media(max-width:600px){.stat-line{padding:.55rem .6rem}.stat-line .item{padding:0 .65rem}}
+
 /* MODAL */
 .overlay{position:fixed;inset:0;background:rgba(28,26,23,.5);display:flex;align-items:center;justify-content:center;
   z-index:500;opacity:0;pointer-events:none;transition:opacity .2s;
@@ -562,11 +572,8 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   <button class="top-tab" id="tt-send" onclick="showPage('send')">단톡방 발송</button>
   <button class="top-tab" id="tt-caregiver" onclick="showPage('caregiver')">간병인 관리</button>
   <button class="top-tab" id="tt-report" onclick="showPage('report')">업체보고</button>
-  <button class="top-tab" id="tt-quickmatch" onclick="showPage('quickmatch')">빠른매칭</button>
   <button class="top-tab" id="tt-blacklist" onclick="showPage('blacklist')">블랙리스트</button>
-  <button class="top-tab" id="tt-calendar" onclick="showPage('calendar')">캘린더</button>
   <button class="top-tab" id="tt-memo" onclick="showPage('memo')">업무일지</button>
-  <button class="top-tab" id="tt-log" onclick="showPage('log')">발송 기록</button>
   <button class="top-tab" id="tt-settings" onclick="showPage('settings')">설정</button>
 </div>
 
@@ -588,20 +595,11 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   <button class="aside-btn" id="mb-caregiver" onclick="showPage('caregiver')">
     <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>간병인 관리
   </button>
-  <button class="aside-btn" id="mb-log" onclick="showPage('log')">
-    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>발송 기록
-  </button>
   <button class="aside-btn" id="mb-report" onclick="showPage('report')">
     <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>업체보고
   </button>
-  <button class="aside-btn" id="mb-quickmatch" onclick="showPage('quickmatch')">
-    <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>빠른매칭
-  </button>
   <button class="aside-btn" id="mb-blacklist" onclick="showPage('blacklist')">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>블랙리스트
-  </button>
-  <button class="aside-btn" id="mb-calendar" onclick="showPage('calendar')">
-    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>캘린더
   </button>
   <button class="aside-btn" id="mb-memo" onclick="showPage('memo')">
     <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>업무일지
@@ -660,20 +658,11 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         <button onclick="navigateFromDrawer('report')">
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>업체보고
         </button>
-        <button onclick="navigateFromDrawer('quickmatch')">
-          <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>빠른매칭
-        </button>
         <button onclick="navigateFromDrawer('blacklist')">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>블랙리스트
         </button>
-        <button onclick="navigateFromDrawer('calendar')">
-          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>캘린더
-        </button>
         <button onclick="navigateFromDrawer('memo')">
           <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>업무일지
-        </button>
-        <button onclick="navigateFromDrawer('log')">
-          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>발송 기록
         </button>
         <button onclick="navigateFromDrawer('settings')">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>설정
@@ -685,16 +674,41 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
 
 <main>
 
-<!-- ══ DASHBOARD ══ -->
+<!-- ══ DASHBOARD (+ 캘린더 병합) ══ -->
 <div class="page act" id="page-dashboard">
   <div class="sh"><div><div class="sh-title">대시보드</div><div class="sh-sub">씨앤에이케어 간병인 구인 현황</div></div></div>
-  <div class="g4" style="margin-bottom:1.25rem">
-    <div class="stat"><div class="n" id="d-total" style="color:var(--teal)">0</div><div class="l">전체 환자</div></div>
-    <div class="stat"><div class="n" id="d-active" style="color:var(--amber)">0</div><div class="l">모집중</div></div>
-    <div class="stat"><div class="n" id="d-matched" style="color:var(--green)">0</div><div class="l">매칭완료</div></div>
-    <div class="stat"><div class="n" id="d-sent" style="color:var(--gray)">0</div><div class="l">총 발송</div></div>
+  <div class="stat-line" style="margin-bottom:1.25rem">
+    <div class="item"><span class="n" id="d-total" style="color:var(--teal)">0</span><span class="l">전체 환자</span></div>
+    <div class="item"><span class="n" id="d-active" style="color:var(--amber)">0</span><span class="l">모집중</span></div>
+    <div class="item"><span class="n" id="d-matched" style="color:var(--green)">0</span><span class="l">매칭완료</span></div>
+    <div class="item"><span class="n" id="d-sent" style="color:var(--gray)">0</span><span class="l">총 발송</span></div>
   </div>
-  <div class="card"><div class="card-hd"><span class="dot"></span>최근 등록 환자</div><div id="d-recent"></div></div>
+
+  <!-- 최근 등록 환자 자리 → 캘린더(일정 조회)로 교체 -->
+  <div class="card">
+    <div class="sh" style="margin-bottom:1.25rem">
+      <div class="card-hd" style="margin:0"><span class="dot"></span>📅 일정 조회</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn btn-sm" onclick="shiftCalDay(-1)" style="padding:6px 12px;font-size:16px">‹</button>
+        <input type="date" id="cal-date-input" style="font-size:14px;font-weight:700;padding:6px 10px;border:1.5px solid var(--border);border-radius:var(--rsm);background:var(--surface)" onchange="renderCalendar()">
+        <button class="btn btn-sm" onclick="shiftCalDay(1)" style="padding:6px 12px;font-size:16px">›</button>
+        <button class="btn btn-sm btn-teal" onclick="goCalToday()">오늘</button>
+      </div>
+    </div>
+
+    <!-- 요일/날짜 큰 표시 -->
+    <div id="cal-day-header" style="text-align:center;margin-bottom:1.25rem">
+      <div id="cal-day-label" style="font-size:13px;font-weight:600;color:var(--gray);letter-spacing:.5px"></div>
+      <div id="cal-day-num" style="font-size:48px;font-weight:900;line-height:1.1;color:var(--black)"></div>
+      <div id="cal-month-label" style="font-size:14px;color:var(--gray);margin-top:2px"></div>
+    </div>
+
+    <!-- 당일 일정 -->
+    <div id="cal-day-body">
+      <div class="card-hd"><span class="dot"></span>이날 일정</div>
+      <div id="cal-detail-body" style="min-height:80px"></div>
+    </div>
+  </div>
 </div>
 
 <!-- ══ NEW PATIENT ══ -->
@@ -1014,11 +1028,10 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   <div id="cg-panel-list">
     <div style="display:flex;gap:6px;margin-bottom:1rem;flex-wrap:wrap">
       <button id="cg-status-" class="btn btn-sm cg-status-pill act" onclick="switchCgStatusFlt('')">전체</button>
-      <button id="cg-status-예비" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('예비')">예비</button>
       <button id="cg-status-근무중" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('근무중')">근무중</button>
       <button id="cg-status-대기중" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('대기중')">대기중</button>
-      <button id="cg-status-휴무" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('휴무')">휴무</button>
       <button id="cg-status-종료" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('종료')">종료</button>
+      <button id="cg-status-예비" class="btn btn-sm cg-status-pill" onclick="switchCgStatusFlt('예비')">예비</button>
     </div>
     <div id="cg-list"></div>
   </div>
@@ -1129,51 +1142,6 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
     </div>
   </div>
 </div>
-<!-- ══ MEMBERS ══ -->
-<div class="page" id="page-quickmatch">
-  <div class="sh">
-    <div><div class="sh-title">빠른매칭</div><div class="sh-sub">서비스 시작 가능일 확인된 간병인 명단 · 오늘~7일 이내만 관리</div></div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <div style="position:relative;display:flex;align-items:center">
-        <svg viewBox="0 0 24 24" style="position:absolute;left:9px;width:14px;height:14px;stroke:var(--gray-lt);stroke-width:2;fill:none;stroke-linecap:round;pointer-events:none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" id="qm-search" placeholder="이름·연락처·지역 검색..." oninput="renderQuickMatch()"
-          style="padding:6px 10px 6px 28px;font-size:12px;width:180px;border:1px solid var(--border);border-radius:var(--rsm)">
-      </div>
-      <button class="btn btn-sm" onclick="downloadQuickMatchExcel()">
-        <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>엑셀 다운로드
-      </button>
-      <button class="btn btn-teal btn-sm" onclick="openQuickMatchModal()">
-        <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>후보 등록
-      </button>
-    </div>
-  </div>
-
-  <div style="background:var(--teal-lt);border-radius:var(--rsm);padding:10px 14px;font-size:12px;color:var(--teal);margin-bottom:1.25rem">
-    ⏱ 오늘부터 7일 이내 시작 가능한 후보만 관리해요. 지난 날짜는 접속할 때마다 자동으로 정리돼요.
-  </div>
-
-  <div class="g3" style="margin-bottom:1.25rem">
-    <div class="stat"><div class="n" id="qm-total" style="color:var(--teal)">0</div><div class="l">등록된 후보</div></div>
-    <div class="stat"><div class="n" id="qm-today" style="color:var(--green)">0</div><div class="l">오늘 시작 가능</div></div>
-    <div class="stat"><div class="n" id="qm-soon" style="color:var(--amber)">0</div><div class="l">3일 내 만료</div></div>
-  </div>
-
-  <div id="quickmatch-list"></div>
-</div>
-
-<!-- 빠른매칭 후보 등록 모달 -->
-<div class="overlay" id="quickmatch-overlay">
-  <div class="modal" style="max-width:440px">
-    <div class="modal-hd">
-      <div class="modal-title">빠른매칭 후보 등록</div>
-      <button class="btn btn-icon" onclick="closeOverlay('quickmatch-overlay')">
-        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-    <div id="quickmatch-form-body"></div>
-  </div>
-</div>
-
 <div class="page" id="page-blacklist">
   <div class="sh">
     <div><div class="sh-title" style="color:var(--red)">🚫 블랙리스트</div><div class="sh-sub">문제가 있었던 간병인 명단 관리</div></div>
@@ -1239,41 +1207,6 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   </div>
 </div>
 
-
-<div class="page" id="page-log">
-  <div class="sh"><div><div class="sh-title">발송 기록</div><div class="sh-sub">단톡방별 발송 이력</div></div>
-    <button class="btn btn-red btn-sm" onclick="clearLogs()">초기화</button>
-  </div>
-  <div class="card"><div id="log-wrap"></div></div>
-</div>
-
-<!-- ══ CALENDAR ══ -->
-<div class="page" id="page-calendar">
-  <div class="sh">
-    <div><div class="sh-title">📅 일정 조회</div><div class="sh-sub">날짜별 환자·간병인 스케줄 및 급여 지급일</div></div>
-    <div style="display:flex;align-items:center;gap:8px">
-      <button class="btn btn-sm" onclick="shiftCalDay(-1)" style="padding:6px 12px;font-size:16px">‹</button>
-      <input type="date" id="cal-date-input" style="font-size:14px;font-weight:700;padding:6px 10px;border:1.5px solid var(--border);border-radius:var(--rsm);background:var(--surface)" onchange="renderCalendar()">
-      <button class="btn btn-sm" onclick="shiftCalDay(1)" style="padding:6px 12px;font-size:16px">›</button>
-      <button class="btn btn-sm btn-teal" onclick="goCalToday()">오늘</button>
-    </div>
-  </div>
-
-  <!-- 요일/날짜 큰 표시 -->
-  <div id="cal-day-header" style="text-align:center;margin-bottom:1.25rem">
-    <div id="cal-day-label" style="font-size:13px;font-weight:600;color:var(--gray);letter-spacing:.5px"></div>
-    <div id="cal-day-num" style="font-size:48px;font-weight:900;line-height:1.1;color:var(--black)"></div>
-    <div id="cal-month-label" style="font-size:14px;color:var(--gray);margin-top:2px"></div>
-  </div>
-
-  <!-- 당일 일정 -->
-  <div id="cal-day-body">
-    <div class="card">
-      <div class="card-hd"><span class="dot"></span>이날 일정</div>
-      <div id="cal-detail-body" style="min-height:80px"></div>
-    </div>
-  </div>
-</div>
 
 <!-- ══ MEMO ══ -->
 <div class="page" id="page-memo">
@@ -1504,10 +1437,6 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         onclick="confirmMaintenanceTool('📅 기존 재모집→연장 데이터 변환\n\n예전 방식(재모집)으로 저장되어 있던 데이터를 최신 방식(연장)으로 변환합니다.', convertExtendData)">
         📅 기존 재모집→연장 데이터 변환
       </button>
-      <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)"
-        onclick="confirmMaintenanceTool('💰 급여 알림 테스트\n\n지금 이 순간을 기준으로, 앞으로 예정된 급여 지급 알림을 미리 화면에 띄워서 보여줍니다.', () => checkPayRemind(true))">
-        💰 급여 알림 테스트
-      </button>
       <button class="btn btn-sm" style="border-color:var(--red);color:var(--red)"
         onclick="confirmMaintenanceTool('🔍 매칭 간병인 없는 환자 진단\n\n현재 매칭된 간병인이 없는 환자를 찾아서, 사유별(매칭 이력 없음/중도종료/재배정 이동/확인 필요)로 분류해서 보여줍니다.', auditUnmatchedPatients)">
         🔍 매칭 간병인 없는 환자 진단
@@ -1611,6 +1540,32 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- 5. 발송 기록 -->
+  <div class="card">
+    <div class="sh" style="margin-bottom:1rem">
+      <div>
+        <div class="card-hd" style="margin:0"><span class="dot"></span>📨 발송 기록</div>
+        <div style="font-size:12px;color:var(--gray);margin-top:2px">단톡방별 발송 이력 · 총 <b id="log-total-count">0</b>건</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm" id="log-toggle-btn" onclick="toggleSendLogList()">전체 목록 보기</button>
+        <button class="btn btn-red btn-sm" onclick="clearLogs()">초기화</button>
+      </div>
+    </div>
+    <div class="g2" style="margin-bottom:.75rem">
+      <div class="field">
+        <label>단톡방 필터 <span style="font-size:10px;color:var(--gray);font-weight:400;text-transform:none;letter-spacing:0">(발송 많은 순)</span></label>
+        <select id="log-filter-room" onchange="renderLog()"><option value="">전체 단톡방</option></select>
+      </div>
+      <div class="field">
+        <label>환자 필터 <span style="font-size:10px;color:var(--gray);font-weight:400;text-transform:none;letter-spacing:0">(발송 많은 순)</span></label>
+        <select id="log-filter-patient" onchange="renderLog()"><option value="">전체 환자</option></select>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:.5rem">필터 결과: <b id="log-filtered-count" style="color:var(--teal)">0</b>건</div>
+    <div id="log-wrap" style="display:none"></div>
   </div>
 </div>
 
@@ -1767,7 +1722,6 @@ function defaultHolidays() {
   return ["2026-01-01 신정","2026-02-16 설날연휴","2026-02-17 설날","2026-02-18 설날연휴","2026-03-01 삼일절","2026-03-02 대체공휴일(삼일절)","2026-05-05 어린이날","2026-05-24 부처님오신날","2026-05-25 대체공휴일(부처님오신날)","2026-06-03 지방선거일","2026-06-06 현충일","2026-07-17 제헌절","2026-08-15 광복절","2026-08-17 대체공휴일(광복절)","2026-09-24 추석연휴","2026-09-25 추석","2026-09-26 추석연휴","2026-10-03 개천절","2026-10-05 대체공휴일(개천절)","2026-10-09 한글날","2026-12-25 성탄절"];
 }
 if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays();
-let quickMatch    = JSON.parse(localStorage.getItem('cnc_quickmatch')   || '[]');
 let blacklist  = JSON.parse(localStorage.getItem('cnc_blacklist') || '[]');
 let memos      = JSON.parse(localStorage.getItem('cnc_memos')     || '[]');
 let notices    = JSON.parse(localStorage.getItem('cnc_notices')   || '[]');
@@ -1777,7 +1731,6 @@ let editCgId       = null;
 let remindTimer    = null;
 let insuranceTimer = null;
 let roomsCollapsed = true;
-let editQuickMatchId   = null;
 let editBlacklistId = null;
 let rptType        = 'all';
 let selRptPt       = null;
@@ -1785,7 +1738,7 @@ let _fbReady       = false;
 let _fbPause       = false;
 
 // ─── Firebase 부분 업데이트(update()) 를 위한 마지막 동기화 스냅샷 ───
-// id 키 컬렉션(patients/caregivers/logs/attendance/reportLogs/quickMatch/memos/notices):
+// id 키 컬렉션(patients/caregivers/logs/attendance/reportLogs/memos/notices):
 //   { 컬렉션명 → { id(String) → JSON 문자열 } }
 // id 없는 컬렉션(rooms/cfg): { 컬렉션명 → JSON 문자열 }
 // 비어있는 상태(최초 실행)에서는 save() 최초 1회가 전체 데이터를 update()로 올림
@@ -1794,7 +1747,7 @@ let _lastSyncedById = (function() {
     const saved = JSON.parse(localStorage.getItem('cnc_lastSyncedById') || 'null');
     if(saved && typeof saved === 'object') return saved;
   } catch(e) {}
-  return { patients:{}, caregivers:{}, logs:{}, attendance:{}, reportLogs:{}, quickMatch:{}, blacklist:{}, memos:{}, notices:{} };
+  return { patients:{}, caregivers:{}, logs:{}, attendance:{}, reportLogs:{}, blacklist:{}, memos:{}, notices:{} };
 })();
 // _lastSyncedById를 localStorage에도 저장 (새로고침/재접속해도 "이미 동기화된 적 있음" 기록이 유지되도록)
 function persistLastSyncedSnapshot() {
@@ -1810,11 +1763,11 @@ let _newLocalCgIds = new Set();
 // 최근 로컬에서 수정된 항목 ID + 시각 (Firebase 덮어쓰기 방지) - 전체 컬렉션 공통 처리
 const _editedMaps = {
   patients: new Map(), caregivers: new Map(), attendance: new Map(), logs: new Map(),
-  reportLogs: new Map(), quickMatch: new Map(), blacklist: new Map(), memos: new Map(), notices: new Map()
+  reportLogs: new Map(), blacklist: new Map(), memos: new Map(), notices: new Map()
 };
 const EDIT_PROTECT_MS = 120000; // 2분 보호 (기존 10초는 너무 짧아서, 직원이 화면을 좀 오래 보거나 네트워크가 느리면 그 사이 낡은 동기화가 방금 한 수정을 덮어써버리는 문제가 있었음)
 
-// rooms(단톡방 목록)와 cfg(협회 정보·설정)는 id가 없는 통짜 데이터라 위 9개 컬렉션과 같은 방식의
+// rooms(단톡방 목록)와 cfg(협회 정보·설정)는 id가 없는 통짜 데이터라 위 8개 컬렉션과 같은 방식의
 // 보호가 안 걸려있었음 — 감사 결과 이 부분만 낡은 동기화가 와도 무조건 덮어써지는 구멍이 있었어서,
 // 같은 원칙(최근 수정은 몇 분간 보호 + 저장 시각 비교)을 이 둘에도 동일하게 적용함
 let _roomsEditedAt = 0;
@@ -1833,7 +1786,7 @@ function markEdited(collection, id) {
   _editedMaps[collection].set(String(id), Date.now());
   // 레코드 자체에도 "마지막 수정 시각"을 남겨서, 기기 간 동기화 시 "더 최근 것이 이긴다"는
   // 원칙으로 병합 충돌을 해결할 수 있게 함 (기존 markXEdited 호출부를 하나도 안 건드리고
-  // 이 공통 함수 하나만 확장해서 전체 9개 컬렉션에 자동으로 적용됨)
+  // 이 공통 함수 하나만 확장해서 전체 8개 컬렉션에 자동으로 적용됨)
   const arr = getCollectionArray(collection);
   if(arr) {
     const item = arr.find(x => x && String(x.id) === String(id));
@@ -1847,7 +1800,6 @@ function getCollectionArray(name) {
     case 'attendance': return attendance;
     case 'logs':       return logs;
     case 'reportLogs': return reportLogs;
-    case 'quickMatch':    return quickMatch;
     case 'blacklist':  return blacklist;
     case 'memos':      return memos;
     case 'notices':    return notices;
@@ -1865,26 +1817,15 @@ function markCgEdited(id) { markEdited('caregivers', id); }
 function isPtEditProtected(id) { return isEditProtected('patients', id); }
 function isCgEditProtected(id) { return isEditProtected('caregivers', id); }
 
-// 나머지 7개 컬렉션 — 간병일지/발송기록/업체보고/협회간병인/블랙리스트/업무일지/알림
+// 나머지 6개 컬렉션 — 간병일지/발송기록/업체보고/블랙리스트/업무일지/알림
+// (해당 컬렉션의 편집보호 조회는 mergeIdCollection()이 isEditProtected()를 직접 호출하므로
+//  전용 is*EditProtected 래퍼는 만들지 않음 — mark*Edited만 필요)
 function markAttendEdited(id) { markEdited('attendance', id); }
-function isAttendEditProtected(id) { return isEditProtected('attendance', id); }
 function markLogEdited(id) { markEdited('logs', id); }
-function isLogEditProtected(id) { return isEditProtected('logs', id); }
 function markReportLogEdited(id) { markEdited('reportLogs', id); }
-function isReportLogEditProtected(id) { return isEditProtected('reportLogs', id); }
-function markQuickMatchEdited(id) { markEdited('quickMatch', id); }
-function isQuickMatchEditProtected(id) { return isEditProtected('quickMatch', id); }
 function markBlacklistEdited(id) { markEdited('blacklist', id); }
-function isBlacklistEditProtected(id) { return isEditProtected('blacklist', id); }
 function markMemoEdited(id) { markEdited('memos', id); }
-function isMemoEditProtected(id) { return isEditProtected('memos', id); }
 function markNoticeEdited(id) { markEdited('notices', id); }
-function isNoticeEditProtected(id) { return isEditProtected('notices', id); }
-
-// 삭제 보호 해제 카운터 - 연속 3회 확인 후 해제 (단발 캐시 스냅샷 오탐 방지)
-let _ptDeleteConfirmCount = 0;
-let _cgDeleteConfirmCount = 0;
-const DELETE_CONFIRM_THRESHOLD = 3;
 
 // 삭제된 간병인 ID - localStorage에 영구 저장
 // 자동 만료 없음 - Firebase에서 실제로 사라진 것 확인 후에만 해제
@@ -2012,7 +1953,7 @@ function safeKey(id) {
 
 // ─── 배열 ↔ 객체(id 키 기반) 변환 헬퍼 ───
 // Firebase에는 배열이 아닌 { [id]: item } 형태의 객체로 저장 → 항목 단위 update() 가능
-// 대상: patients, caregivers, logs, attendance, reportLogs, quickMatch, memos, notices
+// 대상: patients, caregivers, logs, attendance, reportLogs, memos, notices
 function arrToObjById(arr) {
   const obj = {};
   (arr || []).forEach(item => {
@@ -2050,7 +1991,6 @@ function getIdKeyedCollections() {
     logs:       logs,
     attendance: attendance,
     reportLogs: reportLogs,
-    quickMatch:    quickMatch,
     blacklist:  blacklist,
     memos:      memos,
     notices:    notices
@@ -2133,7 +2073,6 @@ function save() {
   localStorage.setItem('cnc_attend',    JSON.stringify(attendance));
   localStorage.setItem('cnc_rptlogs',   JSON.stringify(reportLogs));
   localStorage.setItem('cnc_cfg',       JSON.stringify(cfg));
-  localStorage.setItem('cnc_quickmatch',   JSON.stringify(quickMatch));
   localStorage.setItem('cnc_blacklist', JSON.stringify(blacklist));
   localStorage.setItem('cnc_memos',     JSON.stringify(memos));
   localStorage.setItem('cnc_notices',   JSON.stringify(notices));
@@ -2211,9 +2150,6 @@ function save() {
   }, 300);
 }
 
-function saveMem() { save(); }
-
-
 // Firebase 병합 결과 반영 후 스냅샷을 현재 상태로 재정렬
 // (리스너에서 받은 데이터를 그대로 다시 save()가 재전송하는 걸 방지)
 function resyncLastSyncedSnapshot() {
@@ -2282,7 +2218,6 @@ function attachFirebaseListener() {
     const fbLogs        = objToArrById(d.logs);
     const fbAttendance  = objToArrById(d.attendance);
     const fbReportLogs  = objToArrById(d.reportLogs);
-    const fbQuickMatch     = objToArrById(d.quickMatch);
     const fbBlacklist   = objToArrById(d.blacklist);
     const fbMemos       = objToArrById(d.memos);
     const fbNotices     = objToArrById(d.notices);
@@ -2461,10 +2396,6 @@ function attachFirebaseListener() {
       reportLogs = mergeIdCollection(reportLogs, fbReportLogs, 'reportLogs');
       localStorage.setItem('cnc_rptlogs', JSON.stringify(reportLogs));
     }
-    if(fbQuickMatch.length > 0) {
-      quickMatch = mergeIdCollection(quickMatch, fbQuickMatch, 'quickMatch');
-      localStorage.setItem('cnc_quickmatch', JSON.stringify(quickMatch));
-    }
     if(fbBlacklist.length > 0) {
       blacklist = mergeIdCollection(blacklist, fbBlacklist, 'blacklist');
       localStorage.setItem('cnc_blacklist', JSON.stringify(blacklist));
@@ -2549,6 +2480,7 @@ function attachFirebaseListener() {
         checkAutoStart(); // Firebase 로드 완료 후 대기중→근무중 체크
         migrateInsuranceDataOnce(); // 배상보험 이력 관리 도입 전 낡은 데이터 1회성 정리
         migrateReserveStatusOnce(); // 예비 상태 도입 전 낡은 데이터 1회성 정리
+        migrateOffDutyStatusOnce(); // 휴무 상태 폐기 — 기존 '휴무' 레코드를 예비로 편입
         setTimeout(autoFillAllAttendance, 1000);
       } catch(e) { console.warn('렌더 오류:', e); }
     } else {
@@ -2557,11 +2489,9 @@ function attachFirebaseListener() {
         if(ap==='page-patients')  renderPatients();
         if(ap==='page-caregiver') renderCaregivers();
         if(ap==='page-send')      renderSend();
-        if(ap==='page-log')       renderLog();
+        if(ap==='page-settings')  renderLog(); // 발송 기록이 설정 화면 하단으로 이동 — 설정 화면 보고 있을 때만 실시간 갱신
         if(ap==='page-report')    renderReport();
-        if(ap==='page-quickmatch')   renderQuickMatch();
         if(ap==='page-blacklist') renderBlacklist();
-        if(ap==='page-calendar')  renderCalendar();
         updateSidebar(); renderDashboard();
       } catch(e) { console.warn('렌더 오류:', e); }
       showSyncStatus('동기화됨');
@@ -2764,7 +2694,7 @@ function showPage(name, fromHistory) {
   const bt=document.getElementById('bt-'+name);
   if(bt) bt.classList.add('act');
   closeMoreDrawer(); // 더보기 서랍에서 이동한 경우, 이동 후 서랍은 자동으로 닫음
-  const fns={dashboard:renderDashboard,patients:renderPatients,send:renderSend,caregiver:renderCaregivers,log:renderLog,settings:loadSettings,report:renderReport,quickmatch:renderQuickMatch,blacklist:renderBlacklist,memo:initMemoPage,calendar:initCalendar};
+  const fns={dashboard:renderDashboard,patients:renderPatients,send:renderSend,caregiver:renderCaregivers,settings:loadSettings,report:renderReport,blacklist:renderBlacklist,memo:initMemoPage};
   if(fns[name]) fns[name]();
   updateSidebar();
   // 뒤로가기 지원: 메뉴를 직접 눌러서 이동한 경우에만 브라우저 기록에 새로 남김
@@ -3075,6 +3005,13 @@ function applyVendorMessageToForm() {
   const raw = document.getElementById('vendor-paste-text').value;
   const p = parseVendorMessageForRegistration(raw);
   if(!p || (!p.name && !p.hospital)) { toast('메시지에서 인식할 수 있는 내용이 없어요', true); return; }
+  const okToFill = confirm(
+    '⚠️ 업체 카톡 메시지와 실제 환자 정보가 다를 수 있어요.\n\n' +
+    '자동 입력 후에는 반드시 환자(보호자)와 통화해서 확인한 뒤,\n' +
+    '공고 미리보기로 내용을 다시 한번 확인해주세요.\n\n' +
+    '계속해서 자동 입력할까요?'
+  );
+  if(!okToFill) return;
 
   if(p.name) document.getElementById('p-name').value = p.name;
   if(p.age) document.getElementById('p-age').value = p.age;
@@ -3220,25 +3157,8 @@ function renderDashboard() {
   document.getElementById('d-active').textContent  = patients.filter(p=>p.status==='모집중').length;
   document.getElementById('d-matched').textContent = patients.filter(p=>p.status==='매칭완료').length;
   document.getElementById('d-sent').textContent    = logs.length;
-  const el = document.getElementById('d-recent');
-  if(!patients.length) {
-    el.innerHTML='<div class="empty"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><p>등록된 환자가 없어요</p></div>';
-    return;
-  }
-  // 종료 제외 + 시작일 순 정렬 후 5명
-  const list = [...patients]
-    .filter(p => p.status !== '종료')
-    .sort((a,b) => (a.startDate||'9999').localeCompare(b.startDate||'9999'))
-    .slice(0, 5);
-  // 종료 제외 후 5명 안 되면 종료 환자도 추가
-  if(list.length < 5) {
-    const ended = [...patients]
-      .filter(p => p.status === '종료')
-      .sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''))
-      .slice(0, 5 - list.length);
-    list.push(...ended);
-  }
-  el.innerHTML = list.map(p => ptRowHTML(p)).join('');
+  // 대시보드에 캘린더가 병합되어 있으므로, 대시보드가 새로고침될 때마다 캘린더도 함께 최신 상태로 갱신
+  renderCalendar();
 }
 
 // ─── STATUS BADGE ───
@@ -3471,6 +3391,8 @@ function openPatient(id) {
       새 간병인 시작 예정일: <b>${p.recruitInfo.startDate||'—'} ${p.recruitInfo.startTime||''}</b><br>
       (기존 간병인 근무 종료 후 자동으로 교체돼요)
     </div>
+    ${p.recruitInfo.reason==='맞교체(예약)' ? `
+    <button class="btn btn-sm" style="border-color:var(--red);color:var(--red);margin-bottom:8px" onclick="cancelDirectSwap('${p.id}')">✕ 맞교체 취소 (기존 간병인 계속 근무)</button>` : ''}
     ${p.pendingReplacement ? `
     <div style="background:var(--green-lt);border-radius:var(--rsm);padding:10px 14px;display:flex;align-items:center;gap:12px">
       <div style="flex:1">
@@ -3574,6 +3496,14 @@ function editPatient(id) {
           <option value="수술 예정" ${p.surgery==='수술 예정'?'selected':''}>수술 예정</option>
           <option value="수술 없음" ${p.surgery==='수술 없음'?'selected':''}>수술 없음</option>
         </select>
+      </div>
+    </div>
+    <div class="g2">
+      <div class="field"><label>키 (cm)</label>
+        <input type="number" id="ep-height" value="${p.height||''}" placeholder="예: 160">
+      </div>
+      <div class="field"><label>몸무게 (kg)</label>
+        <input type="number" id="ep-weight" value="${p.weight||''}" placeholder="예: 48">
       </div>
     </div>
     <div class="g2" style="margin-bottom:.75rem">
@@ -3684,6 +3614,8 @@ function savePatientEdit(id) {
   p.room      = document.getElementById('ep-room')?.value.trim() || '';
   p.diagnosis = document.getElementById('ep-diagnosis').value.trim();
   p.surgery   = document.getElementById('ep-surgery').value;
+  p.height    = document.getElementById('ep-height')?.value.trim() || '';
+  p.weight    = document.getElementById('ep-weight')?.value.trim() || '';
   p.cgGender  = document.querySelector('input[name="ep-cg-gender"]:checked')?.value || '';
   p.diaper    = document.getElementById('ep-diaper').checked;
   p.move      = !document.getElementById('ep-move').checked; // 체크박스는 "거동 불가" 표시이므로 반전해서 저장
@@ -4590,7 +4522,7 @@ function renderCgForm(cg, p) {
     <div class="g2">
       <div class="field"><label>등록일</label><input type="date" id="cg-regDate" value="${cg?v('regDate'):today}"></div>
       <div class="field"><label>근무상태</label>
-        <select id="cg-workStatus"><option ${defaultWorkStatus==='예비'?'selected':''}>예비</option><option ${defaultWorkStatus==='대기중'?'selected':''}>대기중</option><option ${defaultWorkStatus==='근무중'?'selected':''}>근무중</option><option ${defaultWorkStatus==='휴무'?'selected':''}>휴무</option><option ${defaultWorkStatus==='종료'?'selected':''}>종료</option></select>
+        <select id="cg-workStatus"><option ${defaultWorkStatus==='예비'?'selected':''}>예비</option><option ${defaultWorkStatus==='대기중'?'selected':''}>대기중</option><option ${defaultWorkStatus==='근무중'?'selected':''}>근무중</option><option ${defaultWorkStatus==='종료'?'selected':''}>종료</option></select>
       </div>
       <div class="field"><label>간병인 이름 <span class="req">*</span></label><input type="text" id="cg-name" placeholder="홍길동" value="${v('name')}"></div>
       <div class="field"><label>성별</label>
@@ -5022,7 +4954,7 @@ function saveCg() {
 }
 
 function cgRowHTML(cg) {
-  const statMap={'근무중':'b-green','대기중':'b-amber','휴무':'b-gray','종료':'b-gray','예비':'b-blue'};
+  const statMap={'근무중':'b-green','대기중':'b-amber','종료':'b-gray','예비':'b-blue'};
   // 예비/종료 상태거나, 과거에 매칭됐다가(assignHistory 있음) 지금은 환자가 없는 대기중 간병인은
   // 새 환자에게 재배정할 수 있어야 함
   const cgCanReassign = cg.workStatus==='종료' || cg.workStatus==='예비' || (cg.workStatus==='대기중' && !cg.patientId);
@@ -5101,7 +5033,7 @@ function cgRowHTML(cg) {
 }
 
 let cgMainTab   = 'list'; // list | attend | ins
-let cgStatusFlt = '';     // '' | 예비 | 근무중 | 대기중 | 휴무 | 종료
+let cgStatusFlt = '';     // '' | 예비 | 근무중 | 대기중 | 종료 (휴무 상태 폐기됨 — migrateOffDutyStatusOnce 참고)
 
 function switchCgMainTab(tab) {
   cgMainTab = tab;
@@ -6194,6 +6126,8 @@ function confirmDirectSwap(ptId) {
   }
   const repDays = Math.round((parseLocalDate(p.endDate)-parseLocalDate(swapDate))/86400000);
 
+  const oldCgEndDate = cg.endDate; // 맞교체로 단축되기 전 마감일 (아래 유령 간병일지 정리용 — 되돌리기 전 값 보존)
+
   // 기존 간병인 마감일만 맞교체일로 단축 (환자 마감일은 건드리지 않음 → 연장과의 핵심 차이)
   cg.endDate = swapDate; cg.endTime = swapTime;
   if(cg.startDate) {
@@ -6209,10 +6143,70 @@ function confirmDirectSwap(ptId) {
   markCgEdited(cg.id); // Firebase 덮어쓰기 방지
   markPtEdited(p.id);
   save();
+  // 마감일이 단축되기 전(옛 마감일 기준)에 이미 자동생성돼 있던 "새 마감일보다 뒤 날짜" 간병일지
+  // 기록(유령 기록)을 먼저 정리 — 안 그러면 옛 마감일(예: 10/20) 기록이 그대로 남아서 간병일지가
+  // 안 바뀐 것처럼 보임. 재배정 이력 오염을 막기 위해 "이전 마감일~새 마감일 사이" 구간만 정확히
+  // 지운다 (autoFillAttendance 안의 관련 주석 참고 — 막연히 "새 마감일보다 뒤"를 전부 지우면 안 됨).
+  trimAttendanceGhosts(String(cg.id), oldCgEndDate, swapDate);
   autoFillAttendance(String(cg.id)); // 단축된 마감일에 맞춰 간병일지 동기화 (신규 추가분만 채움 — 아래 참고)
   refreshCalendarIfOpen();
   closeOverlay('swap-overlay'); renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
   toast('✅ 맞교체 예약됐어요. '+cg.name+'님은 '+swapDate+'까지 근무하고, 이후 교체할 간병인 공고를 올려주세요.');
+}
+
+// ── 맞교체 취소: 예약된 맞교체를 취소하고 기존 간병인이 계속 근무하도록 되돌림 ──
+// 맞교체(confirmDirectSwap)는 "환자 마감일은 그대로 두고 기존 간병인 마감일만 앞당김"으로 동작하므로,
+// 취소는 그 반대로 간병인 마감일/시간을 환자 마감일/시간으로 복원하면 원상복구된다.
+function cancelDirectSwap(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  if(!p) return;
+  if(!p.recruitInfo || p.recruitInfo.reason !== '맞교체(예약)') return;
+  const cg = caregivers.find(c=>String(c.patientId)===String(ptId)&&c.workStatus!=='종료');
+  if(!cg) { toast('현재 매칭된 간병인을 찾을 수 없어요. 데이터를 직접 확인해주세요', true); return; }
+  if(!confirm('맞교체를 취소할까요?\n' + cg.name + '님이 원래 마감일(' + (p.endDate||'—') + ' ' + (p.endTime||'') + ')까지 계속 근무하는 것으로 되돌아가요.')) return;
+
+  const oldCgEndDate = cg.endDate; // 맞교체로 단축됐던 마감일 (되돌리기 전 값 보존 — 아래 간병일지 정리용)
+  const hadPendingReplacement = !!p.pendingReplacement; // 아래 교체보고 정리 여부 판단용 (delete 전에 먼저 기록)
+
+  cg.endDate = p.endDate || '';
+  cg.endTime = p.endTime || '';
+  if(cg.startDate && cg.endDate) {
+    const days = Math.round((parseLocalDate(cg.endDate)-parseLocalDate(cg.startDate))/86400000);
+    if(days >= 0) cg.duration = days+'일';
+  }
+  delete p.recruitInfo;
+  delete p.pendingReplacement; // 등록해뒀던 교체 예정 간병인 정보도 함께 취소
+
+  // 예정 교체 간병인을 등록해뒀었다면(saveReplacementInfo가 그때 교체보고를 자동 작성해둠) —
+  // 맞교체 자체가 취소된 것이므로 그 교체보고도 함께 지운다. 안 그러면 취소했는데도 업체보고
+  // 탭에 교체보고가 그대로 남아있는 문제가 생김. 이 환자에게 그 전부터 있었던(이번 취소와 무관한)
+  // 다른 교체보고 이력까지 지우면 안 되므로, 이번에 새로 생겼던 가장 최근 것 하나만 제거한다 —
+  // 취소 후엔 기존과 동일하게 매칭보고/종료보고만 남는다.
+  if(hadPendingReplacement) {
+    const replaceLogs = reportLogs.filter(l=>String(l.patientId)===String(p.id) && l.type==='replace');
+    if(replaceLogs.length) {
+      const latestId = Math.max(...replaceLogs.map(l=>Number(l.id)||0));
+      reportLogs = reportLogs.filter(l=>!(String(l.patientId)===String(p.id) && l.type==='replace' && Number(l.id)===latestId));
+    }
+  }
+
+  markCgEdited(cg.id); // Firebase 덮어쓰기 방지
+  markPtEdited(p.id);
+  save();
+
+  // 단축됐던 마감일은 더 이상 "마지막 근무일"이 아니므로, 그날 간병일지에 남아있는
+  // 맞교체 당시의 단축 마감시각을 되돌려준다 (안 그러면 그 날짜만 이상한 시각에 퇴근한 유령 기록으로 남음).
+  // 담당자가 그날 출퇴근을 수기로 직접 수정한 경우(auto:false)는 건드리지 않음(기존 보호 원칙과 동일).
+  if(oldCgEndDate && oldCgEndDate !== cg.endDate) {
+    const stale = attendance.find(a=>String(a.cgId)===String(cg.id) && (a.inDate===oldCgEndDate || a.date===oldCgEndDate) && a.auto===true);
+    if(stale) { stale.outDate = oldCgEndDate; stale.outTime = '23:59'; markAttendEdited(stale.id); }
+  }
+
+  autoFillAttendance(String(cg.id)); // 복원된 마감일까지 간병일지 채움 + 새 마지막날 마감시각 동기화
+  refreshCalendarIfOpen();
+  renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
+  openPatient(ptId); // 환자 상세 팝업 내용 새로고침 (맞교체 예정 배너 제거)
+  toast('✅ 맞교체가 취소됐어요. '+cg.name+'님이 계속 근무해요.');
 }
 
 // ── 예정 교체 간병인 정보 입력/수정 (기존 간병인 근무 종료 시 자동 인계) ──
@@ -6226,7 +6220,25 @@ function openReplacementForm(ptId) {
       + '🔄 새 간병인 시작일: <b>' + (p.recruitInfo.startDate||'—') + ' ' + (p.recruitInfo.startTime||'') + '</b>'
       + '</div>'
     : '';
-  document.getElementById('replace-body').innerHTML = riHtml
+  // ── 재배정 기능처럼: 예정 교체 간병인이 아예 새로운 사람이 아니라 "이미 등록돼 있는
+  // 간병인"(예비/대기중/종료 풀, 그리고 기존 간병인 본인이 예정교체 되는 경우도 있으므로
+  // 이 환자에게 현재 매칭된 간병인도 포함)인 경우, 목록에서 골라서 정보를 자동으로 채울 수
+  // 있게 한다. "직접 입력"을 선택하면 아무것도 건드리지 않고 수기로 입력 가능.
+  const curCg = caregivers.find(c=>String(c.patientId)===String(p.id)&&c.workStatus!=='종료');
+  const selectableCgs = caregivers.filter(c =>
+    c.workStatus==='종료' || c.workStatus==='예비' || (c.workStatus==='대기중' && !c.patientId)
+    || (curCg && String(c.id)===String(curCg.id))
+  );
+  const ptIdEscSel = String(ptId).replace(/'/g,"\\'");
+  const cgSelectHtml = '<div class="field"><label>등록 방법</label>'
+    + '<select id="rep-cg-select" onchange="fillReplacementFromCg(\'' + ptIdEscSel + '\', this.value)">'
+    + '<option value="">✏️ 직접 입력</option>'
+    + selectableCgs.map(c => '<option value="' + c.id + '">' + c.name
+        + ' (' + c.workStatus + (c.phone ? ' · ' + formatPhone(c.phone) : '') + ')'
+        + (curCg && String(c.id)===String(curCg.id) ? ' — 현재 담당' : '')
+        + '</option>').join('')
+    + '</select></div>';
+  document.getElementById('replace-body').innerHTML = riHtml + cgSelectHtml
     + '<div class="g2">'
     + '<div class="field"><label>이름</label><input type="text" id="rep-name" value="' + (rep.name||'') + '"></div>'
     + '<div class="field"><label>나이</label><input type="number" id="rep-age" value="' + (rep.age||'') + '"></div>'
@@ -6247,6 +6259,28 @@ function openReplacementForm(ptId) {
     + (p.pendingReplacement ? '<button class="btn btn-red" onclick="clearPendingReplacement(&quot;' + String(ptId).replace(/'/g,"\\'") + '&quot;)">취소</button>' : '')
     + '<button class="btn" onclick="closeOverlay(&quot;replace-overlay&quot;)">닫기</button></div>';
   document.getElementById('replace-overlay').classList.add('open');
+}
+
+// 예정 교체 간병인 입력폼에서 "직접 입력" 대신 기존에 등록된 간병인을 선택했을 때,
+// 그 간병인의 정보로 입력칸을 자동으로 채워준다 (재배정 기능의 자동입력과 동일한 취지).
+// 선택 후에도 값은 그대로 수정 가능 — 저장 전까지는 폼 입력값일 뿐, 실제 간병인 레코드는
+// 건드리지 않는다.
+function fillReplacementFromCg(ptId, cgId) {
+  if(!cgId) return; // "✏️ 직접 입력" 선택 시 기존 입력값 유지, 아무것도 건드리지 않음
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg) return;
+  const setVal = (id, v) => { const el = document.getElementById(id); if(el) el.value = v || ''; };
+  setVal('rep-name', cg.name);
+  setVal('rep-age', cg.age);
+  const genderEl = document.getElementById('rep-gender');
+  if(genderEl) genderEl.value = cg.gender || '';
+  setVal('rep-phone', cg.phone);
+  setVal('rep-career', cg.career);
+  setVal('rep-ssn', cg.ssn);
+  setVal('rep-bankName', cg.bankName);
+  setVal('rep-bankAccount', cg.bankAccount);
+  setVal('rep-bankHolder', cg.bankHolder);
+  toast('✅ ' + cg.name + '님 정보를 불러왔어요. 필요하면 수정 후 저장하세요.');
 }
 
 function saveReplacementInfo(ptId) {
@@ -6916,12 +6950,62 @@ function deleteCg(id) {
   refreshCalendarIfOpen(); // 삭제된 간병인이 캘린더에 열려있으면 즉시 반영
 }
 
-// ─── LOG ───
+// ─── LOG (발송 기록 — 설정 화면 하단 카드) ───
+let sendLogCollapsed = true; // 설정 화면을 복잡하게 만들지 않도록 전체 목록은 기본 숨김, 필요할 때만 펼쳐서 확인
+
+function toggleSendLogList() {
+  sendLogCollapsed = !sendLogCollapsed;
+  renderLog();
+}
+
 function renderLog() {
-  const el=document.getElementById('log-wrap');
-  if(!logs.length){el.innerHTML='<div class="empty"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>발송 기록이 없어요</p></div>';return;}
-  el.innerHTML=`<table class="tbl"><thead><tr><th>단톡방</th><th>환자</th><th>시각</th></tr></thead><tbody>
-    ${logs.map(l=>`<tr>
+  const wrap      = document.getElementById('log-wrap');
+  const roomSel   = document.getElementById('log-filter-room');
+  const ptSel     = document.getElementById('log-filter-patient');
+  if(!wrap || !roomSel || !ptSel) return; // 설정 화면이 아직 렌더되지 않은 경우 대비
+
+  const totalEl    = document.getElementById('log-total-count');
+  const filteredEl = document.getElementById('log-filtered-count');
+  const toggleBtn  = document.getElementById('log-toggle-btn');
+  if(totalEl) totalEl.textContent = logs.length;
+
+  // 단톡방/환자별 발송 횟수 집계 → 드롭다운을 "많이 보낸 순"으로 채워서
+  // 어떤 단톡방을 많이 썼는지, 어떤 환자를 몇 번 보냈는지 한눈에 체크할 수 있게 함
+  const roomCnt = {}, ptCnt = {};
+  logs.forEach(l=>{
+    if(l.room) roomCnt[l.room] = (roomCnt[l.room]||0) + 1;
+    if(l.patientName) ptCnt[l.patientName] = (ptCnt[l.patientName]||0) + 1;
+  });
+  const roomEntries = Object.entries(roomCnt).sort((a,b)=>b[1]-a[1]);
+  const ptEntries   = Object.entries(ptCnt).sort((a,b)=>b[1]-a[1]);
+
+  const prevRoom = roomSel.value;
+  const prevPt   = ptSel.value;
+  roomSel.innerHTML = '<option value="">전체 단톡방</option>' +
+    roomEntries.map(([r,c])=>`<option value="${r.replace(/"/g,'&quot;')}">${r} (${c}건)</option>`).join('');
+  ptSel.innerHTML = '<option value="">전체 환자</option>' +
+    ptEntries.map(([p,c])=>`<option value="${p.replace(/"/g,'&quot;')}">${p} (${c}건)</option>`).join('');
+  if(Object.prototype.hasOwnProperty.call(roomCnt, prevRoom)) roomSel.value = prevRoom;
+  if(Object.prototype.hasOwnProperty.call(ptCnt, prevPt))     ptSel.value   = prevPt;
+
+  const filterRoom = roomSel.value;
+  const filterPt   = ptSel.value;
+  const filtered = logs.filter(l =>
+    (!filterRoom || l.room===filterRoom) &&
+    (!filterPt   || l.patientName===filterPt)
+  );
+  if(filteredEl) filteredEl.textContent = filtered.length;
+
+  if(toggleBtn) toggleBtn.textContent = sendLogCollapsed ? '전체 목록 보기' : '전체 목록 숨기기';
+  wrap.style.display = sendLogCollapsed ? 'none' : '';
+  if(sendLogCollapsed) return; // 숨겨진 상태면 목록 HTML은 다시 그리지 않음 (성능 + 불필요한 렌더 방지)
+
+  if(!filtered.length){
+    wrap.innerHTML='<div class="empty"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>발송 기록이 없어요</p></div>';
+    return;
+  }
+  wrap.innerHTML=`<table class="tbl"><thead><tr><th>단톡방</th><th>환자</th><th>시각</th></tr></thead><tbody>
+    ${filtered.map(l=>`<tr>
       <td><span class="badge b-teal">${l.room}</span></td>
       <td style="font-weight:600">${l.patientName}</td>
       <td style="font-family:var(--mono);color:var(--gray)">${l.time}</td>
@@ -6976,6 +7060,7 @@ function loadSettings() {
   if(snd) snd.checked = cfg.sound !== false;
   const hol = document.getElementById('cfg-holidays');
   if(hol) hol.value = (cfg.holidays||[]).join('\n');
+  renderLog(); // 발송 기록 카드도 설정 화면 진입 시 함께 렌더링
 }
 function saveSettings() {
   cfg.name        = document.getElementById('cfg-name').value.trim()||'씨앤에이케어간병협회';
@@ -7807,124 +7892,6 @@ function refreshDateSensitiveReportLogs(pt) {
 
 
 
-// 오늘보다 이전 시작가능일은 자동으로 지움(휘발성 데이터 원칙). 뭔가 지워졌으면 true 반환
-function purgeExpiredQuickMatch() {
-  const today = todayStr();
-  const before = quickMatch.length;
-  quickMatch = quickMatch.filter(m => m.availableDate && m.availableDate >= today);
-  return quickMatch.length !== before;
-}
-
-function renderQuickMatch() {
-  if(purgeExpiredQuickMatch()) { localStorage.setItem('cnc_quickmatch', JSON.stringify(quickMatch)); save(); }
-
-  const q = (document.getElementById('qm-search')?.value||'').trim().toLowerCase();
-  let list = [...quickMatch];
-  if(q) list = list.filter(m=>
-    (m.name||'').toLowerCase().includes(q)||
-    (m.phone||'').includes(q)||
-    (m.region||'').toLowerCase().includes(q)
-  );
-  list.sort((a,b)=>(a.availableDate||'').localeCompare(b.availableDate||''));
-
-  const today = todayStr();
-  const soonCutoff = toLocalDateStr(new Date(Date.now() + 3*86400000));
-  const totalEl = document.getElementById('qm-total');
-  const todayEl = document.getElementById('qm-today');
-  const soonEl  = document.getElementById('qm-soon');
-  if(totalEl) totalEl.textContent = quickMatch.length;
-  if(todayEl) todayEl.textContent = quickMatch.filter(m=>m.availableDate===today).length;
-  if(soonEl)  soonEl.textContent  = quickMatch.filter(m=>m.availableDate && m.availableDate<=soonCutoff).length;
-
-  const el = document.getElementById('quickmatch-list');
-  if(!list.length){
-    el.innerHTML=`<div class="empty"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>${q?`"${q}" 검색 결과 없음`:'등록된 후보가 없어요'}</p></div>`;
-    return;
-  }
-  el.innerHTML=list.map(m=>{
-    const isToday = m.availableDate === today;
-    const isSoon  = !isToday && m.availableDate <= soonCutoff;
-    const dayLabel = getDayLabel(m.availableDate);
-    const dayShort = dayLabel ? dayLabel.replace('요일','') : '';
-    const dateBadgeClass = isToday ? 'b-green' : isSoon ? 'b-amber' : 'b-gray';
-    const dateBadgeText = isToday ? `${m.availableDate}(오늘)` : `${m.availableDate}(${dayShort})`;
-    return `
-    <div class="pt-row">
-      <div class="pt-top">
-        <div><div class="pt-name">${m.name}</div>
-          <div style="font-size:11px;color:var(--gray);margin-top:2px">등록일: ${m.createdAt||'—'}</div></div>
-        <span class="badge ${dateBadgeClass}">${dateBadgeText}</span>
-      </div>
-      <div class="pt-meta">
-        <span>📞 <b>${formatPhone(m.phone)||'—'}</b></span>
-        <span>📍 ${m.region||'—'}</span>
-      </div>
-      <div class="pt-foot" style="margin-top:.5rem">
-        <span></span>
-        <button class="btn btn-sm btn-red" onclick="deleteQuickMatch('${m.id}')">삭제</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function openQuickMatchModal() {
-  editQuickMatchId = null;
-  const maxDate = toLocalDateStr(new Date(Date.now() + 7*86400000));
-  document.getElementById('quickmatch-form-body').innerHTML=`
-    <div class="field"><label>이름 <span class="req">*</span></label><input type="text" id="qm-name" placeholder="홍길동"></div>
-    <div class="field"><label>연락처</label><input type="tel" id="qm-phone" placeholder="010-0000-0000"></div>
-    <div class="field"><label>근무 가능 지역</label><input type="text" id="qm-region" placeholder="예: 강남·서초만 가능"></div>
-    <div class="field"><label>서비스 시작 가능일 <span class="req">*</span></label>
-      <input type="date" id="qm-availableDate" min="${todayStr()}" max="${maxDate}" value="${todayStr()}">
-      <div style="font-size:11px;color:var(--gray);margin-top:4px">오늘부터 7일 이내만 등록할 수 있어요</div>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:1rem">
-      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveQuickMatch()">저장</button>
-      <button class="btn" onclick="closeOverlay('quickmatch-overlay')">취소</button>
-    </div>`;
-  document.getElementById('quickmatch-overlay').classList.add('open');
-}
-
-function saveQuickMatch() {
-  const name = document.getElementById('qm-name').value.trim();
-  if(!name) { toast('이름은 필수입니다', true); return; }
-  const availableDate = document.getElementById('qm-availableDate').value;
-  if(!availableDate) { toast('서비스 시작 가능일은 필수입니다', true); return; }
-  const today = todayStr();
-  const maxDate = toLocalDateStr(new Date(Date.now() + 7*86400000));
-  if(availableDate < today || availableDate > maxDate) {
-    toast('빠른매칭은 오늘부터 7일 이내 시작 가능한 건만 등록할 수 있어요', true);
-    return;
-  }
-  const m = {
-    id: genId(),
-    name,
-    phone: document.getElementById('qm-phone').value.trim(),
-    region: document.getElementById('qm-region').value.trim(),
-    availableDate,
-    createdAt: todayStr(),
-    _ts: Date.now(),
-  };
-  quickMatch.unshift(m);
-  markQuickMatchEdited(m.id);
-  save(); closeOverlay('quickmatch-overlay'); renderQuickMatch();
-  toast(`✅ ${name} 님 등록 완료`);
-}
-
-function deleteQuickMatch(id){
-  if(!confirm('삭제할까요?'))return;
-  quickMatch=quickMatch.filter(m=>String(m.id)!==String(id));
-  save();renderQuickMatch();toast('삭제됐어요');
-}
-
-function downloadQuickMatchExcel(){
-  purgeExpiredQuickMatch();
-  const headers=['이름','연락처','근무가능지역','서비스시작가능일','등록일'];
-  const rows=quickMatch.map(m=>[m.name||'',String(m.phone||''),m.region||'',m.availableDate||'',m.createdAt||'']);
-  downloadFile('씨앤에이케어_빠른매칭명단.csv',toCSV(headers,rows));
-  toast('✅ 빠른매칭 명단 다운로드 완료');
-}
-
 // ─── 블랙리스트 ───
 function renderBlacklist() {
   const q = (document.getElementById('blk-search')?.value || '').trim().toLowerCase();
@@ -8174,14 +8141,6 @@ function calcTotalHours(cg) {
   return h + '시간' + (m>0?' '+m+'분':'');
 }
 // ─── 캘린더 ───
-let _calYear  = new Date().getFullYear();
-let _calMonth = new Date().getMonth(); // 0-indexed
-
-function initCalendar() {
-  var inp = document.getElementById('cal-date-input');
-  if(inp && !inp.value) inp.value = todayStr();
-  renderCalendar();
-}
 
 function shiftCalDay(delta) {
   var inp = document.getElementById('cal-date-input');
@@ -8504,6 +8463,15 @@ function showCalDetail(dateStr) {
       // 재사용 대기(대기중)로 돌아간 간병인도 endDate는 그대로 유지되기 때문)
       const liveCovers = !!cg.endDate && cg.endDate === h.endDate;
       if(liveCovers) return;
+      // 아직 같은 환자와 매칭이 끊기지 않은 채 계속 이어지는 중(=재배정으로 다른 환자에게
+      // 넘어간 게 아니라, 맞교체/마감일 수정 등으로 "같은 근무건의 세부 일정"만 나중에
+      // 바뀐 경우)이라면, 이 이력은 "유실된 정산"이 아니라 그냥 최신화가 안 된 낡은 스냅샷일
+      // 뿐이다. 이 경우 라이브 값(cg.endDate)이 항상 최신·정확한 값이므로 라이브 쪽 "당일
+      // 근무가 마감되는 간병인" 블록만 신뢰하고, 낡은 이력 기준으로 여기서 또 하나 만들어
+      // 내면 안 된다 (예: 맞교체로 10/20→10/18 단축 시, 이력엔 옛 10/20이 남아있어도 그건
+      // 실제로 그날 마감된 게 아니므로 10/20에 최종정산 카드가 뜨면 안 됨).
+      const stillLiveSamePatient = !!cg.patientId && String(cg.patientId) === String(h.patientId) && cg.workStatus !== '종료';
+      if(stillLiveSamePatient) return;
       const bankStr = (cg.bankName||cg.bankAccount)
         ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
         : '';
@@ -8552,6 +8520,10 @@ function showCalDetail(dateStr) {
       if(!h.startDate || !h.endDate) return;
       var liveCovers = cg.startDate === h.startDate && cg.endDate === h.endDate;
       if(liveCovers) return;
+      // 위 블록과 동일한 이유로, 같은 환자와 아직 매칭이 이어지는 중(맞교체/마감일 수정 등으로
+      // 세부 일정만 나중에 바뀐 경우)이면 이 이력은 낡은 스냅샷일 뿐이라 복구 대상에서 제외.
+      var stillLiveSamePatient = !!cg.patientId && String(cg.patientId) === String(h.patientId) && cg.workStatus !== '종료';
+      if(stillLiveSamePatient) return;
       var virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
       calcPayDates(virtualCg).forEach(function(vp) {
         if(vp.date !== dateStr) return;
@@ -8829,23 +8801,9 @@ function saveAutoNotice(content, level) {
 }
 
 // ─── 통합 알림 팝업 ───
-// 모든 알림을 한 팝업에 취합
-let _pendingAlerts = [];
-
-function showUnifiedRemind(alerts) {
-  if(!alerts.length) return;
-  const popup = document.getElementById('remind-popup');
-  document.getElementById('remind-popup-body').innerHTML =
-    alerts.map(a=>
-      `<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.15);line-height:1.6">${a}</div>`
-    ).join('');
-  popup.style.display = 'block';
-  if(cfg.sound !== false) playBeep();
-}
 
 function closeRemindPopup() {
   document.getElementById('remind-popup').style.display = 'none';
-  _pendingAlerts = [];
 }
 
 // 모든 알림을 한꺼번에 체크 (통합)
@@ -8926,27 +8884,6 @@ function checkAllRemind() {
     alertsHtml.map(a=>'<div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,.15);line-height:1.6">'+a+'</div>').join('');
   popup.style.display = 'block';
   if(cfg.sound!==false) playBeep();
-}
-
-// 기존 개별 알림 함수를 통합 함수로 대체
-function checkPayRemind(testMode) {
-  if(testMode) {
-    // 테스트 모드만 기존 방식 유지
-    const today = todayStr();
-    const alerts = [];
-    caregivers.filter(c=>c.startDate).forEach(cg=>{
-      calcPayDates(cg).filter(p=>p.date>=today).slice(0,2).forEach(p=>{
-        const isToday = p.date===today;
-        const prefix  = !isToday?`📅 ${p.date} `:'';
-        if(p.isReserve) alerts.push(`${prefix}💰 <b>${cg.name}</b> ${p.label} [주말·공휴일 조정] (원래 ${p.payDate||p.endDate})`);
-        else alerts.push(`${prefix}💰 <b>${cg.name}</b> ${p.label} 지급일`);
-      });
-    });
-    if(alerts.length) showUnifiedRemind(alerts);
-    else toast('예정된 급여 지급일이 없어요');
-  } else {
-    checkAllRemind();
-  }
 }
 
 // 업무일지 카드 숨김 상태 관리 (기본은 전체 내용 보임, 숨김 누르면 4줄까지만)
@@ -9570,6 +9507,30 @@ function autoFillAttendanceUntilEnd(cgId, endDate) {
   return autoFillAttendance(cgId);
 }
 
+// 간병인 마감일을 "앞당길" 때(맞교체 등), 그 전에 이미 자동생성돼 있던 간병일지 기록 중
+// "새 마감일보다 뒤 ~ 이전 마감일까지" 구간만 정확히 지운다 (auto:true인 것만 — 담당자가
+// 수기로 고친 기록은 절대 건드리지 않음). 반드시 "이전 마감일(oldEndDate)"을 상한으로 줘서
+// 범위를 좁혀야 한다 — autoFillAttendance()에 있던 예전 정리 로직이 "현재 endDate보다 뒤는
+// 전부 삭제" 식으로 무제한 삭제하다가, 간병인이 다른 환자로 재배정되며 endDate가 바뀔 때마다
+// 이미 끝난 과거 근무 이력까지 함께 지워버리는 사고가 있었음 — 그 실수를 반복하지 않기 위해
+// 이번엔 딱 "이번에 단축된 그 구간"만 지우도록 범위를 명시적으로 제한한다.
+function trimAttendanceGhosts(cgId, oldEndDate, newEndDate) {
+  if(!oldEndDate || !newEndDate || oldEndDate <= newEndDate) return 0;
+  let removed = 0;
+  for(let i = attendance.length - 1; i >= 0; i--) {
+    const a = attendance[i];
+    if(String(a.cgId) !== String(cgId)) continue;
+    if(a.auto !== true) continue; // 수기 기록 보호
+    const d = a.inDate || a.date;
+    if(!d) continue;
+    if(d > newEndDate && d <= oldEndDate) {
+      attendance.splice(i, 1);
+      removed++;
+    }
+  }
+  return removed;
+}
+
 function autoFillAttendance(cgId) {
   const cg = caregivers.find(c=>String(c.id)===String(cgId));
   if(!cg || !cg.startDate) return 0;
@@ -9717,7 +9678,7 @@ function checkOut(cgId) {
 let insFlt = 'default'; // default=가입전+가입, all, none, active, expired
 
 // 배상보험현황에는 대기중/근무중/종료 간병인만 대상으로 함.
-// 예비(한번도 매칭된 적 없음)·휴무 간병인은 보험 관리 대상이 아니므로 어떤 탭/검색에서도 노출되지 않아야 함.
+// 예비(한번도 매칭된 적 없음) 간병인은 보험 관리 대상이 아니므로 어떤 탭/검색에서도 노출되지 않아야 함.
 function isInsEligible(c) {
   return c.workStatus === '대기중' || c.workStatus === '근무중' || c.workStatus === '종료';
 }
@@ -9782,6 +9743,22 @@ function migrateReserveStatusOnce() {
   let changed = false;
   caregivers.forEach(cg => {
     if(cg.workStatus === '대기중' && !cg.patientId && (!cg.assignHistory || !cg.assignHistory.length)) {
+      cg.workStatus = '예비';
+      changed = true;
+    }
+  });
+  if(changed) save();
+}
+
+// 휴무 상태 폐기(1회성): '휴무'는 UI(필터탭/등록폼)에서 제거된 죽은 상태값이므로,
+// 기존에 이미 '휴무'로 저장돼있던 레코드는 재배정 가능한 예비 풀로 편입시켜
+// (배상보험 제외 대상이라는 성격은 예비와 동일하게 유지되고, 대신 재배정 후보에는
+// 새로 포함됨) 조용히 사라지는 데이터가 없게 함. 조건 자체가 자기제한적이라
+// (한번 바뀌면 더 이상 workStatus==='휴무'가 아니므로) 매 세션 재실행해도 안전함.
+function migrateOffDutyStatusOnce() {
+  let changed = false;
+  caregivers.forEach(cg => {
+    if(cg.workStatus === '휴무') {
       cg.workStatus = '예비';
       changed = true;
     }
@@ -9989,7 +9966,7 @@ function renderInsurance() {
     return 'active'; // 가입중
   }
 
-  // 대상: 대기중/근무중/종료 간병인만 (예비·휴무 제외) - 필터로 세부 구분
+  // 대상: 대기중/근무중/종료 간병인만 (예비 제외) - 필터로 세부 구분
   let list = caregivers.filter(isInsEligible);
   if(insFlt === 'none')         list = list.filter(c=>c.workStatus!=='종료' && getInsStatus(c)==='none');
   else if(insFlt === 'active')  list = list.filter(c=>c.workStatus!=='종료' && getInsStatus(c)==='active');
@@ -10855,29 +10832,15 @@ function playBeep(type) {
 // 브라우저 알림 권한 요청
 if(Notification&&Notification.permission==='default'){Notification.requestPermission();}
 
-function copyScript() {
-  const el = document.getElementById('script-code');
-  if(!el) { toast('코드를 찾을 수 없어요', true); return; }
-  const code = (el.innerText || el.textContent).trim();
-  // textarea 방식으로 강제 복사 (모달 내 포커스 문제 우회)
-  const ta = document.createElement('textarea');
-  ta.value = code;
-  ta.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;opacity:0;z-index:9999';
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
-  try {
-    const ok = document.execCommand('copy');
-    if(ok) toast('✅ 코드 복사 완료! Apps Script에 붙여넣기 하세요');
-    else toast('❌ 복사 실패 — 코드를 직접 드래그해서 복사해주세요', true);
-  } catch(e) {
-    toast('❌ 복사 실패 — 코드를 직접 드래그해서 복사해주세요', true);
-  }
-  document.body.removeChild(ta);
-}
-
 function exportAll() {
-  const b=new Blob([JSON.stringify({patients,caregivers,rooms,logs,cfg},null,2)],{type:'application/json'});
+  // ⚠️ 예전엔 patients/caregivers/rooms/logs/cfg만 백업되고 간병일지(attendance)/발송·종료보고
+  // (reportLogs)/블랙리스트/업무일지(memos)/알림(notices)이 빠져있어서,
+  // "전체 초기화 전 JSON 백업 권장" 안내와 달리 실제로는 데이터 일부가 백업되지 않는 문제가 있었음.
+  // 앱이 관리하는 컬렉션 전부를 백업하도록 수정.
+  const b=new Blob([JSON.stringify({
+    patients, caregivers, rooms, logs, cfg,
+    attendance, reportLogs, blacklist, memos, notices
+  },null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='cnc-backup.json';a.click();
 }
 
@@ -11009,13 +10972,6 @@ function downloadAll(fmt) {
   }, 1000);
   toast('✅ 전체 '+fmt.toUpperCase()+' 다운로드 시작!');
 }
-
-// ─── 기존 downloadCSV 호환 유지 ───
-function downloadCSV(type) {
-  if(type==='all') { downloadAll('csv'); return; }
-  downloadData(type,'csv');
-}
-function downloadCSVAll() { downloadAll('csv'); }
 
 // ─── 간병일지 환자 선택 ───
 
@@ -11553,6 +11509,35 @@ function importData(input) {
         if(rooms.length !== before) markRoomsEdited();
       }
       if(data.cfg) { Object.assign(cfg,data.cfg); markCfgEdited(); loadSettings(); }
+
+      // ⚠️ 예전엔 간병일지/발송·종료보고/블랙리스트/업무일지/알림이 복원 대상에서
+      // 빠져있어서, exportAll()로 백업한 내용을 그대로 못 불러오는 비대칭 문제가 있었음.
+      // id 있는 나머지 5개 컬렉션도 동일한 방식(중복 id는 건너뜀)으로 복원하도록 추가.
+      const idCollections = [
+        ['attendance',  attendance,  markAttendEdited],
+        ['reportLogs',  reportLogs,  markReportLogEdited],
+        ['blacklist',   blacklist,   markBlacklistEdited],
+        ['memos',       memos,       markMemoEdited],
+        ['notices',     notices,     markNoticeEdited],
+      ];
+      idCollections.forEach(([key, arr, markFn]) => {
+        if(!Array.isArray(data[key])) return;
+        let cnt = 0;
+        data[key].forEach(item=>{
+          if(item && item.id!=null && !arr.find(x=>String(x.id)===String(item.id))) {
+            arr.push(item); markFn(item.id); cnt++;
+          }
+        });
+        added[key] = cnt;
+      });
+      if(Array.isArray(data.logs)) {
+        const before = logs.length;
+        data.logs.forEach(l=>{
+          if(l && l.id!=null && !logs.find(x=>String(x.id)===String(l.id))){ logs.push(l); markLogEdited(l.id); }
+        });
+        if(logs.length !== before) added.logs = logs.length - before;
+      }
+
       save(); updateSidebar(); renderDashboard();
       toast(`✅ 불러오기 완료! 환자 ${added.patients}건, 간병인 ${added.caregivers}건 추가`);
     } catch(err) {
@@ -11562,7 +11547,16 @@ function importData(input) {
   };
   reader.readAsText(file);
 }
-function clearAll(){if(!confirm('모든 데이터 삭제? 복구 불가!'))return;patients=[];caregivers=[];logs=[];save();updateSidebar();toast('초기화됐어요');}
+function clearAll(){
+  if(!confirm('모든 데이터 삭제? 복구 불가!'))return;
+  // ⚠️ 예전엔 patients/caregivers/logs만 지워지고 간병일지(attendance)/발송·종료보고(reportLogs)/
+  // 블랙리스트/업무일지(memos)/알림(notices)은 그대로 남아있어서,
+  // "모든 데이터 삭제"라는 확인 문구와 달리 실제로는 일부만 초기화되는 문제가 있었음.
+  // rooms(단톡방 목록)·cfg(설정)는 데이터가 아니라 설정으로 보고 기존처럼 유지.
+  patients=[];caregivers=[];logs=[];
+  attendance=[];reportLogs=[];blacklist=[];memos=[];notices=[];
+  save();updateSidebar();renderDashboard();toast('초기화됐어요');
+}
 
 // ─── INIT ───
 // 기존 데이터 시간 형식 정규화 (오전/오후 → 24시간)
