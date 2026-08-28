@@ -2254,26 +2254,46 @@ function save() {
   }, 300);
 }
 
-// Firebase 병합 결과 반영 후 스냅샷을 현재 상태로 재정렬
-// (리스너에서 받은 데이터를 그대로 다시 save()가 재전송하는 걸 방지)
-function resyncLastSyncedSnapshot() {
-  const collections = getIdKeyedCollections();
-  const newSynced = {};
-  Object.keys(collections).forEach(colKey => {
-    const map = {};
-    (collections[colKey] || []).forEach(item => {
-      if(item && item.id != null) map[safeKey(item.id)] = JSON.stringify(cleanForFirebase(item));
-    });
-    newSynced[colKey] = map;
+// 병합 결과 중 "파이어베이스 원본과 문자열까지 완전히 일치하는 것만" 동기화 완료로 기록.
+// 다르면(로컬 승리/이력 병합/아직 미동기화 로컬 전용 등 이유 불문) 절대 손대지 않고 그대로 둬서
+// 다음 save()의 buildSyncUpdates가 그 차이를 정확히 감지해 자동으로 재전송하게 함.
+//
+// ⚠️ 예전엔 이 자리에 resyncLastSyncedSnapshot()가 있었는데, 병합 결과와 무관하게
+// "지금 메모리에 있는 값 = 이미 파이어베이스에 저장 완료된 값"이라고 통째로 기록해버렸음.
+// 그래서:
+//  - 로컬이 더 최신이라 _ts 비교에서 정상적으로 이겨서 화면엔 맞는 값이 나와도,
+//    그 값이 실제로 파이어베이스에 반영됐는지 확인 없이 "동기화됨"으로 찍혀서 다시는 재전송이 안 됨
+//  - 오프라인 중 새로 만든 레코드(파이어베이스에 아예 없는 것)도 연결되자마자 똑같이 당해서
+//    영원히 안 올라감 (상태창엔 "동기화됨"으로 떠서 문제를 알아챌 방법도 없었음)
+// → 느린 기기의 오래된 저장이 빠른 기기의 새 저장보다 서버에 늦게 도착해 서버에 옛날 값이
+//    남는 상황에서, 다른 기기가 자기 로컬(진짜 최신)로 화면은 맞게 고쳐도 그 정답이 서버로
+//    다시 안 올라가 영구 고착되는 게 "기기마다 데이터가 다르게 보이는" 현상의 핵심 원인이었음.
+function markConfirmedSynced(colKey, finalArr, fbArr) {
+  const lastSynced = _lastSyncedById[colKey] || (_lastSyncedById[colKey] = {});
+  const fbById = new Map();
+  (fbArr || []).forEach(x => { if(x && x.id != null) fbById.set(String(x.id), x); });
+  const finalIds = new Set();
+  (finalArr || []).forEach(item => {
+    if(!item || item.id == null) return;
+    const id = safeKey(item.id);
+    finalIds.add(id);
+    const fbItem = fbById.get(String(item.id));
+    if(!fbItem) return; // 파이어베이스에 없는(=아직 미동기화) 로컬 전용 항목 → 손대지 않음
+    const finalStr = JSON.stringify(cleanForFirebase(item));
+    const fbStr    = JSON.stringify(cleanForFirebase(fbItem));
+    if(finalStr === fbStr) lastSynced[id] = finalStr; // 파이어베이스와 완전히 같을 때만 동기화 완료로 확정
+    // 다르면 여기서 절대 손대지 않음 — 다음 save()가 이 차이를 감지해 재전송하도록 남겨둠
   });
-  _lastSyncedById = newSynced;
+  // 배열에서 완전히 사라진 항목은 동기화 기록에서도 제거 (삭제가 정상 반영되도록 — 기존 동작과 동일)
+  Object.keys(lastSynced).forEach(id => { if(!finalIds.has(id)) delete lastSynced[id]; });
+}
 
-  _lastSyncedMisc = {
-    rooms: JSON.stringify(cleanForFirebase(rooms)),
-    roomsTs: JSON.stringify(cleanForFirebase(_roomsTs)),
-    cfg:   JSON.stringify(cleanForFirebase(cfg))
-  };
-  persistLastSyncedSnapshot();
+// rooms/roomsTs/cfg처럼 id가 없는 단일 값 컬렉션용 — 위와 동일한 원칙 적용
+function markMiscConfirmedSynced(key, finalVal, fbVal) {
+  const finalStr = JSON.stringify(cleanForFirebase(finalVal));
+  const fbStr    = JSON.stringify(cleanForFirebase(fbVal));
+  if(finalStr === fbStr) _lastSyncedMisc[key] = finalStr;
+  // 다르면 손대지 않음 — 다음 save()가 재전송하도록 남겨둠
 }
 
 // ─── Firebase 실시간 리스너 ───
@@ -2571,9 +2591,28 @@ function attachFirebaseListener() {
         .catch(e => console.warn('공지사항 구조 마이그레이션 실패:', e));
     }
 
-    // 방금 반영된(병합 완료된) 현재 상태를 동기화 스냅샷으로 확정
-    // → 다음 save() 호출 시 여기서 받은 데이터를 다시 불필요하게 재전송하지 않음
-    resyncLastSyncedSnapshot();
+    // 방금 반영된(병합 완료된) 결과 중 파이어베이스와 실제로 일치하는 것만 동기화 완료로 확정
+    // (자세한 이유는 markConfirmedSynced 함수 주석 참고)
+    markConfirmedSynced('patients',   patients,   fbPatients);
+    markConfirmedSynced('caregivers', caregivers, fbCaregivers);
+    markConfirmedSynced('logs',       logs,       fbLogs);
+    markConfirmedSynced('attendance', attendance, fbAttendance);
+    markConfirmedSynced('reportLogs', reportLogs, fbReportLogs);
+    markConfirmedSynced('blacklist',  blacklist,  fbBlacklist);
+    markConfirmedSynced('memos',      memos,      fbMemos);
+    markConfirmedSynced('notices',    notices,    fbNotices);
+    markMiscConfirmedSynced('rooms',   rooms,    fbRooms);
+    markMiscConfirmedSynced('roomsTs', _roomsTs, Number(d.roomsTs || 0));
+    if(d.cfg && typeof d.cfg === 'object') markMiscConfirmedSynced('cfg', cfg, d.cfg);
+    persistLastSyncedSnapshot();
+
+    // 위에서 "아직 파이어베이스에 안 올라간 것"이 남아있으면(로컬 승리분·신규 미동기화 등)
+    // 사용자가 다른 걸 만지길 기다리지 않고 곧바로 재전송을 예약해서 다른 기기에도 빠르게 반영시킴.
+    // (buildSyncUpdates는 side-effect 없는 순수 비교라 여기서 미리 호출해 확인해도 안전함)
+    if(!_fbPause) {
+      const _correctionCheck = buildSyncUpdates();
+      if(_correctionCheck.hasChange) setTimeout(() => { if(!_fbPause) save(); }, 500);
+    }
 
     if(!_fbReady) {
       _fbReady = true;
@@ -4006,13 +4045,15 @@ function confirmOnsiteCancel(id) {
   recalcDuration(p, p.endDate);
 
   if(cg) {
-    saveToAssignHistory(cg); // 근무 이력 저장 (일반 종료와 동일하게)
     cg.workStatus = '종료';
     cg.endDate = cg.startDate;
     cg.endTime = cg.startTime || '';
     recalcDuration(cg, cg.endDate);
     cg.onsiteCancelDate   = cg.startDate; // 캘린더에 고정 지급액을 표시하기 위한 플래그
     cg.onsiteCancelAmount = 15000;        // 업체 지급 20,000원 - 협회 수수료 5,000원
+    // workStatus를 먼저 확정한 뒤 이력 저장 — 순서가 반대면 "과거 담당 환자" 기록의
+    // status가 방금 끝난 근무건인데도 "근무중"으로 잘못 저장됨
+    saveToAssignHistory(cg); // 근무 이력 저장 (일반 종료와 동일하게)
   }
 
   markPtEdited(p.id);
@@ -4040,8 +4081,12 @@ function deletePatient(id) {
   // 중이던" 값들만 지운다.
   caregivers.forEach(cg => {
     if(String(cg.patientId)===String(id)) {
+      // 기준상 매칭 해제 = '대기중' 요건 미충족. 과거 근무 이력(assignHistory)이 있으면
+      // "간병 마감되고 재배정 전"인 종료로, 이력이 전혀 없으면(매칭 한번도 안 된 것과 동일한
+      // 상태로 되돌아감) 예비로 분류한다.
+      const hasHistory = !!(cg.assignHistory && cg.assignHistory.length);
       cg.patientId  = '';
-      cg.workStatus = '대기중';
+      cg.workStatus = hasHistory ? '종료' : '예비';
       cg.startDate  = '';
       cg.startTime  = '';
       cg.endDate    = '';
@@ -4117,17 +4162,26 @@ function selectSendPt(id) {
     // 기존 수정본이 현재 원본(재모집/일반)과 너무 다르면 무시하고 원본 사용
     // (재모집 공고로 바뀐 경우 이전 수정본이 남아있으면 혼란)
     const edited = selPt._editedPost;
-    if(edited && edited.includes('[구인]') && basePost.includes('[구인]')) {
-      // 둘 다 구인 공고면 수정본 유지
-      preview.value = edited;
-    } else if(edited && edited === buildPost(selPt) && selPt.recruitInfo) {
-      // 이전에 일반 공고로 수정본 저장됐는데 지금은 재모집 → 원본으로 교체
+    // 구인공고인지 판별: 제목 줄이 "<구인/..." 또는 "<급구/..." 형태로 시작하는지 확인
+    // (예전엔 "[구인]" 대괄호 형식으로 판별했지만 현재 양식은 "<...>" 홑화살괄호라 항상 불일치했음 —
+    // 그 결과 아래 첫 번째 분기가 절대 타지 않고 항상 "옛 수정본을 그대로" 쓰는 마지막 분기로만 빠졌음)
+    const isJobAdFormat = t => !!t && t.split('\n').some(l => l.startsWith('<'));
+    if(selPt.recruitInfo) {
+      // 맞교체/연장 후 예약교체 등으로 재모집 진행 중: basePost(=buildRecruitPost 결과)가 이미
+      // 저장된 수정본 위에 최신 재모집 시작일/시작시간/기간을 반영해 둔 것이므로 그대로 사용한다.
+      // (여기서 edited를 그대로 쓰면 재모집 값이 하나도 반영 안 된 옛 수정본이 그대로 노출됨 — 신고된 버그)
       preview.value = basePost;
-      delete selPt._editedPost;
-      const idx = patients.findIndex(p=>String(p.id)===String(selPt.id));
-      if(idx>-1) delete patients[idx]._editedPost;
+    } else if(edited && isJobAdFormat(edited) && isJobAdFormat(basePost)) {
+      // 일반 모집이고 저장된 수정본이 여전히 유효한 구인공고 형식이면 유지
+      preview.value = edited;
     } else {
-      preview.value = edited || basePost;
+      // 형식이 안 맞는(예: 옛 양식) 수정본은 폐기하고 최신 원본 사용
+      preview.value = basePost;
+      if(edited) {
+        delete selPt._editedPost;
+        const idx = patients.findIndex(p=>String(p.id)===String(selPt.id));
+        if(idx>-1) delete patients[idx]._editedPost;
+      }
     }
 
     updateSendEditLabel();
@@ -4941,10 +4995,8 @@ function saveCg() {
             prevCg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록
             syncInsuranceForPatientChange(prevCg, prevCg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관
             prevCg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
-            prevCg.workStatus = '대기중';
-          } else {
-            prevCg.workStatus = '종료';
           }
+          prevCg.workStatus = '종료'; // 이력 유무와 무관하게 기준상 "종료"로 통일
           markCgEdited(prevCg.id); // Firebase 덮어쓰기 방지 (10초)
         }
       }
@@ -6906,7 +6958,9 @@ function cancelEarlyTerminate(cgId) {
   const ptId    = cg.earlyEndPatientId || (snap && snap.patientId) || cg.patientId || '';
 
   // ── 간병인 복원 ──
-  cg.workStatus = '근무중';
+  // 종료 전 실제 상태(스냅샷)로 복원 — "시작 전 취소"였다면 대기중으로, 근무 중 중도종료였다면
+  // 근무중으로. 스냅샷이 없는 경우(자동종료/자연마감 등)는 근무중이었다고 보는 게 합리적임.
+  cg.workStatus = (snap && snap.workStatus) ? snap.workStatus : '근무중';
   cg.patientId  = ptId;  // 정상 연결 복원
   cg.endDate    = snap ? (snap.prevEndDate || '') : '';
   cg.endTime    = snap ? (snap.prevEndTime || '') : '';
@@ -8059,9 +8113,13 @@ function smartUpdatePost(editedPost, p) {
 
   if(oldTitleIdx > -1 && oldEndIdx > oldTitleIdx && newTitleIdx > -1 && newEndIdx > newTitleIdx) {
     lines.splice(oldTitleIdx, oldEndIdx - oldTitleIdx, ...newLines.slice(newTitleIdx, newEndIdx));
+    return lines.join('\n');
   }
 
-  return lines.join('\n');
+  // 옛 수정본 구조가 지금 양식과 너무 달라(제목~협회비 구간을 못 찾음) 안전하게 갈아끼울 수 없는 경우,
+  // 일부만 갱신된 상태로 어중간하게 반쪽 반영된 옛 문구를 그대로 남기지 않고 최신 양식으로 새로 생성한다.
+  // (이 fallback이 없으면 시작일/시작시간/기간을 아무리 바꿔도 반영이 전혀 안 된 것처럼 보이는 문제가 있었음)
+  return newPost;
 }
 
 function toggleRecruitHistory(btn) {
@@ -10927,10 +10985,12 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
     outgoingCg.endDate = outgoingEndDate || outgoingCg.endDate || '';
     outgoingCg.endTime = outgoingEndTime || outgoingCg.endTime || '';
     autoFillAttendanceUntilEnd(String(outgoingCg.id), outgoingCg.endDate); // 마감일까지 간병일지 자동 채우기 (상태 변경 전에 먼저)
+    // workStatus를 먼저 최종값으로 확정한 뒤 이력에 기록 (순서가 반대면 saveToAssignHistory()가
+    // 남기는 "과거 담당 환자" 기록의 status가 방금 끝난 근무건인데도 "근무중"으로 잘못 저장됨)
     const isReturningCg = !!(outgoingCg.assignHistory && outgoingCg.assignHistory.length);
-    if(isReturningCg) saveToAssignHistory(outgoingCg);
-    outgoingCg.workStatus = isReturningCg ? '대기중' : '종료';
+    outgoingCg.workStatus = '종료'; // 이력 유무와 무관하게 기준상 "종료"로 통일 (checkAutoEnd와 동일한 이유)
     if(isReturningCg) {
+      saveToAssignHistory(outgoingCg);
       outgoingCg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록
       syncInsuranceForPatientChange(outgoingCg, outgoingCg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관
       outgoingCg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
@@ -11087,17 +11147,26 @@ function checkAutoEnd() {
     // 매칭된 환자는 patientId를 지우기 전에 먼저 참조를 잡아둠 (아래 환자 쪽 처리에 필요)
     const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
 
-    // 이미 과거 이력이 있는(재사용 중인) 간병인은 "종료"가 아니라 "대기중"으로 전환해서
-    // 계속 매칭 가능한 풀에 남겨둠. 이번에 끝난 근무도 이력에 먼저 기록해둠.
+    // 이력이 있든 없든 근무상태 기준상 "종료"(간병 마감되고 재배정 되기전)로 통일한다.
+    // 이력이 있는(재사용 중인) 간병인은 patientId만 해제해서 재배정 가능한 풀에 남겨둠 —
+    // 종료 상태도 이미 재배정 후보(cgCanReassign)에 포함되므로 "대기중"으로 위장할 필요가 없고,
+    // "대기중"으로 남기면 급여지급일 알림(checkAllRemind: 근무중/종료만 훑음) 등에서 누락됨.
+    // workStatus를 먼저 최종값으로 확정한 뒤 이력에 기록해야 saveToAssignHistory()가 남기는
+    // "과거 담당 환자" 기록의 status가 이번에 끝난 상태를 정확히 반영함 (예전엔 순서가 반대라
+    // 방금 끝난 근무건이 이력에 "근무중"으로 잘못 남았음)
     const isReturningCg = !!(cg.assignHistory && cg.assignHistory.length);
+    cg.workStatus = '종료';
     if(isReturningCg) saveToAssignHistory(cg);
-    cg.workStatus = isReturningCg ? '대기중' : '종료';
     if(isReturningCg) {
       if(pt) cg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록 (② 루프와 동일하게 맞춤)
       syncInsuranceForPatientChange(cg, cg.patientId, '', pt ? pt.name : ''); // 배상보험도 이번 근무건 이력으로 보관 (patientId 지우기 전에 먼저 정리)
       cg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
       cg._returnedToPoolAt = cg.endDate; // 재처리 방지용 플래그 (endDate는 캘린더 계산을 위해 그대로 유지)
     }
+    // ⚠️ 자동종료도 "로컬 최신 수정"으로 보호해야 함 — 이 호출이 없으면 이 간병인의 _ts가
+    // 갱신되지 않아, 잠시 후 다른 기기의 낡은(아직 근무중인 채로 저장된) 데이터와 동기화될 때
+    // 시각 비교에서 낡은 쪽이 이겨서 방금 종료 처리한 게 다시 "근무중"으로 되돌아가버림
+    markCgEdited(cg.id);
     changed = true;
 
     let skipEndReport = false; // 예약 교체 인계/대체 미확보 재모집 전환은 실제 "환자 종료"가 아니므로 종료보고 제외
@@ -11119,6 +11188,7 @@ function checkAutoEnd() {
             duration: '', reason: '연장 후 간병인 교체(대체 미확보)'
           };
         }
+        markPtEdited(pt.id); // Firebase 덮어쓰기 방지 (자동 처리도 로컬 최신 수정으로 보호)
         changed = true;
         skipEndReport = true;
       } else {
@@ -11126,6 +11196,7 @@ function checkAutoEnd() {
         pt.endTime  = cg.endTime;
         pt.status   = '종료';
         pt.recruited = true;
+        markPtEdited(pt.id); // Firebase 덮어쓰기 방지 (자동 처리도 로컬 최신 수정으로 보호)
         changed = true;
       }
     }
@@ -11175,6 +11246,7 @@ function checkAutoEnd() {
     pt.endTime  = endTime || '23:59';
     pt.status   = '종료';
     pt.recruited = true;
+    markPtEdited(pt.id); // Firebase 덮어쓰기 방지 (자동 처리도 로컬 최신 수정으로 보호)
     changed = true;
 
     if(cg) {
@@ -11189,18 +11261,21 @@ function checkAutoEnd() {
       // 이 호출이 없으면 근무 기간 전체의 간병일지가 비어있는 채로 남게 됨)
       autoFillAttendanceUntilEnd(String(cg.id), cg.endDate);
 
+      // workStatus를 먼저 최종값으로 확정한 뒤 이력에 기록 (① 루프와 동일한 이유 —
+      // 순서가 반대면 saveToAssignHistory()가 남기는 "과거 담당 환자" 기록의 status가
+      // 방금 끝난 근무건인데도 "근무중"으로 잘못 저장됨)
       const isReturningCg = !!(cg.assignHistory && cg.assignHistory.length);
+      cg.earlyEndPatientId = String(pt.id); // "종료취소"가 이 경로로 끝난 경우도 복원할 수 있도록
+      cg.workStatus = '종료'; // 이력 유무와 무관하게 기준상 "종료"로 통일 (① 루프와 동일한 이유)
       if(isReturningCg) {
-        cg.earlyEndPatientId = String(pt.id); // "종료취소"가 이 경로로 끝난 경우도 복원할 수 있도록
         saveToAssignHistory(cg);
         syncInsuranceForPatientChange(cg, cg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관 (patientId 지우기 전에 먼저 정리)
-        cg.workStatus = '대기중';
         cg.patientId  = '';
         cg._returnedToPoolAt = cg.endDate;
-      } else {
-        cg.earlyEndPatientId = String(pt.id);
-        cg.workStatus = '종료';
       }
+      // ⚠️ 자동종료도 "로컬 최신 수정"으로 보호해야 함 — 없으면 _ts가 갱신되지 않아
+      // 잠시 후 다른 기기의 낡은(근무중인 채로 저장된) 데이터와 동기화될 때 되돌아갈 수 있음
+      markCgEdited(cg.id);
     }
     endedItems.push({pt, cg});
   });
@@ -11939,7 +12014,7 @@ function parseCSVFile(filename, text) {
         }
         caregivers.unshift({
           id:genId(),
-          regDate:g(row,'날짜'), workStatus:g(row,'근무상태')||'대기중',
+          regDate:g(row,'날짜'), workStatus:g(row,'근무상태')||'예비',
           name, ssn, age, gender:g(row,'성별'),
           pay:pay||'', phone:g(row,'연락처'),
           bankName:g(row,'은행명'), bankAccount:g(row,'계좌번호'), bankHolder:g(row,'예금주'),
@@ -12201,9 +12276,9 @@ function normalizeTimes() {
       delete c._snapshot;
       changed = true;
     }
-    // workStatus 없는 간병인 기본값
+    // workStatus 없는 간병인 기본값 — 기준4(예비: 매칭 한번도 안된 간병인)에 맞춰 예비로
     if(!c.workStatus) {
-      c.workStatus = '대기중';
+      c.workStatus = '예비';
       changed = true;
     }
   });
