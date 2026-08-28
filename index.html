@@ -7841,14 +7841,11 @@ function selectRptPtType(ptId, type) {
     const log = reportLogs.find(l=>String(l.patientId)===String(ptId)&&l.type==='ended');
     msg = log ? log.msg : buildEndReport(selRptPt);
   } else if(type==='replace') {
-    // 항상 최신 정보/양식으로 새로 생성 (저장된 옛 로그를 그대로 재사용하지 않음)
-    const cgForReplace = findCgForPatient(selRptPt);
-    msg = buildReplaceReport(
-      selRptPt,
-      cgForReplace ? cgForReplace.startDate : selRptPt.startDate,
-      cgForReplace ? cgForReplace.startTime : selRptPt.startTime,
-      cgForReplace
-    );
+    // 항상 최신 정보/양식으로 새로 생성 (저장된 옛 로그를 그대로 재사용하지 않음).
+    // 단, 예약된 맞교체가 아직 인계 전(pendingReplacement)이면 그 예정 간병인 정보를 사용 —
+    // 안 그러면 아직 실제 간병인 레코드로 안 바뀐 상태라 직전 교체 건이 대신 나와버림.
+    const info = getReplaceReportInfo(selRptPt);
+    msg = buildReplaceReport(selRptPt, info.date, info.time, info.cg);
   }
   const titleEl = document.getElementById('rpt-title-label');
   titleEl.textContent = type==='matched' ? `📋 제목: ${selRptPt.name} / ${selRptPt.hospital||''}`
@@ -7936,6 +7933,30 @@ function findCgForPatient(p) {
   }
 
   return null;
+}
+
+// ── 교체보고에 쓸 "새로 오는 간병인" 정보 결정 (공통 헬퍼) ──
+// 맞교체/예약교체를 확정(recruitInfo+pendingReplacement 등록)한 뒤에도, 실제 인계 시각이
+// 지나 promotePendingReplacement()가 실행되기 전까지는 findCgForPatient()가 여전히
+// "곧 교체될 기존(직전) 간병인"을 돌려준다. 이 상태에서 교체보고를 만들면 이번에 새로
+// 등록한 교체 예정 간병인이 아니라 직전 교체 건(또는 원래 담당자) 정보가 나와버리는
+// 문제가 있었음 — 같은 환자에게 맞교체를 연달아 두 번 진행하면 두 번째 교체보고에
+// 첫 번째 교체 건이 대신 나오는 버그가 바로 이 케이스. pendingReplacement가 있으면
+// (아직 인계 전이라는 뜻) 그 예정 정보를 우선 사용한다.
+function getReplaceReportInfo(pt) {
+  if(pt && pt.pendingReplacement) {
+    return {
+      cg:   pt.pendingReplacement,
+      date: pt.recruitInfo ? pt.recruitInfo.startDate : '',
+      time: pt.recruitInfo ? pt.recruitInfo.startTime : ''
+    };
+  }
+  const cg = findCgForPatient(pt);
+  return {
+    cg,
+    date: cg ? cg.startDate : (pt ? pt.startDate : ''),
+    time: cg ? cg.startTime : (pt ? pt.startTime : '')
+  };
 }
 
 // ── 매칭 보고 메시지 생성 ──
@@ -8454,13 +8475,8 @@ function regenerateReport() {
   if(rptType === 'matched')  msg = buildMatchReport(selRptPt);
   else if(rptType === 'ended')   msg = buildEndReport(selRptPt);
   else if(rptType === 'replace') {
-    const cgForReplace = findCgForPatient(selRptPt);
-    msg = buildReplaceReport(
-      selRptPt,
-      cgForReplace ? cgForReplace.startDate : selRptPt.startDate,
-      cgForReplace ? cgForReplace.startTime : selRptPt.startTime,
-      cgForReplace
-    );
+    const info = getReplaceReportInfo(selRptPt);
+    msg = buildReplaceReport(selRptPt, info.date, info.time, info.cg);
   }
   else msg = buildMatchReport(selRptPt);
   document.getElementById('rpt-preview').value = msg;
