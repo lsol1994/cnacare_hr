@@ -3536,7 +3536,10 @@ function openPatient(id) {
       (기존 간병인 근무 종료 후 자동으로 교체돼요)
     </div>
     ${p.recruitInfo.reason==='맞교체(예약)' ? `
-    <button class="btn btn-sm" style="border-color:var(--red);color:var(--red);margin-bottom:8px" onclick="cancelDirectSwap('${p.id}')">✕ 맞교체 취소 (기존 간병인 계속 근무)</button>` : ''}
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="openDirectSwap('${p.id}')">🕐 맞교체 일정 변경</button>
+      <button class="btn btn-sm" style="flex:1;justify-content:center;border-color:var(--red);color:var(--red)" onclick="cancelDirectSwap('${p.id}')">✕ 맞교체 취소</button>
+    </div>` : ''}
     ${p.pendingReplacement ? `
     <div style="background:var(--green-lt);border-radius:var(--rsm);padding:10px 14px;display:flex;align-items:center;gap:12px">
       <div style="flex:1">
@@ -6236,23 +6239,33 @@ function openDirectSwap(ptId) {
   const cg = caregivers.find(c=>String(c.patientId)===String(ptId)&&c.workStatus!=='종료');
   if(!cg) { toast('현재 매칭된 간병인이 없어요', true); return; }
   if(!p.endDate) { toast('환자 마감일을 먼저 등록해주세요', true); return; }
-  document.getElementById('swap-title').textContent = '🔀 ' + p.name + ' 간병인 맞교체';
+  // 이미 맞교체가 예약된 상태(인계 전)에서 다시 연 경우 = 일정 변경(수정) 모드.
+  // 실제 처리(confirmDirectSwap)는 신규 등록과 동일한 로직을 그대로 재사용 —
+  // recruitInfo.startDate/startTime과 cg.endDate/endTime을 새 값으로 덮어쓰기만 하면 되므로 충분함.
+  const isEdit = !!(p.recruitInfo && p.recruitInfo.reason === '맞교체(예약)');
+  document.getElementById('swap-title').textContent = isEdit
+    ? '🕐 ' + p.name + ' 맞교체 일정 변경'
+    : '🔀 ' + p.name + ' 간병인 맞교체';
   const ptEndStr = p.endDate + ' ' + (p.endTime||'');
   const ptIdEsc = String(ptId).replace(/'/g,"\\'");
+  const prefDate = isEdit ? (p.recruitInfo.startDate||'') : '';
+  const prefTime = isEdit ? (p.recruitInfo.startTime||'') : '';
   document.getElementById('swap-body').innerHTML = '<div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;margin-bottom:1rem;font-size:12px;color:var(--gray)">'
     + '<div>현재 담당 간병인: <b style="color:var(--black)">' + cg.name + '</b></div>'
     + '<div>환자 계약 마감일: <b style="color:var(--black)">' + ptEndStr + '</b> <span style="color:var(--teal)">(그대로 유지)</span></div>'
     + '</div>'
+    + (isEdit ? '<div style="background:var(--amber-lt);border-radius:var(--rsm);padding:8px 12px;margin-bottom:.875rem;font-size:12px;color:#92400e">현재 예약된 맞교체 예정일시: <b>' + (p.recruitInfo.startDate||'—') + ' ' + (p.recruitInfo.startTime||'') + '</b><br>아래에서 날짜/시간을 바꾸면 이 예약이 새 값으로 갱신돼요.</div>' : '')
     + '<div class="field"><label>맞교체 예정일 <span style="color:var(--red)">*</span></label>'
-    + '<input type="date" id="swap-date" oninput="onSwapDateChange(&quot;' + ptIdEsc + '&quot;)"></div>'
+    + '<input type="date" id="swap-date" value="' + prefDate + '" oninput="onSwapDateChange(&quot;' + ptIdEsc + '&quot;)"></div>'
     + '<div class="field"><label>맞교체 예정시간</label>'
-    + '<input type="time" id="swap-time"></div>'
+    + '<input type="time" id="swap-time" value="' + prefTime + '"></div>'
     + '<div style="background:var(--teal-lt);border-radius:var(--rsm);padding:8px 12px;margin-bottom:.875rem;font-size:12px;color:var(--teal);font-weight:600;min-height:32px" id="swap-preview"></div>'
     + '<div style="font-size:11px;color:var(--gray);margin-bottom:.875rem">이 날짜부터 <b>' + cg.name + '</b>님 근무가 마감되고, 등록할 새 간병인이 이어서 근무해요. 환자 계약 마감일은 변경되지 않아요.</div>'
     + '<div style="display:flex;gap:8px;margin-top:1rem">'
-    + '<button class="btn btn-teal" style="flex:1;justify-content:center" onclick="confirmDirectSwap(&quot;' + ptIdEsc + '&quot;)">맞교체 예약</button>'
+    + '<button class="btn btn-teal" style="flex:1;justify-content:center" onclick="confirmDirectSwap(&quot;' + ptIdEsc + '&quot;)">' + (isEdit ? '변경 저장' : '맞교체 예약') + '</button>'
     + '<button class="btn" onclick="closeOverlay(&quot;swap-overlay&quot;)">취소</button></div>';
   document.getElementById('swap-overlay').classList.add('open');
+  if(isEdit) onSwapDateChange(ptId); // 미리 채워둔 날짜 기준으로 미리보기도 바로 표시
 }
 
 function onSwapDateChange(ptId) {
@@ -6282,6 +6295,7 @@ function confirmDirectSwap(ptId) {
     toast('맞교체 예정일은 현재 간병인 시작일보다 빠를 수 없어요', true); return;
   }
   const repDays = Math.round((parseLocalDate(p.endDate)-parseLocalDate(swapDate))/86400000);
+  const isEdit = !!(p.recruitInfo && p.recruitInfo.reason === '맞교체(예약)'); // 토스트 문구 구분용 (덮어쓰기 전에 판단)
 
   const oldCgEndDate = cg.endDate; // 맞교체로 단축되기 전 마감일 (아래 유령 간병일지 정리용 — 되돌리기 전 값 보존)
 
@@ -6308,7 +6322,10 @@ function confirmDirectSwap(ptId) {
   autoFillAttendance(String(cg.id)); // 단축된 마감일에 맞춰 간병일지 동기화 (신규 추가분만 채움 — 아래 참고)
   refreshCalendarIfOpen();
   closeOverlay('swap-overlay'); renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
-  toast('✅ 맞교체 예약됐어요. '+cg.name+'님은 '+swapDate+'까지 근무하고, 이후 교체할 간병인 공고를 올려주세요.');
+  if(document.getElementById('pt-overlay') && document.getElementById('pt-overlay').classList.contains('open')) openPatient(ptId); // 열려있으면 맞교체 예정 배너 즉시 갱신
+  toast(isEdit
+    ? '✅ 맞교체 일정이 변경됐어요. '+cg.name+'님은 '+swapDate+'까지 근무해요.'
+    : '✅ 맞교체 예약됐어요. '+cg.name+'님은 '+swapDate+'까지 근무하고, 이후 교체할 간병인 공고를 올려주세요.');
 }
 
 // ── 맞교체 취소: 예약된 맞교체를 취소하고 기존 간병인이 계속 근무하도록 되돌림 ──
