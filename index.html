@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
+<!-- 캐시 무효화: 기기마다 다른 버전의 앱이 캐시되어 서로 다른 데이터를 보여주는 문제 방지
+     (2026-08-31: 여러 PC/폰이 각자 낡은 버전을 오래 캐시해서 동기화가 안 되는 것처럼 보이던 문제의 원인) -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>씨앤에이케어 — 간병인 구인 관리 시스템</title>
 
 <!-- PWA -->
@@ -1994,6 +1999,47 @@ function addDeletedPtId(id) {
 function clearDeletedPtIds() { localStorage.removeItem('cnc_deletedPtIds'); }
 let _journalFmt    = 'xlsx';
 
+// ─── 앱 버전 / 새 버전 감지 ───
+// 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
+// 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
+// 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
+const APP_BUILD = '26_08_31_1';
+let _versionCheckTimer = null;
+function checkForNewVersion() {
+  fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
+    .then(r => r.ok ? r.text() : null)
+    .then(txt => {
+      if(!txt) return;
+      const remote = txt.trim();
+      if(remote && remote !== APP_BUILD) showUpdateBanner(remote);
+    })
+    .catch(() => {}); // version.txt가 없거나 네트워크 문제면 조용히 무시 (기존 동작에 영향 없음)
+}
+function showUpdateBanner(remoteVersion) {
+  if(document.getElementById('app-update-banner')) return; // 이미 표시 중이면 중복 생성 안 함
+  const el = document.createElement('div');
+  el.id = 'app-update-banner';
+  el.style.cssText = [
+    'position:fixed', 'top:0', 'left:0', 'right:0',
+    'background:#0B7A6E', 'color:#fff', 'z-index:999999',
+    'padding:10px 14px', 'font-size:13px', 'font-weight:700',
+    'display:flex', 'align-items:center', 'justify-content:center', 'gap:12px',
+    'box-shadow:0 2px 10px rgba(0,0,0,.25)'
+  ].join(';');
+  el.innerHTML = '🔄 새 버전이 있어요 (지금 화면은 옛날 버전일 수 있어요)'
+    + '<button id="app-update-reload-btn" style="background:#fff;color:#0B7A6E;border:none;border-radius:6px;padding:6px 14px;font-weight:700;cursor:pointer">지금 새로고침</button>';
+  document.body.appendChild(el);
+  document.getElementById('app-update-reload-btn').onclick = () => {
+    // 저장 중인 변경사항이 있으면 잃을 수 있으니 확인 후 새로고침 (beforeunload와 동일한 기준)
+    if(_pendingSave && !confirm('저장 중인 변경사항이 있어요. 그래도 새로고침 할까요?')) return;
+    location.reload();
+  };
+}
+// 로드 10초 후 1차 확인, 이후 5분마다, 그리고 탭이 다시 보일 때(백그라운드에 오래 있다 복귀 시)마다 확인
+setTimeout(checkForNewVersion, 10000);
+setInterval(checkForNewVersion, 5 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if(!document.hidden) checkForNewVersion(); });
+
 // ─── Firebase 초기화 (동적 로딩 - 실패해도 앱 동작) ───
 let db = null;
 
@@ -2590,6 +2636,16 @@ function attachFirebaseListener() {
       db.ref('cnc/notices').set(arrToObjById(notices))
         .catch(e => console.warn('공지사항 구조 마이그레이션 실패:', e));
     }
+
+    // ── _ts 없는 옛날 레코드 자동 보정 ──
+    // _ts가 없으면 병합 시 "예전 휴리스틱" 경로를 타게 되는데, 그 경로는 _ts 비교보다
+    // 신뢰도가 낮아서 종료 처리 등이 잘못 되돌아가는 원인이 될 수 있었음.
+    // 여기서 한 번 채워두면 다음 save()가 자동으로 서버에 반영해서, 이후로는 항상 정확한
+    // _ts 비교 경로를 타게 됨 (마이그레이션 스크립트 따로 안 돌려도 자연스럽게 정리됨).
+    function backfillMissingTs(arr) {
+      (arr || []).forEach(item => { if(item && item._ts == null) item._ts = Date.now(); });
+    }
+    [patients, caregivers, logs, attendance, reportLogs, blacklist, memos, notices].forEach(backfillMissingTs);
 
     // 방금 반영된(병합 완료된) 결과 중 파이어베이스와 실제로 일치하는 것만 동기화 완료로 확정
     // (자세한 이유는 markConfirmedSynced 함수 주석 참고)
