@@ -2003,7 +2003,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_08_31_2';
+const APP_BUILD = '26_09_04_1';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -4736,6 +4736,21 @@ function renderCgForm(cg, p) {
   // 신규 등록: 환자와 함께 등록하면(p 있음) 근무중을 기본값으로, 간병인만 단독 등록하면(p 없음)
   // 아직 매칭 전이므로 예비를 기본값으로 — 기존 레코드 수정 시에는 저장된 값 그대로 사용
   const defaultWorkStatus = cg ? v('workStatus') : (p ? '근무중' : '예비');
+
+  // ── 간병 시작일/시간 기본값 (신규 등록 시에만 해당) ──
+  // ⚠️ 예전엔 p가 있으면 무조건 p.startDate(환자의 "원본 서비스시작일")를 기본값으로 채웠음.
+  // 이 환자에게 이미 다른 활성(미종료) 간병인이 매칭돼 있는 상태에서 "간병인 등록" 버튼으로
+  // 직접교체(맞교체)를 진행하는 경우, 새 간병인은 원본 시작일이 아니라 실제 교체가 이뤄지는
+  // 시점부터 근무하는 것인데도 기본값이 원본 시작일 그대로 채워져 있어서, 직원이 시작일 칸을
+  // 놓치고 그대로 저장하면 급여 계산·간병일지·배상보험 기간이 전부 (원본 시작일 기준으로)
+  // 잘못 계산되는 문제가 있었음(같은 환자에 맞교체를 두 번 이상 반복하면 매번 재현됨).
+  // 우선순위로 기본값을 정한다:
+  //   1) 🔀맞교체 예약/연장 후 교체 예정으로 recruitInfo.startDate가 이미 잡혀있으면 그 날짜
+  //   2) 예약 없이 이미 활성 간병인이 있는 상태(직접교체)면 → 원본 시작일이 아니라 "오늘"
+  //   3) 그 외(진짜 첫 매칭, 활성 간병인 없음)엔 기존처럼 환자의 서비스시작일
+  const existingActiveCg = (p && !cg) ? caregivers.find(c => String(c.patientId)===String(p.id) && c.workStatus!=='종료') : null;
+  const cgDefaultStartDate = p ? ((p.recruitInfo && p.recruitInfo.startDate) || (existingActiveCg ? today : p.startDate) || '') : '';
+  const cgDefaultStartTime = p ? ((p.recruitInfo && p.recruitInfo.startTime) || (existingActiveCg ? '08:00' : p.startTime) || '08:00') : '08:00';
   document.getElementById('cg-form-body').innerHTML=`
     <div class="g2">
       <div class="field"><label>등록일</label><input type="date" id="cg-regDate" value="${cg?v('regDate'):today}"></div>
@@ -4771,17 +4786,19 @@ function renderCgForm(cg, p) {
     </div>
     <div class="hr"></div>
     <div class="card-hd" style="margin-bottom:.5rem"><span class="dot"></span>간병 일정
-      ${p ? `<span style="font-size:10px;font-weight:400;color:var(--teal);text-transform:none;letter-spacing:0;margin-left:6px">환자 정보에서 자동 입력됨 · 수정 가능</span>` : ''}
+      ${existingActiveCg
+        ? `<span style="font-size:10px;font-weight:400;color:var(--amber);text-transform:none;letter-spacing:0;margin-left:6px">⚠️ 이미 담당 간병인이 있어 교체(맞교체)로 처리돼요 · 시작일 기본값=${p.recruitInfo&&p.recruitInfo.startDate?'예약된 교체일':'오늘'} (실제 교체일로 수정하세요)</span>`
+        : (p ? `<span style="font-size:10px;font-weight:400;color:var(--teal);text-transform:none;letter-spacing:0;margin-left:6px">환자 정보에서 자동 입력됨 · 수정 가능</span>` : '')}
     </div>
     <div class="g2">
       <div class="field"><label>환자 병원</label>
         <input type="text" id="cg-hospital" placeholder="${p?p.hospital:''}" value="${v('hospital')||(p?p.hospital:'')}">
       </div>
       <div class="field"><label>간병 시작일</label>
-        <input type="date" id="cg-startDate" value="${v('startDate')||(p?p.startDate:'')}" onchange="calcEndDate()">
+        <input type="date" id="cg-startDate" value="${v('startDate')||cgDefaultStartDate}" onchange="calcEndDate()">
       </div>
       <div class="field"><label>시작 시간 (24h 이내)</label>
-        <input type="time" id="cg-startTime" value="${v('startTime')||(p?p.startTime:'08:00')}">
+        <input type="time" id="cg-startTime" value="${v('startTime')||cgDefaultStartTime}">
       </div>
       <div class="field"><label>간병 마감일 <span style="font-size:10px;font-weight:400;color:var(--gray)">자동계산·수정가능</span></label>
         <input type="date" id="cg-endDate" value="${v('endDate')||calcEndDateVal(p)}">
