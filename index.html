@@ -2003,7 +2003,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_08_31_1';
+const APP_BUILD = '26_08_31_2';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -11379,6 +11379,12 @@ function checkAutoEnd() {
     if(pt.status !== '종료' || !pt.endDate) return;
     const cg = caregivers.find(c=>String(c.patientId)===String(pt.id) && c.workStatus!=='종료');
     if(!cg) return;
+    // 같은 환자가 같은 간병인에게 재배정된 경우, 이 cg는 pt.endDate(1차 종료일) 이후에
+    // 새로 시작된 별개의 새 배정일 수 있음 — 그런 경우까지 여기서 무조건 닫아버리면,
+    // 방금 재배정한 유효한 근무가 다른 기기에 남아있던 예전(1차) 환자 종료 상태 때문에
+    // 곧바로 다시 "종료" 처리돼버리는 문제가 있었음(patientId만 보고 판단해서 재배정 여부를
+    // 구분 못 함). cg의 시작일이 이 종료일보다 이후라면 재배정으로 생긴 새 근무이므로 스킵.
+    if(cg.startDate && cg.startDate > pt.endDate) return;
     cg.endDate = pt.endDate;
     cg.endTime = pt.endTime || cg.endTime || '';
     // 종료 처리 전에 마감일까지 간병일지 자동 채우기 (① 루프와 동일 처리 —
