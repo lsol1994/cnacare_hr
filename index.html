@@ -2003,7 +2003,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_04_1';
+const APP_BUILD = '26_09_07_1';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -8962,6 +8962,27 @@ function findHistoricalCgForPatient(patientId, dateField, dateVal) {
   return null;
 }
 
+// 캘린더 급여지급 카드용 환자 조회. 종료/중도종료/맞교체 처리 시 cg.patientId는 재배정
+// 풀로 돌리기 위해 비워지지만(startDate/endDate/pay는 급여 계산을 위해 그대로 남음),
+// 그 시점에 cg.earlyEndPatientId에 원래 환자ID가 보존되므로 우선 그걸로 복구를 시도한다.
+// (다른 곳 — saveToAssignHistory, 종료보고/종료취소 등 — 은 이미 이 패턴을 쓰고 있었는데
+// 캘린더의 급여상세 생성 코드만 cg.patientId만 보고 있어서 환자가 있어도 못 찾던 문제)
+function resolveCalPt(cg) {
+  var pt = cg.patientId ? patients.find(function(p){return String(p.id)===String(cg.patientId);}) : null;
+  if(!pt && cg.earlyEndPatientId) pt = patients.find(function(p){return String(p.id)===String(cg.earlyEndPatientId);});
+  return pt;
+}
+// resolveCalPt()로도 환자를 못 찾을 때(환자 레코드 자체가 삭제된 경우 등) 최후 수단으로,
+// 현재 cg의 startDate/endDate와 정확히 일치하는 assignHistory 항목을 찾아 patientName만이라도
+// 복구한다. 날짜가 라이브 값과 다른 이력은 이미 별도의 "이력에서 복구됨" 블록이 처리하므로
+// 여기서는 정확히 일치하는 것만 찾아 중복을 피한다.
+function findOwnAssignHistoryByDates(cg) {
+  if(!cg.startDate) return null;
+  return (cg.assignHistory||[]).find(function(h) {
+    return h.startDate === cg.startDate && h.endDate === (cg.endDate||'');
+  }) || null;
+}
+
 function showCalDetail(dateStr) {
   var bodyEl = document.getElementById('cal-detail-body');
   if(!bodyEl) return;
@@ -9049,8 +9070,9 @@ function showCalDetail(dateStr) {
       paidCgIdsToday[String(cg.id)] = true;
       var bgColor = p.isReserve ? '#FFF3E0' : 'var(--amber-lt)';
       var bdColor = p.isReserve ? '#E65100' : 'var(--amber)';
-      var pt = cg.patientId ? patients.find(function(pt){return String(pt.id)===String(cg.patientId);}) : null;
-      var ptStr = pt ? ' (' + pt.name + ')' : '';
+      var pt = resolveCalPt(cg);
+      var histFallback = !pt ? findOwnAssignHistoryByDates(cg) : null;
+      var ptStr = pt ? ' (' + pt.name + ')' : (histFallback ? ' (' + (histFallback.patientName||'') + ')' : '');
       var reserveStr = p.isReserve ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">원래 지급일: ' + (p.payDate||p.endDate) + '</div>' : '';
       var advanceNoteStr = p.advanceDeducted ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">선지급 ' + p.advanceDeducted.toLocaleString() + '원 차감 (원래 ' + (p.originalAmount||0).toLocaleString() + '원)</div>' : '';
       var amountStr = p.amount ? '<div style="font-size:15px;font-weight:900;color:'+bdColor+';margin-top:4px">' + p.amount.toLocaleString() + '원</div>' : '';
@@ -9058,6 +9080,18 @@ function showCalDetail(dateStr) {
       var expenseHtml = '';
       if(pt) {
         var expenseMsg = buildExpenseMemo(cg, pt, p);
+        if(expenseMsg) {
+          _calExpenseMsgs.push(expenseMsg);
+          var idx = _calExpenseMsgs.length - 1;
+          expenseHtml = '<div style="margin-top:6px">'
+            + '<div id="cal-expense-text-' + idx + '" style="white-space:pre-wrap;font-size:11px;line-height:1.6;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:6px;margin-bottom:4px">' + expenseMsg + '</div>'
+            + '<div style="display:flex;gap:6px">'
+            + '<button class="btn btn-sm" id="cal-expense-toggle-' + idx + '" style="flex:1;justify-content:center" onclick="toggleCalExpense(' + idx + ')">🙈 숨기기</button>'
+            + '<button class="btn btn-sm" style="flex:1;justify-content:center" onclick="copyCalExpenseMsg(' + idx + ')">📋 복사</button>'
+            + '</div></div>';
+        }
+      } else if(histFallback) {
+        var expenseMsg = buildExpenseMemoFromHistory(cg, histFallback, p);
         if(expenseMsg) {
           _calExpenseMsgs.push(expenseMsg);
           var idx = _calExpenseMsgs.length - 1;
@@ -9106,8 +9140,9 @@ function showCalDetail(dateStr) {
   caregivers.forEach(function(cg) {
     if(!cg.onsiteCancelDate || cg.onsiteCancelDate !== dateStr) return;
     paidCgIdsToday[String(cg.id)] = true; // 최종정산 로직이 이 간병인을 중복 처리하지 않도록 표시
-    var pt = cg.patientId ? patients.find(function(p){return String(p.id)===String(cg.patientId);}) : null;
-    var ptStr = pt ? ' (' + pt.name + ')' : '';
+    var pt = resolveCalPt(cg);
+    var histFallback = !pt ? findOwnAssignHistoryByDates(cg) : null;
+    var ptStr = pt ? ' (' + pt.name + ')' : (histFallback ? ' (' + (histFallback.patientName||'') + ')' : '');
     var bankStr = (cg.bankName||cg.bankAccount)
       ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
       : '';
@@ -9116,6 +9151,18 @@ function showCalDetail(dateStr) {
     var expenseHtml = '';
     if(pt) {
       var expenseMsg = buildExpenseMemo(cg, pt, { label: '현장취소', amount: amount });
+      if(expenseMsg) {
+        _calExpenseMsgs.push(expenseMsg);
+        var idx2 = _calExpenseMsgs.length - 1;
+        expenseHtml = '<div style="margin-top:6px">'
+          + '<div id="cal-expense-text-' + idx2 + '" style="white-space:pre-wrap;font-size:11px;line-height:1.6;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:6px;margin-bottom:4px">' + expenseMsg + '</div>'
+          + '<div style="display:flex;gap:6px">'
+          + '<button class="btn btn-sm" id="cal-expense-toggle-' + idx2 + '" style="flex:1;justify-content:center" onclick="toggleCalExpense(' + idx2 + ')">🙈 숨기기</button>'
+          + '<button class="btn btn-sm" style="flex:1;justify-content:center" onclick="copyCalExpenseMsg(' + idx2 + ')">📋 복사</button>'
+          + '</div></div>';
+      }
+    } else if(histFallback) {
+      var expenseMsg = buildExpenseMemoFromHistory(cg, histFallback, { label: '현장취소', amount: amount });
       if(expenseMsg) {
         _calExpenseMsgs.push(expenseMsg);
         var idx2 = _calExpenseMsgs.length - 1;
@@ -9155,8 +9202,9 @@ function showCalDetail(dateStr) {
     var alreadyPaid = calcPayDates(cg).reduce(function(sum,p){ return sum + (p.amount||0); }, 0) + totalAdvance(cg);
     var settleAmount = totalOwed - alreadyPaid;
     if(settleAmount <= 0) return; // 이미 다 지급된 상태면 표시 안 함
-    var pt = cg.patientId ? patients.find(function(p){return String(p.id)===String(cg.patientId);}) : null;
-    var ptStr = pt ? ' (' + pt.name + ')' : '';
+    var pt = resolveCalPt(cg);
+    var histFallback = !pt ? findOwnAssignHistoryByDates(cg) : null;
+    var ptStr = pt ? ' (' + pt.name + ')' : (histFallback ? ' (' + (histFallback.patientName||'') + ')' : '');
     var bankStr = (cg.bankName||cg.bankAccount)
       ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
       : '';
@@ -9165,6 +9213,18 @@ function showCalDetail(dateStr) {
     var expenseHtml = '';
     if(pt) {
       var expenseMsg = buildExpenseMemo(cg, pt, { label: '최종 정산 (근무 마감)', amount: settleAmount });
+      if(expenseMsg) {
+        _calExpenseMsgs.push(expenseMsg);
+        var idx = _calExpenseMsgs.length - 1;
+        expenseHtml = '<div style="margin-top:6px">'
+          + '<div id="cal-expense-text-' + idx + '" style="white-space:pre-wrap;font-size:11px;line-height:1.6;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:6px;margin-bottom:4px">' + expenseMsg + '</div>'
+          + '<div style="display:flex;gap:6px">'
+          + '<button class="btn btn-sm" id="cal-expense-toggle-' + idx + '" style="flex:1;justify-content:center" onclick="toggleCalExpense(' + idx + ')">🙈 숨기기</button>'
+          + '<button class="btn btn-sm" style="flex:1;justify-content:center" onclick="copyCalExpenseMsg(' + idx + ')">📋 복사</button>'
+          + '</div></div>';
+      }
+    } else if(histFallback) {
+      var expenseMsg = buildExpenseMemoFromHistory(cg, histFallback, { label: '최종 정산 (근무 마감)', amount: settleAmount });
       if(expenseMsg) {
         _calExpenseMsgs.push(expenseMsg);
         var idx = _calExpenseMsgs.length - 1;
@@ -9983,7 +10043,13 @@ function buildExpenseMemoFromHistory(cg, h, payEntry) {
 
   let rangeStart, rangeStartTime, rangeEnd, rangeEndTime, totalDays, reasonLabel;
 
-  if(payEntry.label === '단기 급여') {
+  if(payEntry.label === '현장취소') {
+    // 도착 후 취소(이력복구): 시작=마감(실제 근무 없음), 고정 지급액
+    rangeStart = h.startDate; rangeStartTime = h.startTime;
+    rangeEnd   = h.startDate; rangeEndTime   = h.startTime;
+    totalDays  = 0;
+    reasonLabel = '도착 후 취소/현장 취소';
+  } else if(payEntry.label === '단기 급여') {
     rangeStart = h.startDate; rangeStartTime = h.startTime;
     rangeEnd   = h.endDate;   rangeEndTime   = h.endTime;
     totalDays  = Math.round((parseLocalDate(rangeEnd) - parseLocalDate(rangeStart)) / 86400000);
