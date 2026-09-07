@@ -2003,7 +2003,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_07_3';
+const APP_BUILD = '26_09_07_4';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3640,6 +3640,7 @@ function openPatient(id) {
       </button>
       <button class="btn btn-sm" onclick="openCaregiverModal('${p.id}')">간병인 등록</button>
       <button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="confirmOnsiteCancel('${p.id}')">🚫 현장 취소</button>
+      <button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="confirmOnsiteCancelReassign('${p.id}')">🚫 현장 취소(간병인만)</button>
       <button class="btn btn-sm" onclick="doCopy(patients.find(x=>String(x.id)==='${p.id}')?._editedPost || buildPost(patients.find(x=>String(x.id)==='${p.id}')));closeOverlay('pt-overlay')">공고 복사</button>
       <button class="btn btn-red btn-sm" onclick="deletePatient('${p.id}')">환자 삭제</button>
     </div>
@@ -4127,6 +4128,102 @@ function confirmOnsiteCancel(id) {
   updateSidebar();
 
   toast(`✅ ${p.name} 님 현장 취소 처리됐어요` + (cg ? ` (${cg.name} 님 15,000원 지급 예정)` : ''));
+}
+
+// 도착 후 취소(간병인만 종료): confirmOnsiteCancel과 달리 환자가 간병인이 마음에 안 들어
+// 그 자리에서 돌려보낸 경우 사용. 환자는 서비스를 계속 원하므로 종료하지 않고 "모집중"으로
+// 돌려 재모집하고, 간병인만 서비스 시작시각 기준으로 종료 처리한다.
+// 지급액은 현장 취소와 동일하게 고정 15,000원(업체 지급 2만원 - 협회 수수료 5천원).
+function confirmOnsiteCancelReassign(id) {
+  const p = patients.find(x=>String(x.id)===String(id));
+  if(!p) { toast('환자를 찾을 수 없어요', true); return; }
+
+  const cg = caregivers.find(c=>String(c.patientId)===String(p.id));
+  if(!cg) { toast('연결된 간병인이 없어서 처리할 수 없어요', true); return; }
+  if(!cg.startDate) { toast('간병인 서비스 시작일이 없어서 처리할 수 없어요', true); return; }
+
+  const ok = confirm(
+    `${cg.name} 님을 "도착 후 취소(간병인만 종료)"로 처리할까요?\n` +
+    `서비스 시작 시각(${cg.startDate} ${cg.startTime||''})에 ${cg.name} 님만 종료 처리되고 15,000원이 캘린더에 지급 예정으로 등록돼요.\n` +
+    `${p.name} 님은 종료되지 않고 "모집중"으로 전환되어 새 간병인을 구하게 돼요.`
+  );
+  if(!ok) return;
+
+  const prevCgName       = cg.name;
+  const originalPatientId = cg.patientId;
+
+  // 재모집 공고에 표시할 원래 마감일 보존 (중도종료 재모집과 동일 로직)
+  const origEndDate = p.endDate || (()=>{
+    if(!p.startDate || !p.duration) return '';
+    const days = parseDurationDays(p.duration);
+    if(!days) return '';
+    const d = parseLocalDate(p.startDate);
+    if(!d) return '';
+    d.setDate(d.getDate()+days);
+    return toLocalDateStr(d);
+  })();
+  let recruitDays = '';
+  if(origEndDate && cg.startDate) {
+    const eOrig = parseLocalDate(origEndDate);
+    const eTerm = parseLocalDate(cg.startDate);
+    if(eOrig && eTerm) {
+      const diff = Math.round((eOrig - eTerm) / 86400000);
+      if(diff > 0) recruitDays = diff + '일';
+    }
+  }
+
+  // ── 간병인: 서비스 시작시각에 종료 처리 (실제 근무는 없었으므로 시작=마감) ──
+  cg.workStatus = '종료';
+  cg.endDate    = cg.startDate;
+  cg.endTime    = cg.startTime || '';
+  recalcDuration(cg, cg.endDate);
+  cg.onsiteCancelDate   = cg.startDate; // 캘린더에 고정 지급액을 표시하기 위한 플래그
+  cg.onsiteCancelAmount = 15000;        // 업체 지급 20,000원 - 협회 수수료 5,000원 (현장 취소와 동일)
+  cg.feedback = (cg.feedback ? cg.feedback + ' / ' : '') + '[도착 후 취소] 환자 요청으로 교체';
+
+  // 배상보험도 이번에 종료된 근무 건의 기록으로 이력에 보관 (patientId를 지우기 전에 처리)
+  syncInsuranceForPatientChange(cg, originalPatientId, '', p.name);
+
+  cg.earlyEndPatientId = originalPatientId; // 연결 끊긴 뒤에도 "마지막 담당 환자"로 조회 가능하게 보존
+  cg.patientId = ''; // 정상 연결 해제 → 새 간병인을 이 환자에게 매칭할 수 있게
+
+  // workStatus를 먼저 확정한 뒤 이력 저장 — 순서가 반대면 "과거 담당 환자" 기록의
+  // status가 방금 끝난 근무건인데도 "근무중"으로 잘못 저장됨
+  saveToAssignHistory(cg, originalPatientId);
+
+  // ── 환자: 종료하지 않고 재모집으로 전환 (동시 종료되는 현장 취소와 구분되는 지점) ──
+  p.recruitInfo = {
+    startDate: cg.startDate,
+    startTime: cg.startTime || '',
+    endDate:   origEndDate,
+    duration:  recruitDays,
+    reason:    '도착 후 취소(간병인 교체)'
+  };
+  p.status           = '모집중';
+  p.recruited        = false;
+  p.caregiverName    = '';
+  p.endDate          = '';
+  p.endTime          = '';
+  p.recruitStartDate = cg.startDate;
+  if(!p.recruitHistory) p.recruitHistory = [];
+  p.recruitHistory.push({
+    endDate: cg.startDate, recruitDate: cg.startDate, reason: '도착 후 취소(간병인 교체)',
+    prevCg: prevCgName, recordedAt: new Date().toLocaleDateString('ko-KR')
+  });
+  sendSheets({type:'updatePatient', name:p.name, startDate:p.startDate, caregiverName:'', status:'모집중'});
+
+  markPtEdited(p.id);
+  markCgEdited(cg.id);
+  save();
+  autoFillAttendance(String(cg.id));
+  refreshCalendarIfOpen();
+  document.getElementById('pt-overlay').classList.remove('open');
+  renderPatients();
+  renderCaregivers();
+  renderDashboard();
+  updateSidebar();
+
+  toast(`✅ ${cg.name} 님 도착 후 취소 처리됐어요 (15,000원 지급 예정). ${p.name} 님은 재모집으로 전환됐어요.`);
 }
 
 function deletePatient(id) {
