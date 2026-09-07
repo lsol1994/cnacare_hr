@@ -2001,13 +2001,78 @@ function addDeletedPtId(id) {
   } catch(e) {}
 }
 function clearDeletedPtIds() { localStorage.removeItem('cnc_deletedPtIds'); }
+
+// 삭제된 근무이력(assignHistory) 항목 - 동일 방식(localStorage, cgId별로 관리)
+// mergeCg()의 assignHistory 병합은 "절대 유실 방지" 원칙으로 로컬∪원격을 항상 합치는데,
+// 그 규칙 때문에 사용자가 deleteAssignHistoryEntry()로 명시적으로 지운 항목이 아직 지워지지
+// 않은 원격(Firebase)/다른 기기의 옛 스냅샷과 합쳐지면서 되살아나는 문제가 있었음.
+// patients/caregivers 전체삭제와 동일하게, "Firebase에서 실제로 사라진 것 확인 후에만 해제"
+// 방식의 tombstone을 항목 단위(patientId+startDate)로 둬서 병합 시 다시 살아나지 않게 함.
+function _histKeyFor(patientId, startDate) { return String(patientId) + '|' + (startDate||''); }
+function getDeletedHistKeys(cgId) {
+  try {
+    const raw = JSON.parse(localStorage.getItem('cnc_deletedHistKeys') || '{}');
+    return new Set(Object.keys(raw[String(cgId)] || {}));
+  } catch(e) { return new Set(); }
+}
+function addDeletedHistKey(cgId, patientId, startDate) {
+  try {
+    const raw = JSON.parse(localStorage.getItem('cnc_deletedHistKeys') || '{}');
+    const cid = String(cgId);
+    if(!raw[cid]) raw[cid] = {};
+    raw[cid][_histKeyFor(patientId, startDate)] = Date.now();
+    localStorage.setItem('cnc_deletedHistKeys', JSON.stringify(raw));
+  } catch(e) {}
+}
+function clearDeletedHistKey(cgId, key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem('cnc_deletedHistKeys') || '{}');
+    const cid = String(cgId);
+    if(raw[cid]) {
+      delete raw[cid][key];
+      if(Object.keys(raw[cid]).length === 0) delete raw[cid];
+      localStorage.setItem('cnc_deletedHistKeys', JSON.stringify(raw));
+    }
+  } catch(e) {}
+}
+
+// 삭제된 보험이력(insuranceHistory) 항목 - assignHistory와 완전히 동일한 문제·동일한 해법.
+// insuranceHistory 병합(mergeCg)도 "절대 유실 방지" 원칙의 강제 합집합이라, deleteInsuranceHistory()로
+// 지운 항목이 아직 지워지지 않은 원격/다른 기기 스냅샷과 합쳐지면서 되살아날 수 있었음.
+function _insHistKeyFor(h) { return String(h.id || (String(h.patientId)+'|'+(h.archivedAt||''))); }
+function getDeletedInsHistKeys(cgId) {
+  try {
+    const raw = JSON.parse(localStorage.getItem('cnc_deletedInsHistKeys') || '{}');
+    return new Set(Object.keys(raw[String(cgId)] || {}));
+  } catch(e) { return new Set(); }
+}
+function addDeletedInsHistKey(cgId, key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem('cnc_deletedInsHistKeys') || '{}');
+    const cid = String(cgId);
+    if(!raw[cid]) raw[cid] = {};
+    raw[cid][key] = Date.now();
+    localStorage.setItem('cnc_deletedInsHistKeys', JSON.stringify(raw));
+  } catch(e) {}
+}
+function clearDeletedInsHistKey(cgId, key) {
+  try {
+    const raw = JSON.parse(localStorage.getItem('cnc_deletedInsHistKeys') || '{}');
+    const cid = String(cgId);
+    if(raw[cid]) {
+      delete raw[cid][key];
+      if(Object.keys(raw[cid]).length === 0) delete raw[cid];
+      localStorage.setItem('cnc_deletedInsHistKeys', JSON.stringify(raw));
+    }
+  } catch(e) {}
+}
 let _journalFmt    = 'xlsx';
 
 // ─── 앱 버전 / 새 버전 감지 ───
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_07_6';
+const APP_BUILD = '26_09_07_8';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -2499,33 +2564,55 @@ function attachFirebaseListener() {
 
           // 과거 근무건 보험 이력(insuranceHistory)도 assignHistory와 마찬가지로 계속
           // 쌓이기만 해야 하는 기록이라, 승자와 무관하게 양쪽을 항상 합쳐서 보존함
+          // 단, 사용자가 deleteInsuranceHistory()로 명시적으로 지운 항목(deletedInsHistKeys)은
+          // 원격/다른 기기에 옛 값이 남아있어도 다시 합쳐 넣지 않음
           const localInsHist = local.insuranceHistory || [];
           const dcInsHist    = dc.insuranceHistory    || [];
           if(localInsHist.length || dcInsHist.length) {
             const insHistKey = h => String(h.id || (String(h.patientId)+'|'+(h.archivedAt||'')));
+            const deletedInsHistKeys = getDeletedInsHistKeys(dc.id);
             const seenIns = new Set();
             const combinedIns = [];
             [...localInsHist, ...dcInsHist].forEach(h => {
               const k = insHistKey(h);
+              if(deletedInsHistKeys.has(k)) return; // 사용자가 지운 항목 — 복원 안 함
               if(!seenIns.has(k)) { seenIns.add(k); combinedIns.push(h); }
             });
             winner.insuranceHistory = combinedIns;
+            // Firebase 쪽에서도 실제로 사라진 게 확인되면 tombstone 해제 (영구 삭제 확인)
+            if(deletedInsHistKeys.size > 0) {
+              deletedInsHistKeys.forEach(k => {
+                const stillInFb = dcInsHist.some(h => insHistKey(h) === k);
+                if(!stillInFb) clearDeletedInsHistKey(dc.id, k);
+              });
+            }
           }
 
           // 과거 담당 환자 이력(assignHistory)은 계속 쌓이기만 해야 하는 기록이라,
           // 승자가 어느 쪽이든 상관없이 양쪽을 항상 합쳐서 보존함 (유실 절대 방지)
+          // 단, 사용자가 deleteAssignHistoryEntry()로 명시적으로 지운 항목(deletedHistKeys)은
+          // 원격/다른 기기에 옛 값이 남아있어도 다시 합쳐 넣지 않음
           const localHistory = local.assignHistory || [];
           const dcHistory    = dc.assignHistory    || [];
           if(localHistory.length || dcHistory.length) {
             const histKey = h => String(h.patientId) + '|' + (h.startDate||'');
+            const deletedHistKeys = getDeletedHistKeys(dc.id);
             const seen = new Set();
             const combined = [];
             [...localHistory, ...dcHistory].forEach(h => {
               const k = histKey(h);
+              if(deletedHistKeys.has(k)) return; // 사용자가 지운 항목 — 복원 안 함
               if(!seen.has(k)) { seen.add(k); combined.push(h); }
             });
             combined.sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
             winner.assignHistory = combined;
+            // Firebase 쪽에서도 실제로 사라진 게 확인되면 tombstone 해제 (영구 삭제 확인)
+            if(deletedHistKeys.size > 0) {
+              deletedHistKeys.forEach(k => {
+                const stillInFb = dcHistory.some(h => histKey(h) === k);
+                if(!stillInFb) clearDeletedHistKey(dc.id, k);
+              });
+            }
           }
           return winner;
         }).filter(Boolean);
@@ -5889,6 +5976,8 @@ function deleteAssignHistoryEntry(cgId, patientId, startDate) {
   if(!cg || !cg.assignHistory) return;
   if(!confirm('이 근무 이력을 삭제할까요?')) return;
   cg.assignHistory = cg.assignHistory.filter(h => !(String(h.patientId)===String(patientId) && h.startDate===startDate));
+  addDeletedHistKey(cgId, patientId, startDate); // 동기화 병합 시 되살아나는 것 방지
+  markCgEdited(cgId); // Firebase 덮어쓰기 방지 (2분)
   save();
   openCgDetail(cgId);
   toast('삭제됐어요');
@@ -5931,6 +6020,7 @@ function saveHistoryEntryEdit(cgId, patientId, startDate) {
   h.endDate     = document.getElementById('hist-endDate').value;
   h.endTime     = document.getElementById('hist-endTime').value;
   h.pay         = document.getElementById('hist-pay').value.trim();
+  markCgEdited(cgId); // Firebase 덮어쓰기 방지 (2분)
   save();
   closeOverlay('replace-overlay');
   openCgDetail(cgId);
@@ -11184,6 +11274,7 @@ function saveInsuranceHistory(cgId, histId) {
   h.expiry     = document.getElementById('ins-h-expiry').value;
   h.terminated = document.getElementById('ins-h-terminated').checked;
   h.memo       = document.getElementById('ins-h-memo').value.trim();
+  markCgEdited(cgId); // Firebase 덮어쓰기 방지 (2분)
   save(); closeOverlay('cg-overlay'); renderInsurance();
   toast('✅ 과거 보험 이력이 수정됐어요');
 }
@@ -11197,6 +11288,8 @@ function deleteInsuranceHistory(cgId, histId) {
   const label = h.patientName ? `'${h.patientName}' 건` : '이 기록';
   if(!confirm(`${cg.name}님의 ${label}(과거 배상보험 이력)을 삭제할까요?\n삭제하면 되돌릴 수 없어요.`)) return;
   cg.insuranceHistory = cg.insuranceHistory.filter(x=>String(x.id)!==String(histId));
+  addDeletedInsHistKey(cgId, _insHistKeyFor(h)); // 동기화 병합 시 되살아나는 것 방지
+  markCgEdited(cgId); // Firebase 덮어쓰기 방지 (2분)
   save(); renderInsurance();
   toast('🗑️ 과거 보험 이력이 삭제됐어요');
 }
