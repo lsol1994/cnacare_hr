@@ -2003,7 +2003,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_07_4';
+const APP_BUILD = '26_09_07_5';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -5145,6 +5145,9 @@ function saveCg() {
   if(cg.patientId) {
     pt = patients.find(x=>String(x.id)===String(cg.patientId));
     if(pt) {
+      // 아래에서 pt.status가 '매칭완료'로 덮어써지기 전에, "종료됐던 환자에게 새로
+      // 서비스를 다시 매칭하는 경우"인지 미리 기록해둠 (같은 환자 재요청 케이스 판별용)
+      const wasEndedPt = pt.status === '종료';
       // ══ 맞교체(직접등록): 이 환자에게 이미 다른 활성(미종료) 간병인이 매칭되어 있는데
       // 예약교체(🔀 맞교체 버튼) 절차 없이 그냥 새 간병인을 바로 등록하는 경우 — 이전
       // 간병인의 마감일시를 이 새 간병인의 시작일시로 강제 동기화한다. 두 값을 각각 수기로
@@ -5195,6 +5198,18 @@ function saveCg() {
       pt.recruited     = true;
       delete pt.recruitInfo; // 재모집이 실제로 완료됐으므로 "재모집중" 표시 해제
       delete pt.startCancelled; // 새로 실제 매칭됐으므로 캘린더 숨김 해제
+
+      // ⚠️ 같은 환자 재요청 버그 방지: 종료됐던 환자(wasEndedPt)에게 새 간병인을 매칭하는
+      // 경우, 이전 서비스 건의 endDate/duration이 그대로 남아있으면 — 새 간병인은 아직
+      // 마감일이 없는 경우가 많아 아래 "cg.endDate 동기화" 블록이 실행되지 않고 옛 값이
+      // 그대로 남는다. 그러면 checkAutoEnd()가 이 옛 마감일을 그대로 감지해서 방금 매칭한
+      // 환자를 곧바로 다시 "종료" 처리해버림(간병인도 함께). changeStatus()에서 종료 상태를
+      // 되돌릴 때와 동일한 이유로, 새 일정으로 동기화되기 전에 미리 비워서 방지한다.
+      if(wasEndedPt && !hadPendingReplacement) {
+        pt.endDate  = '';
+        pt.endTime  = '';
+        pt.duration = '';
+      }
 
       // 간병인 시작일시도 항상 환자에게 동기화 (기존엔 마감일만 동기화되고 시작일은 빠져있어서,
       // 간병인 카드에서 시작일을 고쳐도 환자 카드의 시작일은 낡은 채로 남아있는 비대칭 문제가 있었음)
