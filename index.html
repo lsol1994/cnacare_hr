@@ -1518,6 +1518,10 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         onclick="confirmMaintenanceTool('🔧 중도종료 데이터 복구\n\n\'종료취소\' 버튼이 작동하지 않는 경우(복원용 기록이 없는 경우), 현재 남아있는 정보로 복원용 기록을 다시 만들어줍니다.', fixEarlyEndData)">
         🔧 중도종료 데이터 복구
       </button>
+      <button class="btn btn-sm" style="border-color:var(--red);color:var(--red)"
+        onclick="confirmMaintenanceTool('🔧 같은 환자 재매칭 오종료 복구\n\n종료됐던 환자에게 새 간병인을 다시 매칭했는데, 예전 마감일이 안 지워져서 곧바로 다시 \'종료\' 처리돼버린 건을 찾아 복구합니다(간병인 시작일보다 마감일이 더 빠른 비정상 기록을 기준으로 판별). 이력이 있는(재사용된) 간병인 건은 자동 복구가 위험해서 건너뛰고 목록으로만 알려드려요.', fixRematchAutoEndBug)">
+        🔧 같은 환자 재매칭 오종료 복구
+      </button>
       <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)"
         onclick="confirmMaintenanceTool('📋 간병일지 자동생성 (전체)\n\n모든 간병인의 출퇴근 기록 중 비어있는 날짜를 자동으로 채웁니다. 직접 수정해둔 기록은 건드리지 않아요.', autoFillAllAttendanceManual)">
         📋 간병일지 자동생성 (전체)
@@ -2003,7 +2007,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_07_5';
+const APP_BUILD = '26_09_07_6';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -8483,6 +8487,66 @@ function fixEarlyEndData() {
   } else {
     toast('복구할 데이터가 없어요 (이미 모두 복구됨)');
   }
+}
+
+// ─── 같은 환자 재매칭 오종료 복구 ───
+// saveCg()가 종료됐던 환자에게 새 간병인을 매칭할 때 이전 서비스의 endDate/duration을
+// 지우지 않던 버그(26_09_07_5에서 수정)로 인해, checkAutoEnd()가 그 옛 마감일을 그대로
+// 감지해서 매칭 직후 환자·간병인을 곧바로 다시 "종료" 처리해버린 과거 기록을 찾아 복구한다.
+// 판별 기준: cg.endDate < cg.startDate (마감일이 시작일보다 빠름)는 정상 흐름에서는
+// 절대 나올 수 없는 값이라, 이 버그로만 만들어지는 고유한 신호로 사용할 수 있다.
+function fixRematchAutoEndBug() {
+  const affected = caregivers.filter(cg =>
+    cg.workStatus === '종료' && cg.startDate && cg.endDate && cg.startDate > cg.endDate
+  );
+  if(affected.length === 0) { toast('해당하는 데이터가 없어요 (문제 없음)'); return; }
+
+  const simple = [];  // 신규 간병인(이력/보험 얽힘 없음) — 안전하게 자동 복구 가능
+  const skipped = []; // 이력이 있는(재사용된) 간병인 — patientId/보험/이력이 함께 얽혀있어 자동 복구 위험, 수동 확인 필요
+
+  affected.forEach(cg => {
+    const isReturningCg = !!(cg.assignHistory && cg.assignHistory.length);
+    if(isReturningCg || !cg.patientId) skipped.push(cg);
+    else simple.push(cg);
+  });
+
+  const today = todayStr();
+  simple.forEach(cg => {
+    const pt = patients.find(p=>String(p.id)===String(cg.patientId));
+    // 간병인: 잘못 채워진 마감일 제거하고, 시작일 기준으로 근무상태 재계산
+    cg.workStatus = (cg.startDate <= today) ? '근무중' : '대기중';
+    cg.endDate = '';
+    cg.endTime = '';
+    delete cg.earlyEndPatientId;
+    markCgEdited(cg.id);
+    if(pt) {
+      pt.status        = '매칭완료';
+      pt.recruited     = true;
+      pt.caregiverName = cg.name;
+      pt.endDate  = '';
+      pt.endTime  = '';
+      pt.duration = '';
+      delete pt.recruitInfo;
+      delete pt.startCancelled;
+      markPtEdited(pt.id);
+    }
+  });
+
+  if(simple.length > 0) {
+    save();
+    renderCaregivers();
+    renderPatients();
+    renderDashboard();
+    updateSidebar();
+    refreshCalendarIfOpen();
+  }
+
+  let msg = simple.length ? `✅ ${simple.length}건 자동 복구됐어요.` : '';
+  if(skipped.length > 0) {
+    msg += (msg?'\n':'') + `⚠️ ${skipped.length}건은 이력이 있는 간병인이라 건너뛰었어요 (콘솔 확인): ` + skipped.map(c=>c.name).join(', ');
+    console.log('🔍 수동 확인 필요 (같은 환자 재매칭 오종료, 이력 있는 간병인):', skipped);
+  }
+  toast(msg || '처리할 항목이 없어요', skipped.length > 0 && simple.length === 0);
 }
 
 // 현재 매칭된 간병인이 없는 환자를 전부 찾아서, 각각 왜 없는지 사유를 진단해서 보여줌
