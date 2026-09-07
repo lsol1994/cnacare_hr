@@ -2003,7 +2003,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_07_1';
+const APP_BUILD = '26_09_07_3';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -7174,6 +7174,10 @@ function deleteCg(id) {
       // 간병 시작 전 삭제 → recruitStartDate 제거 (원본 startDate로 공고)
       // 간병 시작 후 중도종료는 confirmEarlyTerminate에서 별도 처리
       delete pt.recruitStartDate;
+      // 시작 전 삭제라 실제로 근무가 시작된 적이 없음 → cancelEarlyTerminate의 재모집 케이스와
+      // 동일하게 startCancelled 플래그를 세워서, 캘린더(showCalDetail)와 대시보드 알림/배지에서
+      // 옛 startDate 기준으로 "매칭된 것처럼" 계속 표시되는 것을 막음
+      pt.startCancelled = true;
       // 업체보고 로그에서 이 환자의 매칭보고 제거 (아직 시작 안 했으므로)
       reportLogs = reportLogs.filter(l=>
         !(String(l.patientId)===String(pt.id) && l.type==='matched')
