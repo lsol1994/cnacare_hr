@@ -2072,7 +2072,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_08_01';
+const APP_BUILD = '26_09_09_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3452,8 +3452,8 @@ async function testSheets() {
 // ─── DASHBOARD ───
 function renderDashboard() {
   document.getElementById('d-total').textContent   = patients.length;
-  document.getElementById('d-active').textContent  = patients.filter(p=>p.status==='모집중').length;
-  document.getElementById('d-matched').textContent = patients.filter(p=>p.status==='매칭완료').length;
+  document.getElementById('d-active').textContent  = patients.filter(p=>ptDisplayTab(p)==='모집중').length;
+  document.getElementById('d-matched').textContent = patients.filter(p=>ptDisplayTab(p)==='매칭완료').length;
   document.getElementById('d-sent').textContent    = logs.length;
   // 대시보드에 캘린더가 병합되어 있으므로, 대시보드가 새로고침될 때마다 캘린더도 함께 최신 상태로 갱신
   renderCalendar();
@@ -3558,6 +3558,17 @@ function ptSearchMatch(p, q, qNum) {
     (matchedCg && (matchedCg.name||'').toLowerCase().includes(q));
 }
 
+// 환자 관리 탭 배정 기준: 맞교체/연장 후 예약교체로 재모집이 필요한데(교체할 간병인을 아직
+// 못 구해 pendingReplacement 미확보) p.status는 매칭완료로 남아있는 환자는, 탭 목록상으로는
+// 모집중 탭에 노출해 재모집이 필요하다는 걸 놓치지 않게 한다 (실제 p.status는 그대로 둠 —
+// 매칭완료 상태여야 맞는 다른 로직들, 예: '연장' 버튼 노출, checkAutoEnd 등을 건드리지 않기 위함).
+// 예정 교체 간병인을 등록(pendingReplacement)하면 그 즉시 다시 매칭완료 탭으로 돌아간다.
+// 발송 페이지(renderSend)의 재모집 목록과 동일한 기준.
+function ptDisplayTab(p) {
+  if(p.status === '매칭완료' && p.recruitInfo && !p.pendingReplacement) return '모집중';
+  return p.status;
+}
+
 function renderPatients() {
   autoMatch();
   const q = (document.getElementById('pt-search')?.value || '').trim().toLowerCase();
@@ -3567,7 +3578,7 @@ function renderPatients() {
   // 탭별 인원수 표시
   ['모집중','매칭완료','종료'].forEach(s => {
     const cntEl = document.getElementById('pt-tab-cnt-'+s);
-    if(cntEl) cntEl.textContent = patients.filter(p=>p.status===s).length;
+    if(cntEl) cntEl.textContent = patients.filter(p=>ptDisplayTab(p)===s).length;
   });
 
   // 검색 결과: 탭 구분 없이 전체 환자 대상, 탭 위 별도 영역에 표시
@@ -3585,7 +3596,7 @@ function renderPatients() {
   }
 
   // 탭 목록: 검색어와 무관하게 현재 선택된 상태 탭 기준으로만 표시
-  let list = patients.filter(p=>p.status===ptActiveTab);
+  let list = patients.filter(p=>ptDisplayTab(p)===ptActiveTab);
   // 정렬: 서비스시작일 순
   list.sort((a, b) => {
     const da = a.startDate || '9999-99-99';
