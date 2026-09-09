@@ -2072,7 +2072,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_09_01';
+const APP_BUILD = '26_09_09_03';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -7518,8 +7518,8 @@ function clearLogs(){if(!confirm('초기화할까요?'))return;logs=[];save();re
 function updateSidebar() {
   const today=new Date().toLocaleDateString('ko-KR');
   const unrecruited=patients.filter(p=>!p.recruited&&p.status==='모집중');
-  const recruitingCnt = patients.filter(p=>p.status==='모집중').length;
-  const matchedCnt = patients.filter(p=>p.status==='매칭완료').length;
+  const recruitingCnt = patients.filter(p=>ptDisplayTab(p)==='모집중').length;
+  const matchedCnt = patients.filter(p=>ptDisplayTab(p)==='매칭완료').length;
   document.getElementById('s-recruiting').textContent=recruitingCnt;
   document.getElementById('s-alarm').textContent=unrecruited.length;
   document.getElementById('s-matched').textContent=matchedCnt;
@@ -9301,6 +9301,7 @@ function showCalDetail(dateStr) {
   var startEvents = []; // {time, html}
   var endEvents   = [];
   var payEvents   = [];
+  var swapEvents  = []; // 맞교체/연장 후 예약교체 — 간병 시작·마감과 분리된 전용 섹션
   var onsiteCancelEvents = []; // 현장취소(도착 후 취소) 전용 — 간병시작/마감과 분리해서 하나로 통합 표시
   _calExpenseMsgs = []; // 지출내용 복사 버튼용 임시 저장 (렌더할 때마다 초기화)
 
@@ -9355,19 +9356,35 @@ function showCalDetail(dateStr) {
     }
   });
 
-  // 연장 후 예약 교체: 등록해둔 신규(교체) 간병인의 근무 시작 미리보기 — 환자-간병인 통합 스타일로 표시
-  // (환자 자신의 startDate/endDate는 안 바뀌는 중간 교체 건이라 위 블록엔 대응 카드가 없음)
+  // ── 교체(맞교체/연장 후 예약교체) 카드 — 간병 시작/마감 카드와 분리된 전용 섹션 ──
+  // 인계 전(예정)이든 이미 인계가 끝나 recruitHistory로 넘어간 뒤(과거 조회)든 모두 이 섹션에서
+  // 다룬다. 그래야 실제 인계가 끝난 뒤 그 날짜를 다시 열어봐도 "이전 간병인 → 교체 간병인" 기록이
+  // 캘린더에 그대로 남는다 (예전엔 recruitInfo가 지워지면서 미리보기 카드도 함께 사라졌었음).
+  function swapCardHtml(ptName, hospital, room, prevName, newName, remainDuration, time) {
+    return '<div style="padding:10px 12px;border-left:3px solid var(--blue);margin-bottom:8px;background:var(--blue-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
+      + '<div style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:3px">▶ 교체 시작' + (time?' · '+time:'') + '</div>'
+      + '<div style="font-size:14px;font-weight:700">' + ptName + '</div>'
+      + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (hospital||'') + (room?' ('+room+')':'') + ' / 간병인: ' + (prevName||'—') + ' → ' + (newName||'—') + '</div>'
+      + (remainDuration ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + remainDuration + '</div>' : '')
+      + '</div>';
+  }
+  // ① 아직 인계 전(예정): 등록해둔 신규(교체) 간병인 정보로 미리 표시
   patients.forEach(function(p) {
     if(!p.pendingReplacement || !p.recruitInfo) return;
     if(p.recruitInfo.startDate !== dateStr) return;
-    var rep = p.pendingReplacement;
-    startEvents.push({ time: p.recruitInfo.startTime||'', html:
-      '<div style="padding:10px 12px;border-left:3px solid var(--teal);margin-bottom:8px;background:var(--teal-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-      + '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-bottom:3px">▶ 간병 시작 (교체 간병인)' + (p.recruitInfo.startTime?' · '+p.recruitInfo.startTime:'') + '</div>'
-      + '<div style="font-size:14px;font-weight:700">' + p.name + '</div>'
-      + '<div style="font-size:12px;color:var(--gray);margin-top:2px">' + (p.hospital||'') + (p.room?' ('+p.room+')':'') + ' / 간병인: ' + (rep.name||'') + '</div>'
-      + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (p.recruitInfo.reason==='맞교체(예약)'?'맞교체':'연장 후 예약 교체') + '</div>'
-      + '</div>' });
+    var outCg = caregivers.find(function(c){ return String(c.patientId)===String(p.id) && c.workStatus!=='종료'; });
+    swapEvents.push({ time: p.recruitInfo.startTime||'', html:
+      swapCardHtml(p.name, p.hospital, p.room, outCg?outCg.name:(p.caregiverName||''), p.pendingReplacement.name, p.recruitInfo.duration, p.recruitInfo.startTime)
+    });
+  });
+  // ② 이미 인계 완료(이력): recruitHistory에 이 날짜로 기록된 교체 건을 그대로 복원
+  patients.forEach(function(p) {
+    (p.recruitHistory||[]).forEach(function(h) {
+      if(h.recruitDate !== dateStr) return;
+      swapEvents.push({ time: h.recruitTime||'', html:
+        swapCardHtml(p.name, p.hospital, p.room, h.prevCg||'', h.newCg||'', h.remainDuration||'', h.recruitTime||'')
+      });
+    });
   });
 
   // 급여 지급일
@@ -9697,6 +9714,7 @@ function showCalDetail(dateStr) {
   }
   startEvents = sortByTime(startEvents);
   endEvents   = sortByTime(endEvents);
+  swapEvents  = sortByTime(swapEvents);
   onsiteCancelEvents = sortByTime(onsiteCancelEvents);
 
   function sectionHtml(title, events) {
@@ -9707,10 +9725,11 @@ function showCalDetail(dateStr) {
 
   var sectionsHtml = sectionHtml('▶ 간병 시작', startEvents)
     + sectionHtml('■ 간병 마감', endEvents)
+    + sectionHtml('🔀 교체', swapEvents)
     + sectionHtml('🚫 도착 후 취소', onsiteCancelEvents)
     + sectionHtml('💰 급여 지급', payEvents);
 
-  bodyEl.innerHTML = (startEvents.length + endEvents.length + onsiteCancelEvents.length + payEvents.length) > 0
+  bodyEl.innerHTML = (startEvents.length + endEvents.length + swapEvents.length + onsiteCancelEvents.length + payEvents.length) > 0
     ? sectionsHtml
     : '<div style="padding:2rem;text-align:center;color:var(--gray);font-size:13px">이날 일정이 없어요 😊</div>';
 }
@@ -11506,8 +11525,9 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
   pt.recruited = true;
   if(!pt.recruitHistory) pt.recruitHistory = [];
   pt.recruitHistory.push({
-    endDate: outgoingEndDate||'', recruitDate: outgoingEndDate||'',
+    endDate: outgoingEndDate||'', recruitDate: outgoingEndDate||'', recruitTime: outgoingEndTime||'',
     reason: isDirectSwap ? '맞교체' : '연장 후 예약 교체', prevCg: prevCgName,
+    newCg: newCg.name||'', remainDuration: (pt.recruitInfo && pt.recruitInfo.duration) || '',
     recordedAt: new Date().toLocaleDateString('ko-KR')
   });
   delete pt.pendingReplacement;
