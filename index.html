@@ -2072,7 +2072,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_09_06';
+const APP_BUILD = '26_09_09_07';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -6207,13 +6207,14 @@ function mergeAllDuplicateCg() {
       });
       if(cg.patientId) {
         const pt = patients.find(p=>String(p.id)===String(cg.patientId));
-        if(pt && pt.status !== '종료') pt.caregiverName = keepCg.name;
+        if(pt && pt.status !== '종료') { pt.caregiverName = keepCg.name; markPtEdited(pt.id); }
       }
       addDeletedCgId(String(cg.id));
       totalDeleted++;
     });
 
     keepCg.assignHistory.sort((a,b)=>(b.startDate||'').localeCompare(a.startDate||''));
+    markCgEdited(keepCg.id); // Firebase 덮어쓰기 방지 (2분) — 병합된 assignHistory가 다른 기기로 확실히 전파되도록
   });
 
   // 삭제 실행
@@ -6330,12 +6331,13 @@ function mergeDuplicateCg(name) {
     // 삭제 레코드가 연결한 환자 caregiverName → 유지 레코드 이름으로 이전
     if(cg.patientId) {
       const pt = patients.find(p=>String(p.id)===String(cg.patientId));
-      if(pt && pt.status !== '종료') pt.caregiverName = keepCg.name;
+      if(pt && pt.status !== '종료') { pt.caregiverName = keepCg.name; markPtEdited(pt.id); }
     }
   });
 
   // 날짜 순 정렬 (최신이 먼저)
   keepCg.assignHistory.sort((a,b)=>(b.startDate||'').localeCompare(a.startDate||''));
+  markCgEdited(keepCg.id); // Firebase 덮어쓰기 방지 (2분) — 병합된 assignHistory가 다른 기기로 확실히 전파되도록
 
   // 중복 레코드 삭제 + ID 추적
   const deleteIds = new Set(deleteCgs.map(cg=>String(cg.id)));
@@ -6426,6 +6428,9 @@ function convertExtendData() {
       if(pt.status !== '종료') {
         pt.caregiverName = keepCg.name;
       }
+
+      markCgEdited(keepCg.id); // Firebase 덮어쓰기 방지 (2분) — 병합된 assignHistory가 다른 기기로 확실히 전파되도록
+      markPtEdited(pt.id); // Firebase 덮어쓰기 방지 (2분)
 
       log.push(name + ' ↔ ' + pt.name + ' (' + delCgs.length + '개 통합)');
       converted++;
@@ -7365,6 +7370,7 @@ function cancelEarlyTerminate(cgId) {
         // recruitStartDate도 초기화 (재모집 날짜 제거)
         if(pt.recruitStartDate) delete pt.recruitStartDate;
       }
+      markPtEdited(pt.id); // Firebase 덮어쓰기 방지 (10초) — 종료취소로 복원된 환자 상태도 다른 기기로 확실히 전파되도록
     }
   }
 
@@ -10964,6 +10970,7 @@ function migrateInsuranceDataOnce() {
         cg.insuranceMemo = '';
         cg.insuranceTerminated = false;
         cg.insurancePatientId = '';
+        markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (2분)
         changed = true;
       }
       return;
@@ -10971,6 +10978,7 @@ function migrateInsuranceDataOnce() {
     if(cg.insurancePatientId) {
       if(String(cg.insurancePatientId) !== String(cg.patientId)) {
         syncInsuranceForPatientChange(cg, cg.insurancePatientId, cg.patientId);
+        markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (2분)
         changed = true;
       }
       return;
@@ -10983,10 +10991,12 @@ function migrateInsuranceDataOnce() {
         // assignHistory의 가장 최근 기록에서 이전 환자 이름을 유추해서 채워줌
         const lastAssign = (cg.assignHistory||[])[0];
         syncInsuranceForPatientChange(cg, '', cg.patientId, lastAssign ? lastAssign.patientName : '');
+        markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (2분)
         changed = true; return;
       }
     }
     cg.insurancePatientId = String(cg.patientId); // 정상 데이터로 보이면 트래킹만 시작
+    markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (2분)
     changed = true;
   });
   if(changed) save();
@@ -11280,6 +11290,7 @@ function saveInsurance(cgId) {
   cg.insuranceStartDate = document.getElementById('ins-start').value;
   cg.insuranceExpiry    = document.getElementById('ins-expiry').value;
   cg.insuranceMemo      = document.getElementById('ins-memo').value.trim();
+  markCgEdited(cgId); // Firebase 덮어쓰기 방지 (2분)
   save(); closeOverlay('cg-overlay'); renderInsurance();
   toast('✅ 배상보험 정보 저장됐어요');
 }
@@ -11426,6 +11437,7 @@ function saveNewInsuranceHistory(cgId) {
     terminated: document.getElementById('ins-h-terminated').checked,
     archivedAt: todayStr(),
   });
+  markCgEdited(cgId); // Firebase 덮어쓰기 방지 (2분)
   save(); closeOverlay('cg-overlay'); renderInsurance();
   toast('✅ 과거 보험 이력이 추가됐어요');
 }
