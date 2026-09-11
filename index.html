@@ -2072,7 +2072,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_09_05';
+const APP_BUILD = '26_09_09_06';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -5794,6 +5794,7 @@ function savePtMemoFromModal(ptId) {
   const area = document.getElementById('pt-memo-area');
   if(!area) return;
   pt.memo = area.value.trim();
+  markPtEdited(pt.id);
   save();
   toast('✅ ' + pt.name + ' 메모 저장됐어요');
 }
@@ -5804,6 +5805,7 @@ function saveCgMemoFromModal(cgId) {
   const area = document.getElementById('cg-memo-area');
   if(!area) return;
   cg.memo = area.value.trim();
+  markCgEdited(cg.id);
   save();
   toast('✅ ' + cg.name + ' 메모 저장됐어요');
 }
@@ -5817,6 +5819,7 @@ function saveCgComplaint(cgId) {
   if(!chk) return;
   cg.complaint = chk.checked;
   cg.complaintReason = reasonEl ? reasonEl.value.trim() : '';
+  markCgEdited(cg.id);
   save();
   renderCaregivers();
   toast(cg.complaint ? `⚠️ ${cg.name} 컴플레인 기록됐어요` : `✅ ${cg.name} 컴플레인 해제됐어요`);
@@ -8417,7 +8420,7 @@ function buildMatchMessage(pt, cg) {
   return `안녕하세요, 선생님.
 씨앤에이케어협회입니다.
 *통장사본(또는 계좌번호) 보내주시면 바로 매칭완료 처리 하겠습니다!
-일정: ${schedule} ~ ${endSchedule}${shiftNote}
+일정: ${schedule} 및 ${endSchedule}${shiftNote}
 기간: ${duration}
 병원 : ${hospital}
 환자 : ${ptName}
