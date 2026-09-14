@@ -506,6 +506,29 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   #page-new-patient > div{grid-template-columns:1fr !important}
   #page-new-patient .sticky-col{position:static}
 }
+
+/* 간병사실확인서 */
+.cert-doc{font-family:'맑은 고딕',sans-serif;color:#1a1a1a;max-width:640px;margin:0 auto}
+.cert-title{text-align:center;font-size:21px;font-weight:900;letter-spacing:14px;margin:4px 0 32px}
+.cert-sec-title{font-size:13px;font-weight:800;margin:0 0 6px}
+.cert-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px}
+.cert-tbl td{border:1px solid #bbb;padding:10px;vertical-align:middle;text-align:center}
+.cert-tbl td.cl{background:#F3F1EC;font-weight:700;width:22%;white-space:nowrap}
+.cert-sec-title b{color:var(--teal)}
+.cert-editable{display:inline-block;min-width:70px;border-bottom:1px dashed var(--teal);padding:0 2px;outline:none}
+.cert-editable:empty:before{content:attr(data-ph);color:var(--gray-lt)}
+.cert-foot{font-size:13px;line-height:1.9;text-align:center;margin-top:36px}
+.cert-date{text-align:center;font-size:14px;font-weight:700;margin-top:18px}
+@media print{
+  body.printing-cert *{visibility:hidden}
+  body.printing-cert #cert-print-host,
+  body.printing-cert #cert-print-host *{visibility:visible}
+  body.printing-cert #cert-print-host{
+    display:block !important;position:fixed;inset:0;width:100%;
+    max-height:none;overflow:visible;padding:24px;background:#fff;
+  }
+  .cert-editable{border-bottom:none}
+}
 </style>
 </head>
 <body>
@@ -1455,6 +1478,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       <div class="field"><label>협회명</label><input type="text" id="cfg-name" placeholder="씨앤에이케어간병협회"></div>
       <div class="field"><label>전화번호 (공고에 표시)</label><input type="tel" id="cfg-phone" placeholder="02-000-0000"></div>
     </div>
+    <div class="field"><label>확인서 담당자 성명 <span style="font-size:10px;color:var(--gray);font-weight:400;text-transform:none;letter-spacing:0">(간병사실확인서 확인자란에 자동으로 채워져요)</span></label><input type="text" id="cfg-cert-rep" placeholder="이광우"></div>
     <div class="g3">
       <div class="field"><label>은행명</label><input type="text" id="cfg-bank-name" placeholder="국민은행"></div>
       <div class="field"><label>계좌번호</label><input type="text" id="cfg-bank-account" placeholder="000-000-000000"></div>
@@ -1632,7 +1656,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       </div>
       <div style="background:var(--surface2);border-radius:var(--rsm);padding:12px 14px">
         <div style="font-size:12px;font-weight:700;color:var(--black);margin-bottom:8px">📒 간병일지</div>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;gap:6px;margin-bottom:6px">
           <button class="btn btn-teal btn-sm" style="flex:1;justify-content:center" onclick="openJournalSelect('xlsx')">
             <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>.xlsx
           </button>
@@ -1640,6 +1664,9 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
             <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>.csv
           </button>
         </div>
+        <button class="btn btn-sm" style="width:100%;justify-content:center" onclick="openCertSelect()">
+          📝 간병사실확인서
+        </button>
       </div>
       <div style="background:var(--surface2);border-radius:var(--rsm);padding:12px 14px">
         <div style="font-size:12px;font-weight:700;color:var(--black);margin-bottom:8px">📦 전체 다운로드</div>
@@ -1706,6 +1733,43 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         선택 항목 다운로드
       </button>
       <button class="btn" onclick="closeOverlay('journal-overlay')">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 간병사실확인서 - 대상 선택 모달 ══ -->
+<div class="overlay" id="cert-select-overlay">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-hd">
+      <div class="modal-title">간병사실확인서 생성</div>
+      <button class="btn btn-icon" onclick="closeOverlay('cert-select-overlay')">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <p style="font-size:13px;color:var(--gray);margin-bottom:1rem;line-height:1.6">확인서를 만들 환자·간병인 조합을 선택하세요.</p>
+    <div id="cert-select-list" style="max-height:400px;overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- ══ 간병사실확인서 - 미리보기/인쇄 모달 ══ -->
+<div class="overlay" id="cert-preview-overlay">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-hd">
+      <div class="modal-title">간병사실확인서 미리보기</div>
+      <button class="btn btn-icon" onclick="closeOverlay('cert-preview-overlay')">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <p style="font-size:12px;color:var(--gray);margin-bottom:.875rem;line-height:1.6">점선 밑줄이 있는 값은 클릭해서 바로 고칠 수 있어요. 수정 후 인쇄하면 고친 내용 그대로 출력됩니다.</p>
+    <div style="max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:var(--rsm);padding:20px;margin-bottom:1rem">
+      <div id="cert-print-host"></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="printCert()">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        인쇄 / PDF 저장
+      </button>
+      <button class="btn" onclick="closeOverlay('cert-preview-overlay')">닫기</button>
     </div>
   </div>
 </div>
@@ -2072,7 +2136,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_09_07';
+const APP_BUILD = '26_09_14_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -8046,6 +8110,7 @@ function renderQna() {
 function loadSettings() {
   document.getElementById('cfg-name').value  = cfg.name||'';
   document.getElementById('cfg-phone').value = cfg.phone||'';
+  document.getElementById('cfg-cert-rep').value = cfg.certRepName||'';
   document.getElementById('cfg-bank-name').value    = cfg.bankName||'';
   document.getElementById('cfg-bank-account').value = cfg.bankAccount||'';
   document.getElementById('cfg-bank-holder').value  = cfg.bankHolder||'';
@@ -8064,6 +8129,7 @@ function loadSettings() {
 function saveSettings() {
   cfg.name        = document.getElementById('cfg-name').value.trim()||'씨앤에이케어간병협회';
   cfg.phone       = document.getElementById('cfg-phone').value.trim();
+  cfg.certRepName = document.getElementById('cfg-cert-rep').value.trim();
   cfg.bankName    = document.getElementById('cfg-bank-name').value.trim();
   cfg.bankAccount = document.getElementById('cfg-bank-account').value.trim();
   cfg.bankHolder  = document.getElementById('cfg-bank-holder').value.trim();
@@ -12382,7 +12448,118 @@ function downloadSelectedJournals() {
   toast('✅ 간병일지 통합본 .'+_journalFmt+' '+ptCount+'건 다운로드 완료');
 }
 
+// ─── 간병사실확인서 ───
 
+function korDateFull(dateStr) {
+  if(!dateStr) return '';
+  const d = new Date(dateStr);
+  if(isNaN(d)) return dateStr;
+  return `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
+}
+
+function careLocationStr(pt) {
+  if(!pt) return '';
+  return (pt.hospital||'') + (pt.station ? ' '+pt.station : '') + (pt.room ? ' '+pt.room : '');
+}
+
+// 간병사실확인서 미리보기의 모든 값칸을 인쇄 전 직접 고칠 수 있게 만드는 헬퍼 (점선 밑줄 = 수정 가능)
+function certField(value, placeholder) {
+  const v = (value===undefined || value===null) ? '' : String(value);
+  return `<span class="cert-editable" contenteditable="true"${v?'':' data-ph="'+placeholder+'"'}>${v}</span>`;
+}
+
+// 설정 → 간병일지 칸 → 간병사실확인서: 대상(환자·간병인 조합) 선택 목록
+function openCertSelect() {
+  const el = document.getElementById('cert-select-list');
+  const validCg = caregivers.filter(c=>c.startDate && c.patientId)
+    .sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||''));
+  if(!validCg.length) { toast('간병 일정이 등록된 데이터가 없어요', true); return; }
+
+  const ptIds = [...new Set(validCg.map(c=>c.patientId))];
+  let html = '';
+  ptIds.forEach(pid => {
+    const pt = patients.find(p=>String(p.id)===String(pid));
+    if(!pt) return;
+    const cgList = validCg.filter(c=>String(c.patientId)===String(pid));
+    html += `<div style="font-size:12px;font-weight:700;color:var(--gray);margin:10px 0 4px">${pt.name} <span style="font-weight:400">· ${pt.hospital||''}</span></div>`;
+    cgList.forEach(c => {
+      const period = c.startDate && c.endDate ? c.startDate+' ~ '+c.endDate : (c.startDate+' ~ 근무중');
+      html += `<button class="btn" style="width:100%;justify-content:space-between;margin-bottom:6px;padding:10px 14px" onclick="openCertPreview('${c.id}')">
+        <span style="font-size:13px;font-weight:700">${c.name}</span>
+        <span style="font-size:11px;color:var(--gray)">${period}</span>
+      </button>`;
+    });
+  });
+  el.innerHTML = html;
+  document.getElementById('cert-select-overlay').classList.add('open');
+}
+
+// 선택한 간병인 건으로 간병사실확인서 미리보기 렌더링 (점선 밑줄 = 인쇄 전 직접 수정 가능한 값)
+function openCertPreview(cgId) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg) { toast('간병인 정보를 찾을 수 없어요', true); return; }
+  const pt = patients.find(p=>String(p.id)===String(cg.patientId));
+  if(!pt) { toast('환자 정보를 찾을 수 없어요', true); return; }
+
+  const start = cg.startDate || '';
+  const end   = cg.endDate || todayStr();
+  let totalDays = '';
+  if(start) {
+    // 이 앱 전반의 "사용기간" 계산과 동일한 방식(마감일-시작일, +1 없음) — 템플릿 예시(8/29~9/1 → 총 3일간)와도 일치
+    const diff = Math.round((new Date(end) - new Date(start)) / 86400000);
+    if(!isNaN(diff) && diff > 0) totalDays = diff;
+  }
+  const company  = cfg.name || '씨앤에이케어';
+  const careLoc  = careLocationStr(pt);
+  const repName  = cfg.certRepName || '';
+  const periodStr = start
+    ? `${korDateFull(start)} ~ ${korDateFull(end)}${totalDays?' (총 '+totalDays+'일간)':''}`
+    : '';
+
+  document.getElementById('cert-print-host').innerHTML = `
+    <div class="cert-doc">
+      <div class="cert-title">간병사실확인서</div>
+
+      <div class="cert-sec-title"><b>1.</b> 피간병인(환자) 인적사항</div>
+      <table class="cert-tbl">
+        <tr><td class="cl">성 명</td><td colspan="3">${certField(pt.name, '환자명 입력')}</td></tr>
+        <tr>
+          <td class="cl">나 이</td>
+          <td>${certField(pt.age?('만 '+pt.age+'세'):'', '나이 입력')}</td>
+          <td class="cl">신청인과의 관계</td>
+          <td>${certField('환자', '관계 입력')}</td>
+        </tr>
+      </table>
+
+      <div class="cert-sec-title"><b>2.</b> 간병 제공 내역</div>
+      <table class="cert-tbl">
+        <tr><td class="cl">간병 장소</td><td colspan="3">${certField(careLoc, '간병 장소 입력')}</td></tr>
+        <tr><td class="cl">간병 기간</td><td colspan="3">${certField(periodStr, '간병 기간 입력')}</td></tr>
+        <tr><td class="cl">간병 시간</td><td colspan="3">${certField('24시간 상주', '간병 시간 입력')}</td></tr>
+        <tr><td class="cl">간병인 성명</td><td colspan="3">${certField(cg.name, '간병인 성명 입력')}</td></tr>
+        <tr><td class="cl">간병인 연락처</td><td colspan="3">${certField(formatPhone(cg.phone||''), '간병인 연락처 입력')}</td></tr>
+      </table>
+
+      <div class="cert-sec-title"><b>3.</b> 확인자 (간병인 또는 협회 담당자)</div>
+      <table class="cert-tbl">
+        <tr><td class="cl">소속 (협회명)</td><td colspan="3">${certField(company, '협회명 입력')}</td></tr>
+        <tr><td class="cl">성 명</td><td colspan="3">${certField(repName, '담당자 성명 입력')} (서명 또는 인)</td></tr>
+        <tr><td class="cl">연 락 처</td><td colspan="3">${certField(formatPhone(cfg.phone||''), '연락처 입력')}</td></tr>
+      </table>
+
+      <div class="cert-foot">위와 같이 간병 사실이 조작이나 거짓 없이<br>명확히 있었음을 성실히 확인합니다.</div>
+      <div class="cert-date">${certField(korDateFull(todayStr()), '날짜 입력')}</div>
+    </div>
+  `;
+  closeOverlay('cert-select-overlay');
+  document.getElementById('cert-preview-overlay').classList.add('open');
+}
+
+function printCert() {
+  document.body.classList.add('printing-cert');
+  window.print();
+}
+window.addEventListener('afterprint', () => document.body.classList.remove('printing-cert'));
 
 function csvDragOver(e) {
   e.preventDefault();
