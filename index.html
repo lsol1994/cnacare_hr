@@ -2199,7 +2199,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_14_06';
+const APP_BUILD = '26_09_15_04';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -6274,6 +6274,82 @@ function saveToAssignHistory(cg, overridePatientId) {
   });
 }
 
+// ─── 간병인 1명의 "모든 담당 기간" 조회 (현재 라이브 배정 + 과거 이력 통합) ───
+// 간병인 레코드(cg.id)는 재배정 때마다 재사용되므로, 라이브 필드(cg.patientId/startDate/endDate)는
+// 항상 "가장 최근 배정" 1건만 담고 있음. 과거에 담당했던 다른 환자 건은 assignHistory에 남아있고,
+// saveToAssignHistory()가 종료·재배정·환자삭제 등 모든 배정 해제 경로에서 호출되므로 assignHistory는
+// 유실 없는 전체 이력으로 신뢰할 수 있음(2026-09 통합 감사 완료 — cnacare-accounting learnings 참고).
+// 간병일지(선택목록/미리보기/다운로드/자동생성)가 "과거에 담당했던 모든 간병인"을 절대 놓치지 않도록
+// 이 함수 하나로 라이브+이력을 합쳐서 기간 단위 리스트를 만든다. 라이브 배정과 동일한
+// (patientId+startDate) 조합이 이력에도 있으면 라이브 값이 더 최신이므로 라이브만 남기고 중복 제거.
+function getAssignPeriods(cg) {
+  const periods = [];
+  const seen = new Set();
+  if(cg.patientId && cg.startDate) {
+    periods.push({
+      patientId: String(cg.patientId), startDate: cg.startDate, endDate: cg.endDate||'',
+      startTime: cg.startTime||'', endTime: cg.endTime||'', live: true
+    });
+    seen.add(cg.patientId+'|'+cg.startDate);
+  }
+  (cg.assignHistory||[]).forEach(h => {
+    if(!h.patientId || !h.startDate) return;
+    const key = h.patientId+'|'+h.startDate;
+    if(seen.has(key)) return;
+    seen.add(key);
+    periods.push({
+      patientId: String(h.patientId), startDate: h.startDate, endDate: h.endDate||'',
+      startTime: h.startTime||'', endTime: h.endTime||'', live: false
+    });
+  });
+  periods.sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||''));
+  return periods;
+}
+
+// 환자 1명을 담당했던 모든 간병인의 기간 목록 (라이브로 매칭 중인 간병인 + 과거에 재배정으로
+// 넘어갔거나 종료된 간병인 전원 포함). 각 항목에 원본 간병인 레코드(cg)를 같이 담아 반환.
+function getPeriodsForPatient(patientId) {
+  const out = [];
+  caregivers.forEach(cg => {
+    getAssignPeriods(cg).forEach(p => {
+      if(String(p.patientId)===String(patientId)) out.push(Object.assign({cg}, p));
+    });
+  });
+  return out.sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||''));
+}
+
+// 전체 간병인의 전체 담당 기간 (라이브+이력 통합) — "전체 다운로드"/"전체 자동생성"용
+function getAllAssignPeriods() {
+  const out = [];
+  caregivers.forEach(cg => {
+    getAssignPeriods(cg).forEach(p => out.push(Object.assign({cg}, p)));
+  });
+  return out;
+}
+
+// 간병인 1명의 "이 기간(startDate~endDate)"에 해당하는 출퇴근 기록만 추려서 반환.
+// 간병일지 미리보기/다운로드는 반드시 이 기간으로 범위를 좁혀야 함 — 그렇지 않으면 같은
+// 간병인이 재배정으로 다른 환자를 맡았을 때 그 환자의 기록까지 섞여 들어갈 수 있음.
+function attendanceInPeriod(cgId, startDate, endDate) {
+  const start = startDate || '';
+  const end = endDate || todayStr();
+  return attendance.filter(a=>{
+    if(a.cgId!==String(cgId)) return false;
+    const d = a.inDate||a.date||'';
+    return d && d>=start && d<=end;
+  }).sort((a,b)=>(a.inDate||'').localeCompare(b.inDate||''));
+}
+
+// getAssignPeriods()/getAllAssignPeriods()의 기간 항목을 간병일지 다운로드 함수들이 기대하는
+// "간병인 레코드 모양"으로 변환 (이름·연락처는 간병인 원본에서, 기간·환자ID는 그 기간 것으로)
+function periodToJournalRow(p) {
+  return {
+    id: p.cg.id, name: p.cg.name, phone: p.cg.phone,
+    patientId: p.patientId, startDate: p.startDate, endDate: p.endDate,
+    startTime: p.startTime, endTime: p.endTime
+  };
+}
+
 // 캘린더의 "이력에서 복구됨" 최종정산을 실제로 지급 처리했을 때 정산완료로 표시
 // (patientId+startDate로 식별 — assignHistory는 동기화 병합 시 재정렬될 수 있어 배열 인덱스는 불안정함)
 function markAssignHistorySettled(cgId, patientId, startDate) {
@@ -8686,26 +8762,29 @@ function buildEndReport(p, actualEndDate, actualEndTime) {
 // ─── 중도종료 데이터 복구 ───
 // 종료된 간병인 중 earlyEndPatientId 없는 경우 recruitHistory로 환자 찾아서 복구
 // 설정 → 간병일지 자동생성 (전체 간병인)
+// 라이브 배정뿐 아니라, 재배정으로 다른 환자에게 넘어가 라이브 필드가 덮어써진 간병인의
+// "과거 담당 기간"(assignHistory)까지 전부 훑어서 빈 칸을 채운다 — autoFillAttendanceAllPeriods() 참고.
 function autoFillAllAttendanceManual() {
   let total = 0;
-  caregivers.filter(c=>c.startDate).forEach(c=>{ total += autoFillAttendance(String(c.id)); });
+  caregivers.forEach(c=>{ total += autoFillAttendanceAllPeriods(String(c.id)); });
   renderAttendance();
   refreshCalendarIfOpen();
-  if(total > 0) toast(`✅ 전체 간병인 간병일지 ${total}건 자동 생성/수정됐어요`);
+  if(total > 0) toast(`✅ 전체 간병인 간병일지 ${total}건 자동 생성/수정됐어요 (과거 담당 이력 포함)`);
   else toast('수정할 내용이 없어요 (이미 모두 최신 상태예요)');
 }
 
 // 설정 → 간병일지 자동생성 (간병인 이름으로 선택)
+// 이름이 같은 간병인의 라이브 배정 + 과거 담당 이력(다른 환자로 넘어가기 전 기간 포함) 전부 채움
 function autoFillOneAttendanceManual() {
   const name = prompt('간병일지를 자동생성/수정할 간병인 이름을 입력해주세요:');
   if(!name || !name.trim()) return;
   const matches = caregivers.filter(c => (c.name||'').trim() === name.trim());
   if(matches.length === 0) { toast(`"${name}" 간병인을 찾을 수 없어요`, true); return; }
   let total = 0;
-  matches.forEach(c => { total += autoFillAttendance(String(c.id)); });
+  matches.forEach(c => { total += autoFillAttendanceAllPeriods(String(c.id)); });
   renderAttendance();
   refreshCalendarIfOpen();
-  if(total > 0) toast(`✅ ${name} 간병일지 ${total}건 자동 생성/수정됐어요`);
+  if(total > 0) toast(`✅ ${name} 간병일지 ${total}건 자동 생성/수정됐어요 (과거 담당 이력 포함)`);
   else toast(`${name} 간병일지는 이미 최신 상태예요`);
 }
 
@@ -10831,14 +10910,41 @@ function trimAttendanceGhosts(cgId, oldEndDate, newEndDate) {
 function autoFillAttendance(cgId) {
   const cg = caregivers.find(c=>String(c.id)===String(cgId));
   if(!cg || !cg.startDate) return 0;
+  // 라이브(현재) 배정 구간만 채움 — 기존 20여 곳의 호출부(저장/종료/재배정 직후 동기화)는
+  // 전부 "지금 막 바뀐 라이브 값"에 반응하는 것이므로 동작을 그대로 유지한다.
+  return fillAttendancePeriod(cgId, {
+    startDate: cg.startDate, endDate: cg.endDate, startTime: cg.startTime, endTime: cg.endTime
+  });
+}
+
+// 간병인 1명의 "모든 담당 기간"(라이브 + 과거 이력 전부)에 대해 빈 출퇴근 기록을 채운다.
+// 재배정으로 다른 환자에게 넘어간 뒤에도, 예전에 담당했던 환자 기간의 간병일지가 비어있으면
+// 여기서 함께 채워짐 — 설정 → "간병일지 자동생성"이 과거 이력까지 놓치지 않도록 하는 핵심 함수.
+function autoFillAttendanceAllPeriods(cgId) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg) return 0;
+  let total = 0;
+  getAssignPeriods(cg).forEach(period => { total += fillAttendancePeriod(cgId, period); });
+  return total;
+}
+
+// autoFillAttendance()/autoFillAttendanceAllPeriods() 공용 핵심 로직 — 규칙은 기존과 동일:
+// 규칙: 간병일지는 서비스 시작일~마감일 사이 매일 기록.
+// - 시작일 첫날: 실제 간병 시작시간을 항상 동기화
+// - 마감일(실제 등록된 경우) 마지막날: 실제 간병 마감시간을 항상 동기화
+// - 그 사이 날짜: 출근 00:00 / 퇴근 23:59 고정
+// - 담당자가 출퇴근 기록을 수기로 직접 수정한 날(auto:false)은 자동 동기화가 덮어쓰지 않음
+function fillAttendancePeriod(cgId, period) {
+  if(!period || !period.startDate) return 0;
 
   const today    = todayStr();
-  const hasEnded = !!cg.endDate; // 실제 마감일/마감시간이 등록된 상태인지
-  const endDate  = cg.endDate || today;
+  const hasEnded = !!period.endDate; // 실제 마감일/마감시간이 등록된 상태인지
+  const endDate  = period.endDate || today;
 
   let added = 0;
-  const cur = parseLocalDate(cg.startDate);
+  const cur = parseLocalDate(period.startDate);
   if(!cur) return 0;
+  const cg = { startDate: period.startDate, startTime: period.startTime, endDate: period.endDate, endTime: period.endTime };
 
   while(true) {
     const dateStr = toLocalDateStr(cur);
@@ -10920,10 +11026,13 @@ function autoFillAttendance(cgId) {
 }
 
 
+// 앱 로드 직후 + 주기적(1시간마다) 자동 실행되는 배경 동기화. 라이브 배정뿐 아니라
+// 재배정으로 다른 환자에게 넘어간 간병인의 과거 담당 기간까지 함께 훑어서, 간병일지가
+// 조용히 비어있는 채로 방치되는 일이 다시는 생기지 않도록 함(autoFillAttendanceAllPeriods 참고).
 function autoFillAllAttendance() {
   let total = 0;
-  caregivers.filter(c=>c.startDate).forEach(c=>{
-    total += autoFillAttendance(String(c.id));
+  caregivers.forEach(c=>{
+    total += autoFillAttendanceAllPeriods(String(c.id));
   });
   if(total > 0) { save(); renderAttendance(); refreshCalendarIfOpen(); }
   return total;
@@ -12293,18 +12402,24 @@ function downloadData(type, fmt) {
 function downloadAll(fmt) {
   setTimeout(()=>downloadData('patients',fmt), 0);
   setTimeout(()=>downloadData('caregivers',fmt), 500);
-  // 간병일지는 전체 선택으로 직접
+  // 간병일지는 전체 선택으로 직접 — 라이브 배정 + 재배정으로 넘어간 간병인의 과거 담당
+  // 이력까지 전부 포함(getAllAssignPeriods), 환자와 연결된 적 없는 간병인은 그대로 별도 포함.
   setTimeout(()=>{
-    const allCg = caregivers.filter(c=>c.startDate);
-    if(!allCg.length) return;
-    if(fmt==='xlsx') downloadJournalXLSX(allCg,'씨앤에이케어_간병일지_전체.xlsx');
-    else downloadJournalCSVFile(allCg,'씨앤에이케어_간병일지_전체.csv');
+    const allRows = [
+      ...getAllAssignPeriods().map(periodToJournalRow),
+      ...caregivers.filter(c=>c.startDate && getAssignPeriods(c).length===0)
+    ];
+    if(!allRows.length) return;
+    if(fmt==='xlsx') downloadJournalXLSX(allRows,'씨앤에이케어_간병일지_전체.xlsx');
+    else downloadJournalCSVFile(allRows,'씨앤에이케어_간병일지_전체.csv');
   }, 1000);
   toast('✅ 전체 '+fmt.toUpperCase()+' 다운로드 시작!');
 }
 
 // ─── 간병일지 환자 선택 ───
 
+// 환자별로 "그 환자를 담당했던 모든 간병인"(라이브 매칭 중 + 재배정으로 넘어간 과거 이력 전원)을
+// 체크리스트로 보여준다 — getAllAssignPeriods() 참고.
 function openJournalSelect(fmt) {
   _journalFmt = fmt || 'xlsx';
   document.getElementById('journal-modal-title').textContent = '간병일지 다운로드 (.' + _journalFmt + ')';
@@ -12312,24 +12427,25 @@ function openJournalSelect(fmt) {
     '<svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 선택 항목 .' + _journalFmt + ' 다운로드';
 
   const el = document.getElementById('journal-select-list');
-  const ptIds = [...new Set(caregivers.filter(c=>c.startDate&&c.patientId).map(c=>c.patientId))];
-  const noPtCg = caregivers.filter(c=>c.startDate&&!c.patientId);
+  const allPeriods = getAllAssignPeriods();
+  const ptIds = [...new Set(allPeriods.map(p=>p.patientId))];
+  const noPtCg = caregivers.filter(c=>c.startDate && getAssignPeriods(c).length===0);
   if(!ptIds.length && !noPtCg.length) { toast('간병 일정이 등록된 데이터가 없어요', true); return; }
 
   let html = '';
   ptIds.forEach(pid => {
     const pt = patients.find(p=>String(p.id)===String(pid));
     if(!pt) return;
-    const cgList = caregivers.filter(c=>String(c.patientId)===String(pid)&&c.startDate);
-    const cgNames = cgList.map(c=>c.name).join(', ');
-    const starts = cgList.map(c=>c.startDate).filter(Boolean).sort();
-    const ends   = cgList.map(c=>c.endDate).filter(Boolean).sort();
+    const periodList = allPeriods.filter(p=>String(p.patientId)===String(pid));
+    const cgNames = periodList.map(p=>p.cg.name).join(', ');
+    const starts = periodList.map(p=>p.startDate).filter(Boolean).sort();
+    const ends   = periodList.map(p=>p.endDate).filter(Boolean).sort();
     const totalPeriod = starts.length ? starts[0]+' ~ '+(ends[ends.length-1]||'') : '';
     html += `<label class="ck-wrap" style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--rsm);margin-bottom:6px;display:flex;gap:10px;cursor:pointer;transition:background .15s" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
       <input type="checkbox" class="journal-ck" data-ptid="${pid}" checked style="width:16px;height:16px;accent-color:var(--teal);flex-shrink:0;margin-top:3px">
       <div>
         <div style="font-size:13px;font-weight:700">${pt.name} <span style="font-size:11px;font-weight:400;color:var(--gray)">${pt.gender||''} · ${pt.hospital||''}</span></div>
-        <div style="font-size:11px;color:var(--gray);margin-top:2px">간병인 ${cgList.length}명: ${cgNames}</div>
+        <div style="font-size:11px;color:var(--gray);margin-top:2px">간병인 ${periodList.length}명: ${cgNames}</div>
         <div style="font-size:11px;color:var(--teal);margin-top:1px">📅 ${totalPeriod}</div>
       </div>
     </label>`;
@@ -12372,7 +12488,7 @@ function downloadJournalXLSX(cgList, filename) {
     rows.push(['','','','','','','','']);
 
     cgArr.sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||'')).forEach((c,ci) => {
-      const cgAttend = attendance.filter(a=>a.cgId===String(c.id)).sort((a,b)=>(a.inDate||'').localeCompare(b.inDate||''));
+      const cgAttend = attendanceInPeriod(c.id, c.startDate, c.endDate);
       const period = c.startDate&&c.endDate ? c.startDate+' ~ '+c.endDate : c.startDate||'';
       rows.push([`[간병인 ${ci+1}]`,'','','','','','','']);
       rows.push(['간병인 성명', c.name||'', '', '연락처', formatPhone(c.phone||''), '', '간병기간', period]);
@@ -12473,7 +12589,7 @@ function journalSelectAll(val) {
 
 function journalLines(c, todayStr2) {
   // 간병인 1명 분 행 생성 헬퍼
-  const cgAttend = attendance.filter(a=>a.cgId===String(c.id)).sort((a,b)=>(a.inDate||'').localeCompare(b.inDate||''));
+  const cgAttend = attendanceInPeriod(c.id, c.startDate, c.endDate);
   const period = c.startDate&&c.endDate ? c.startDate+' ~ '+c.endDate : (c.startDate||'');
   const rows = [];
   rows.push('[간병인],,,,,,,');
@@ -12493,10 +12609,13 @@ function journalLines(c, todayStr2) {
 function downloadSelectedJournals() {
   const checked = [...document.querySelectorAll('.journal-ck:checked')];
   if(!checked.length) { toast('최소 1개를 선택해주세요', true); return; }
+  const allPeriods = getAllAssignPeriods();
   const selectedCgList = [];
   checked.forEach(ck => {
     if(ck.dataset.ptid) {
-      caregivers.filter(c=>String(c.patientId)===String(ck.dataset.ptid)&&c.startDate).forEach(c=>selectedCgList.push(c));
+      // 그 환자를 담당했던 모든 간병인(라이브+과거 이력 전원)의 기간을 전부 포함
+      allPeriods.filter(p=>String(p.patientId)===String(ck.dataset.ptid))
+        .forEach(p=>selectedCgList.push(periodToJournalRow(p)));
     } else if(ck.dataset.cgid) {
       const c=caregivers.find(x=>String(x.id)===String(ck.dataset.cgid));
       if(c) selectedCgList.push(c);
@@ -12539,33 +12658,36 @@ function openCertSelect() {
   document.getElementById('cert-select-overlay').classList.add('open');
 }
 
-// 환자명·간병인명 검색어로 목록 필터링해 다시 그림 (환자명이 일치하면 그 환자의 간병인 전원 표시)
+// 환자명·간병인명 검색어로 목록 필터링해 다시 그림 (환자명이 일치하면 그 환자를 담당했던
+// 간병인 전원 표시 — 간병일지 서식(V2)과 동일하게 라이브 매칭 중인 간병인뿐 아니라 재배정으로
+// 다른 환자에게 넘어갔거나 종료된 뒤 그대로인 과거 담당 간병인의 기간도 함께 가져온다.
+// getAssignPeriods()/getAllAssignPeriods() 참고.
 function renderCertSelectList(query) {
   const el = document.getElementById('cert-select-list');
   const clrBtn = document.getElementById('cert-select-search-clear');
   const q = (query||'').trim().toLowerCase();
   if(clrBtn) clrBtn.style.display = q ? '' : 'none';
 
-  const validCg = caregivers.filter(c=>c.startDate && c.patientId)
-    .sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||''));
-  if(!validCg.length) { el.innerHTML = '<p style="font-size:13px;color:var(--gray);text-align:center;padding:20px 0">간병 일정이 등록된 데이터가 없어요</p>'; return; }
+  const allPeriods = getAllAssignPeriods();
+  if(!allPeriods.length) { el.innerHTML = '<p style="font-size:13px;color:var(--gray);text-align:center;padding:20px 0">간병 일정이 등록된 데이터가 없어요</p>'; return; }
 
-  const ptIds = [...new Set(validCg.map(c=>c.patientId))];
+  const ptIds = [...new Set(allPeriods.map(p=>p.patientId))];
   let html = '';
   ptIds.forEach(pid => {
     const pt = patients.find(p=>String(p.id)===String(pid));
     if(!pt) return;
-    let cgList = validCg.filter(c=>String(c.patientId)===String(pid));
+    let periodList = allPeriods.filter(p=>String(p.patientId)===String(pid));
     if(q) {
       const ptMatch = (pt.name||'').toLowerCase().includes(q);
-      if(!ptMatch) cgList = cgList.filter(c => (c.name||'').toLowerCase().includes(q));
+      if(!ptMatch) periodList = periodList.filter(p => (p.cg.name||'').toLowerCase().includes(q));
     }
-    if(!cgList.length) return;
+    if(!periodList.length) return;
     html += `<div style="font-size:12px;font-weight:700;color:var(--gray);margin:10px 0 4px">${pt.name} <span style="font-weight:400">· ${pt.hospital||''}</span></div>`;
-    cgList.forEach(c => {
-      const period = c.startDate && c.endDate ? c.startDate+' ~ '+c.endDate : (c.startDate+' ~ 근무중');
-      html += `<button class="btn" style="width:100%;justify-content:space-between;margin-bottom:6px;padding:10px 14px" onclick="openCertPreview('${c.id}')">
-        <span style="font-size:13px;font-weight:700">${c.name}</span>
+    periodList.forEach(p => {
+      const period = p.startDate && p.endDate ? p.startDate+' ~ '+p.endDate : (p.startDate+' ~ 근무중');
+      const histTag = p.live ? '' : '<span style="font-size:10px;color:var(--gray);background:var(--surface2);border-radius:4px;padding:1px 5px;margin-left:5px">이력</span>';
+      html += `<button class="btn" style="width:100%;justify-content:space-between;margin-bottom:6px;padding:10px 14px" onclick="openCertPreview('${p.cg.id}','${p.startDate}')">
+        <span style="font-size:13px;font-weight:700">${p.cg.name}${histTag}</span>
         <span style="font-size:11px;color:var(--gray)">${period}</span>
       </button>`;
     });
@@ -12574,14 +12696,19 @@ function renderCertSelectList(query) {
 }
 
 // 선택한 간병인 건으로 간병사실확인서 미리보기 렌더링 (점선 밑줄 = 인쇄 전 직접 수정 가능한 값)
-function openCertPreview(cgId) {
+function openCertPreview(cgId, periodStartDate) {
   const cg = caregivers.find(c=>String(c.id)===String(cgId));
   if(!cg) { toast('간병인 정보를 찾을 수 없어요', true); return; }
-  const pt = patients.find(p=>String(p.id)===String(cg.patientId));
+  // periodStartDate로 라이브 배정인지 과거 이력인지 구분해서 그 기간의 patientId/startDate/endDate를
+  // 가져온다 — 한 간병인이 여러 환자를 거쳐왔을 수 있어 cg의 라이브 필드만 보면 안 됨.
+  const periods = getAssignPeriods(cg);
+  const period = periodStartDate ? periods.find(p=>p.startDate===periodStartDate) : periods[periods.length-1];
+  if(!period) { toast('간병 이력 정보를 찾을 수 없어요', true); return; }
+  const pt = patients.find(p=>String(p.id)===String(period.patientId));
   if(!pt) { toast('환자 정보를 찾을 수 없어요', true); return; }
 
-  const start = cg.startDate || '';
-  const end   = cg.endDate || todayStr();
+  const start = period.startDate || '';
+  const end   = period.endDate || todayStr();
   let totalDays = '';
   if(start) {
     // 이 앱 전반의 "사용기간" 계산과 동일한 방식(마감일-시작일, +1 없음) — 템플릿 예시(8/29~9/1 → 총 3일간)와도 일치
@@ -12590,7 +12717,7 @@ function openCertPreview(cgId) {
   }
   const company  = cfg.name || '씨앤에이케어';
   const careLoc  = careLocationStr(pt);
-  const repName  = cfg.certRepName || '';
+  const repName  = cfg.certRepName || '이광우';
   const periodStr = start
     ? `${korDateFull(start)} ~ ${korDateFull(end)}${totalDays?' (총 '+totalDays+'일간)':''}`
     : '';
@@ -12606,7 +12733,7 @@ function openCertPreview(cgId) {
           <td class="cl">나 이</td>
           <td>${certField(pt.age?('만 '+pt.age+'세'):'', '나이 입력')}</td>
           <td class="cl">신청인과의 관계</td>
-          <td>${certField('환자', '관계 입력')}</td>
+          <td>${certField('본인', '관계 입력')}</td>
         </tr>
       </table>
 
@@ -12650,33 +12777,37 @@ function openJournalV2Select() {
   document.getElementById('jv2-select-overlay').classList.add('open');
 }
 
-// 환자명·간병인명 검색어로 목록 필터링해 다시 그림 (환자명이 일치하면 그 환자의 간병인 전원 표시)
+// 환자명·간병인명 검색어로 목록 필터링해 다시 그림 (환자명이 일치하면 그 환자를 담당했던
+// 간병인 전원 표시 — 지금 매칭 중인 간병인뿐 아니라, 재배정으로 다른 환자에게 넘어갔거나
+// 종료된 뒤 그대로인 "과거 담당 간병인"의 기간도 assignHistory에서 함께 가져온다.
+// getAssignPeriods()/getPeriodsForPatient() 참고 — 그래서 한 환자에게 간병인이 여러 명
+// 거쳐갔어도(맞교체·재배정 등) 전원의 간병일지를 놓치지 않고 만들 수 있음.
 function renderJv2SelectList(query) {
   const el = document.getElementById('jv2-select-list');
   const clrBtn = document.getElementById('jv2-select-search-clear');
   const q = (query||'').trim().toLowerCase();
   if(clrBtn) clrBtn.style.display = q ? '' : 'none';
 
-  const validCg = caregivers.filter(c=>c.startDate && c.patientId)
-    .sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||''));
-  if(!validCg.length) { el.innerHTML = '<p style="font-size:13px;color:var(--gray);text-align:center;padding:20px 0">간병 일정이 등록된 데이터가 없어요</p>'; return; }
+  const allPeriods = getAllAssignPeriods();
+  if(!allPeriods.length) { el.innerHTML = '<p style="font-size:13px;color:var(--gray);text-align:center;padding:20px 0">간병 일정이 등록된 데이터가 없어요</p>'; return; }
 
-  const ptIds = [...new Set(validCg.map(c=>c.patientId))];
+  const ptIds = [...new Set(allPeriods.map(p=>p.patientId))];
   let html = '';
   ptIds.forEach(pid => {
     const pt = patients.find(p=>String(p.id)===String(pid));
     if(!pt) return;
-    let cgList = validCg.filter(c=>String(c.patientId)===String(pid));
+    let periodList = allPeriods.filter(p=>String(p.patientId)===String(pid));
     if(q) {
       const ptMatch = (pt.name||'').toLowerCase().includes(q);
-      if(!ptMatch) cgList = cgList.filter(c => (c.name||'').toLowerCase().includes(q));
+      if(!ptMatch) periodList = periodList.filter(p => (p.cg.name||'').toLowerCase().includes(q));
     }
-    if(!cgList.length) return;
+    if(!periodList.length) return;
     html += `<div style="font-size:12px;font-weight:700;color:var(--gray);margin:10px 0 4px">${pt.name} <span style="font-weight:400">· ${pt.hospital||''}</span></div>`;
-    cgList.forEach(c => {
-      const period = c.startDate && c.endDate ? c.startDate+' ~ '+c.endDate : (c.startDate+' ~ 근무중');
-      html += `<button class="btn" style="width:100%;justify-content:space-between;margin-bottom:6px;padding:10px 14px" onclick="openJournalV2Preview('${c.id}')">
-        <span style="font-size:13px;font-weight:700">${c.name}</span>
+    periodList.forEach(p => {
+      const period = p.startDate && p.endDate ? p.startDate+' ~ '+p.endDate : (p.startDate+' ~ 근무중');
+      const histTag = p.live ? '' : '<span style="font-size:10px;color:var(--gray);background:var(--surface2);border-radius:4px;padding:1px 5px;margin-left:5px">이력</span>';
+      html += `<button class="btn" style="width:100%;justify-content:space-between;margin-bottom:6px;padding:10px 14px" onclick="openJournalV2Preview('${p.cg.id}','${p.startDate}')">
+        <span style="font-size:13px;font-weight:700">${p.cg.name}${histTag}</span>
         <span style="font-size:11px;color:var(--gray)">${period}</span>
       </button>`;
     });
@@ -12685,17 +12816,22 @@ function renderJv2SelectList(query) {
 }
 
 // 선택한 간병인 건으로 간병일지(V2 양식) 미리보기 렌더링 (점선 밑줄 = 인쇄 전 직접 수정 가능한 값)
-// 환자·간병인·기간 등 앱에 있는 값은 미리 채우고, 생년월일(환자)처럼
-// 앱이 따로 관리하지 않는 항목은 빈 칸으로 두어 직접 입력하게 함. 간병일자는 간병기간의 총 일수,
-// 환자와의 관계는 '간병인', 작성자는 '씨앤에이케어협회 이관우'로 기본값을 채워둠(수정 가능).
-function openJournalV2Preview(cgId) {
+// 환자·간병인·기간 등 앱에 있는 값은 미리 채우고, 생년월일은 앱이 따로 관리하지 않아
+// 대신 환자 나이(만 나이)를 자동으로 채워둠(수정 가능). 간병일자는 간병기간의 총 일수,
+// 환자와의 관계는 '간병인', 작성자는 '씨앤에이케어협회 이광우'로 기본값을 채워둠(수정 가능).
+function openJournalV2Preview(cgId, periodStartDate) {
   const cg = caregivers.find(c=>String(c.id)===String(cgId));
   if(!cg) { toast('간병인 정보를 찾을 수 없어요', true); return; }
-  const pt = patients.find(p=>String(p.id)===String(cg.patientId));
+  // periodStartDate로 라이브 배정인지 과거 이력인지 구분해서 그 기간의 startDate/endDate/시간을
+  // 가져온다 — 한 간병인이 여러 환자를 거쳐왔을 수 있어(재배정 등) cg의 라이브 필드만 보면 안 됨.
+  const periods = getAssignPeriods(cg);
+  const period = periodStartDate ? periods.find(p=>p.startDate===periodStartDate) : periods[periods.length-1];
+  if(!period) { toast('간병 이력 정보를 찾을 수 없어요', true); return; }
+  const pt = patients.find(p=>String(p.id)===String(period.patientId));
   if(!pt) { toast('환자 정보를 찾을 수 없어요', true); return; }
 
-  const start = cg.startDate || '';
-  const end   = cg.endDate || todayStr();
+  const start = period.startDate || '';
+  const end   = period.endDate || todayStr();
   let totalDays = '';
   if(start) {
     // 간병사실확인서와 동일한 기간·일수 계산 방식(마감일-시작일, +1 없음)
@@ -12710,7 +12846,9 @@ function openJournalV2Preview(cgId) {
 
   // 일별 출퇴근 상세표 — 간병일지 엑셀과 동일한 방식(최소 10행, 실제 기록 있는 날만 업무 체크표시).
   // 원본 종이 양식은 기타 항목이 기본 미체크(☐)라 그대로 따름 — 엑셀 다운로드(기타 ■)와는 표기가 다름.
-  const cgAttend = attendance.filter(a=>a.cgId===String(cg.id)).sort((a,b)=>(a.inDate||'').localeCompare(b.inDate||''));
+  // 반드시 이 기간(start~end) 안의 기록만 골라야 함 — 안 그러면 같은 간병인의 다른 환자
+  // 담당 기간 기록까지 섞여 들어갈 수 있음(간병인 레코드가 여러 환자에 재사용되는 구조라서).
+  const cgAttend = attendanceInPeriod(cg.id, start, end);
   const fillCount = Math.max(cgAttend.length, 10);
   let dailyRows = '';
   for(let i=0; i<fillCount; i++) {
@@ -12733,7 +12871,7 @@ function openJournalV2Preview(cgId) {
         <tr>
           <td class="cl">환 자 명</td><td>${certField(pt.name, '환자명 입력')}</td>
           <td class="cl">성 별</td><td>${certField(pt.gender||'', '성별 입력')}</td>
-          <td class="cl">생년월일</td><td>${certField('', '환자 생년월일 입력')}</td>
+          <td class="cl">나 이</td><td>${certField(pt.age?('만 '+pt.age+'세'):'', '나이 입력')}</td>
         </tr>
         <tr>
           <td class="cl">간병일자</td><td>${certField(totalDaysStr, '간병일자 입력')}</td>
@@ -12757,7 +12895,7 @@ function openJournalV2Preview(cgId) {
       </table>
 
       <div class="cert-foot" style="text-align:left;margin-top:24px">작성일시 : ${certField(korDateFull(todayStr()), '작성일시 입력')}</div>
-      <div class="cert-foot" style="text-align:left;margin-top:8px">작 성 자 : ${certField('씨앤에이케어협회 이관우', '작성자 성명 입력')} (인)</div>
+      <div class="cert-foot" style="text-align:left;margin-top:8px">작 성 자 : ${certField('씨앤에이케어협회 이광우', '작성자 성명 입력')} (인)</div>
     </div>
   `;
   closeOverlay('jv2-select-overlay');
