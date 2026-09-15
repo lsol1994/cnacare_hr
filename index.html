@@ -1559,6 +1559,10 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         onclick="confirmMaintenanceTool('🔧 같은 환자 재매칭 오종료 복구\n\n종료됐던 환자에게 새 간병인을 다시 매칭했는데, 예전 마감일이 안 지워져서 곧바로 다시 \'종료\' 처리돼버린 건을 찾아 복구합니다(간병인 시작일보다 마감일이 더 빠른 비정상 기록을 기준으로 판별). 이력이 있는(재사용된) 간병인 건은 자동 복구가 위험해서 건너뛰고 목록으로만 알려드려요.', fixRematchAutoEndBug)">
         🔧 같은 환자 재매칭 오종료 복구
       </button>
+      <button class="btn btn-sm" style="border-color:var(--red);color:var(--red)"
+        onclick="confirmMaintenanceTool('🩹 간병인 근무이력 누락 복구\n\n환자의 재모집 이력엔 이전 간병인 이름이 남아있는데, 정작 그 간병인 쪽엔 이 근무건 기록이 없는 경우를 찾아 복구합니다(과거 버그로 맞교체/예약교체 시 이력저장이 누락된 건). 간병인이 그 사이 다른 환자로 재배정돼 정보가 이미 덮어써졌거나 동명이인이라 특정할 수 없는 경우는 자동 복구하지 않고 목록으로만 알려드려요.', fixMissingAssignHistory)">
+        🩹 간병인 근무이력 누락 복구
+      </button>
       <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)"
         onclick="confirmMaintenanceTool('📋 간병일지 자동생성 (전체)\n\n모든 간병인의 출퇴근 기록 중 비어있는 날짜를 자동으로 채웁니다. 직접 수정해둔 기록은 건드리지 않아요.', autoFillAllAttendanceManual)">
         📋 간병일지 자동생성 (전체)
@@ -2199,7 +2203,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_15_04';
+const APP_BUILD = '26_09_15_06';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -5407,13 +5411,11 @@ function saveCg() {
           prevCg.endDate = cg.startDate;
           prevCg.endTime = cg.startTime || '';
           autoFillAttendance(String(prevCg.id)); // 이전 간병인 간병일지도 마감일까지 동기화 (상태 전환 전에 먼저)
-          const isReturningCg = !!(prevCg.assignHistory && prevCg.assignHistory.length);
+          // (2026-09-15 수정: isReturningCg 게이트 제거 — patientId 해제/보험정리도 항상 실행)
           saveToAssignHistory(prevCg);
-          if(isReturningCg) {
-            prevCg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록
-            syncInsuranceForPatientChange(prevCg, prevCg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관
-            prevCg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
-          }
+          prevCg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록
+          syncInsuranceForPatientChange(prevCg, prevCg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관
+          prevCg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
           prevCg.workStatus = '종료'; // 이력 유무와 무관하게 기준상 "종료"로 통일
           markCgEdited(prevCg.id); // Firebase 덮어쓰기 방지 (10초)
         }
@@ -8901,6 +8903,67 @@ function fixRematchAutoEndBug() {
   toast(msg || '처리할 항목이 없어요', skipped.length > 0 && simple.length === 0);
 }
 
+// ─── 근무이력 누락 자동 복구 (isReturningCg 게이트 버그로 생긴 과거 데이터 정리, 2026-09-15) ───
+// 환자의 recruitHistory에 prevCg로 이름이 남아있는데, 정작 그 간병인 쪽 assignHistory에는
+// 이 근무건이 없는 경우를 찾아 복구한다 (박종보/김춘복 건과 동일한 패턴).
+// 라이브 필드(patientId 해제됨 + endDate가 recruitHistory의 endDate와 정확히 일치)가 그
+// 근무건 그대로 남아있는 경우만 saveToAssignHistory()로 안전하게 자동 복구하고, 그 사이 다른
+// 환자로 재배정되어 라이브 필드가 이미 덮어써졌거나 동명이인이라 특정할 수 없는 경우는
+// 잘못된 값으로 복구하는 사고를 막기 위해 자동 복구하지 않고 목록으로만 알려준다.
+function fixMissingAssignHistory() {
+  const fixed = [];
+  const skipped = [];
+
+  patients.forEach(p => {
+    (p.recruitHistory || []).forEach(h => {
+      if(!h.prevCg || !h.endDate) return;
+
+      const candidates = caregivers.filter(c => c.name === h.prevCg);
+      if(candidates.length === 0) return; // 간병인 레코드 자체가 삭제됨 - 이 도구로는 복구 불가
+
+      // 이미 이 환자 건이 assignHistory에 있거나, 라이브로 여전히 연결돼 있으면 정상 - 스킵
+      const alreadyRecorded = candidates.some(c => (c.assignHistory||[]).some(a => String(a.patientId)===String(p.id)));
+      const alreadyLive     = candidates.some(c => String(c.patientId)===String(p.id));
+      if(alreadyRecorded || alreadyLive) return;
+
+      // 라이브 endDate가 이 근무건 마감일과 정확히 같고, patientId가 비어있으며, 종료 상태인
+      // 후보만 "그 이후 재배정된 적 없음"으로 보고 안전하게 자동 복구 대상으로 삼음
+      const safeCandidates = candidates.filter(c =>
+        c.endDate === h.endDate && c.patientId === '' && c.workStatus === '종료'
+      );
+
+      if(safeCandidates.length === 1) {
+        const cg = safeCandidates[0];
+        saveToAssignHistory(cg, p.id);
+        markCgEdited(cg.id);
+        fixed.push({ cgName: cg.name, cgId: cg.id, patientName: p.name, patientId: p.id, endDate: h.endDate });
+      } else {
+        skipped.push({
+          prevCg: h.prevCg, patientName: p.name, patientId: p.id, endDate: h.endDate,
+          reason: safeCandidates.length === 0
+            ? '간병인이 이미 다른 환자로 재배정되어 라이브 필드 소실 (수동 확인 필요)'
+            : `동명이인 ${safeCandidates.length}명이라 자동으로 특정 불가`
+        });
+      }
+    });
+  });
+
+  if(fixed.length > 0) {
+    save();
+    renderCaregivers();
+    renderPatients();
+    refreshCalendarIfOpen();
+  }
+
+  let msg = fixed.length ? `✅ ${fixed.length}건 근무이력 자동 복구됐어요.` : '';
+  if(skipped.length > 0) {
+    msg += (msg?'\n':'') + `⚠️ ${skipped.length}건은 자동 복구 불가 - 콘솔에서 확인해주세요.`;
+    console.log('🔍 근무이력 누락 - 수동 확인 필요:', skipped);
+  }
+  if(fixed.length > 0) console.log('✅ 근무이력 자동 복구된 건:', fixed);
+  toast(msg || '누락된 근무이력이 없어요 (모두 정상)', skipped.length > 0 && fixed.length === 0);
+}
+
 // 현재 매칭된 간병인이 없는 환자를 전부 찾아서, 각각 왜 없는지 사유를 진단해서 보여줌
 // 설정의 유지보수 도구 버튼들 - 실행 전에 "이 버튼이 뭘 하는지" 설명하는 확인창을 먼저 띄우고,
 // 확인을 눌러야만 실제 동작(fn)이 실행되도록 감싸는 공통 래퍼
@@ -11749,15 +11812,14 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
     autoFillAttendanceUntilEnd(String(outgoingCg.id), outgoingCg.endDate); // 마감일까지 간병일지 자동 채우기 (상태 변경 전에 먼저)
     // workStatus를 먼저 최종값으로 확정한 뒤 이력에 기록 (순서가 반대면 saveToAssignHistory()가
     // 남기는 "과거 담당 환자" 기록의 status가 방금 끝난 근무건인데도 "근무중"으로 잘못 저장됨)
-    const isReturningCg = !!(outgoingCg.assignHistory && outgoingCg.assignHistory.length);
+    // (2026-09-15 수정: isReturningCg 게이트 제거 — 최초 배정 간병인이 맞교체/예약교체로
+    // 나갈 때 이력저장·patientId 해제·보험정리가 통째로 스킵되던 버그)
     outgoingCg.workStatus = '종료'; // 이력 유무와 무관하게 기준상 "종료"로 통일 (checkAutoEnd와 동일한 이유)
-    if(isReturningCg) {
-      saveToAssignHistory(outgoingCg);
-      outgoingCg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록
-      syncInsuranceForPatientChange(outgoingCg, outgoingCg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관
-      outgoingCg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
-      outgoingCg._returnedToPoolAt = outgoingCg.endDate; // 재처리 방지용 플래그
-    }
+    saveToAssignHistory(outgoingCg);
+    outgoingCg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록
+    syncInsuranceForPatientChange(outgoingCg, outgoingCg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관
+    outgoingCg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
+    outgoingCg._returnedToPoolAt = outgoingCg.endDate; // 재처리 방지용 플래그
     markCgEdited(outgoingCg.id); // Firebase 덮어쓰기 방지 (10초)
   }
 
@@ -11917,15 +11979,14 @@ function checkAutoEnd() {
     // workStatus를 먼저 최종값으로 확정한 뒤 이력에 기록해야 saveToAssignHistory()가 남기는
     // "과거 담당 환자" 기록의 status가 이번에 끝난 상태를 정확히 반영함 (예전엔 순서가 반대라
     // 방금 끝난 근무건이 이력에 "근무중"으로 잘못 남았음)
-    const isReturningCg = !!(cg.assignHistory && cg.assignHistory.length);
+    // (2026-09-15 수정: 최초 배정 간병인이 isReturningCg=false라는 이유로 이력저장/patientId
+    // 해제/보험정리가 통째로 스킵되던 버그 — assignHistory 유무와 무관하게 항상 실행하도록 통일)
     cg.workStatus = '종료';
-    if(isReturningCg) saveToAssignHistory(cg);
-    if(isReturningCg) {
-      if(pt) cg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록 (② 루프와 동일하게 맞춤)
-      syncInsuranceForPatientChange(cg, cg.patientId, '', pt ? pt.name : ''); // 배상보험도 이번 근무건 이력으로 보관 (patientId 지우기 전에 먼저 정리)
-      cg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
-      cg._returnedToPoolAt = cg.endDate; // 재처리 방지용 플래그 (endDate는 캘린더 계산을 위해 그대로 유지)
-    }
+    saveToAssignHistory(cg);
+    if(pt) cg.earlyEndPatientId = String(pt.id); // 종료보고/종료취소에서 이 환자와 연결해 찾을 수 있도록 (② 루프와 동일하게 맞춤)
+    syncInsuranceForPatientChange(cg, cg.patientId, '', pt ? pt.name : ''); // 배상보험도 이번 근무건 이력으로 보관 (patientId 지우기 전에 먼저 정리)
+    cg.patientId = ''; // 매칭 해제 → 다음 배정을 위해 대기 상태로
+    cg._returnedToPoolAt = cg.endDate; // 재처리 방지용 플래그 (endDate는 캘린더 계산을 위해 그대로 유지)
     // ⚠️ 자동종료도 "로컬 최신 수정"으로 보호해야 함 — 이 호출이 없으면 이 간병인의 _ts가
     // 갱신되지 않아, 잠시 후 다른 기기의 낡은(아직 근무중인 채로 저장된) 데이터와 동기화될 때
     // 시각 비교에서 낡은 쪽이 이겨서 방금 종료 처리한 게 다시 "근무중"으로 되돌아가버림
@@ -12027,15 +12088,13 @@ function checkAutoEnd() {
       // workStatus를 먼저 최종값으로 확정한 뒤 이력에 기록 (① 루프와 동일한 이유 —
       // 순서가 반대면 saveToAssignHistory()가 남기는 "과거 담당 환자" 기록의 status가
       // 방금 끝난 근무건인데도 "근무중"으로 잘못 저장됨)
-      const isReturningCg = !!(cg.assignHistory && cg.assignHistory.length);
+      // (2026-09-15 수정: isReturningCg 게이트 제거 — ① 루프와 동일한 이유)
       cg.earlyEndPatientId = String(pt.id); // "종료취소"가 이 경로로 끝난 경우도 복원할 수 있도록
       cg.workStatus = '종료'; // 이력 유무와 무관하게 기준상 "종료"로 통일 (① 루프와 동일한 이유)
-      if(isReturningCg) {
-        saveToAssignHistory(cg);
-        syncInsuranceForPatientChange(cg, cg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관 (patientId 지우기 전에 먼저 정리)
-        cg.patientId  = '';
-        cg._returnedToPoolAt = cg.endDate;
-      }
+      saveToAssignHistory(cg);
+      syncInsuranceForPatientChange(cg, cg.patientId, '', pt.name); // 배상보험도 이번 근무건 이력으로 보관 (patientId 지우기 전에 먼저 정리)
+      cg.patientId  = '';
+      cg._returnedToPoolAt = cg.endDate;
       // ⚠️ 자동종료도 "로컬 최신 수정"으로 보호해야 함 — 없으면 _ts가 갱신되지 않아
       // 잠시 후 다른 기기의 낡은(근무중인 채로 저장된) 데이터와 동기화될 때 되돌아갈 수 있음
       markCgEdited(cg.id);
