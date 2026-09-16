@@ -2205,7 +2205,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_16_01';
+const APP_BUILD = '26_09_16_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -6919,6 +6919,57 @@ function cancelDirectSwap(ptId) {
   toast('✅ 맞교체가 취소됐어요. '+cg.name+'님이 계속 근무해요.');
 }
 
+// 예정 교체 간병인으로 고를 수 있는 후보 목록 (예비/대기중(미배정)/종료 풀 + 이 환자의
+// 현재 담당 간병인 본인). openReplacementForm()과 renderRepCgOptions() 양쪽에서 공용으로
+// 사용 — 검색어 입력 시마다 다시 계산해야 하므로 별도 함수로 분리함.
+function getSelectableReplacementCgs(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  if(!p) return [];
+  const curCg = caregivers.find(c=>String(c.patientId)===String(p.id)&&c.workStatus!=='종료');
+  return caregivers.filter(c =>
+    c.workStatus==='종료' || c.workStatus==='예비' || (c.workStatus==='대기중' && !c.patientId)
+    || (curCg && String(c.id)===String(curCg.id))
+  );
+}
+
+// 예정 교체 간병인 검색창 입력 시 후보 목록을 필터링해 드롭다운으로 보여줌 (이름/연락처 기준).
+// 검색어가 비어있으면(포커스만 준 상태) 전체 후보를 보여줌.
+function renderRepCgOptions(ptId, query) {
+  const box = document.getElementById('rep-cg-options');
+  if(!box) return;
+  const q = (query||'').trim().toLowerCase();
+  const list = getSelectableReplacementCgs(ptId);
+  const filtered = q
+    ? list.filter(c => (c.name||'').toLowerCase().includes(q) || (c.phone||'').replace(/[^0-9]/g,'').includes(q.replace(/[^0-9]/g,'')||q))
+    : list;
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  const curCg = p ? caregivers.find(c=>String(c.patientId)===String(p.id)&&c.workStatus!=='종료') : null;
+  if(!filtered.length) {
+    box.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--gray)">검색 결과가 없어요. 아래 칸에 직접 입력하세요.</div>';
+    box.style.display = 'block';
+    return;
+  }
+  const ptIdEsc = String(ptId).replace(/'/g,"\\'");
+  box.innerHTML = filtered.map(c => {
+    const isCur = curCg && String(c.id)===String(curCg.id);
+    return '<button type="button" class="btn" style="width:100%;justify-content:space-between;border:none;border-radius:0;padding:8px 12px;font-size:12px" onmousedown="selectRepCg(\'' + ptIdEsc + '\',\'' + c.id + '\')">'
+      + '<span style="font-weight:700">' + c.name + '</span>'
+      + '<span style="color:var(--gray);font-size:11px">' + c.workStatus + (c.phone ? ' · ' + formatPhone(c.phone) : '') + (isCur ? ' — 현재 담당' : '') + '</span>'
+      + '</button>';
+  }).join('');
+  box.style.display = 'block';
+}
+
+// 검색 목록에서 간병인을 클릭해 선택했을 때: 정보 자동 채움 + 검색창에 선택된 이름 표시 + 목록 닫기
+function selectRepCg(ptId, cgId) {
+  fillReplacementFromCg(ptId, cgId);
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  const searchEl = document.getElementById('rep-cg-search');
+  if(searchEl) searchEl.value = cg ? cg.name : '';
+  const box = document.getElementById('rep-cg-options');
+  if(box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+
 // ── 예정 교체 간병인 정보 입력/수정 (기존 간병인 근무 종료 시 자동 인계) ──
 function openReplacementForm(ptId) {
   const p = patients.find(x=>String(x.id)===String(ptId));
@@ -6932,22 +6983,22 @@ function openReplacementForm(ptId) {
     : '';
   // ── 재배정 기능처럼: 예정 교체 간병인이 아예 새로운 사람이 아니라 "이미 등록돼 있는
   // 간병인"(예비/대기중/종료 풀, 그리고 기존 간병인 본인이 예정교체 되는 경우도 있으므로
-  // 이 환자에게 현재 매칭된 간병인도 포함)인 경우, 목록에서 골라서 정보를 자동으로 채울 수
-  // 있게 한다. "직접 입력"을 선택하면 아무것도 건드리지 않고 수기로 입력 가능.
-  const curCg = caregivers.find(c=>String(c.patientId)===String(p.id)&&c.workStatus!=='종료');
-  const selectableCgs = caregivers.filter(c =>
-    c.workStatus==='종료' || c.workStatus==='예비' || (c.workStatus==='대기중' && !c.patientId)
-    || (curCg && String(c.id)===String(curCg.id))
-  );
+  // 이 환자에게 현재 매칭된 간병인도 포함)인 경우, 이름·연락처로 검색해서 골라 정보를
+  // 자동으로 채울 수 있게 한다. 검색 없이 "직접 입력"을 그대로 두면 아무것도 건드리지
+  // 않고 수기로 입력 가능. (대상 목록이 길어져도 스크롤 없이 이름으로 바로 찾을 수 있도록
+  // 기존 <select> 방식에서 검색 입력 + 필터링 목록 방식으로 변경 — getSelectableReplacementCgs()
+  // 참고, renderRepCgOptions()/selectRepCg()와 세트로 동작)
   const ptIdEscSel = String(ptId).replace(/'/g,"\\'");
-  const cgSelectHtml = '<div class="field"><label>등록 방법</label>'
-    + '<select id="rep-cg-select" onchange="fillReplacementFromCg(\'' + ptIdEscSel + '\', this.value)">'
-    + '<option value="">✏️ 직접 입력</option>'
-    + selectableCgs.map(c => '<option value="' + c.id + '">' + c.name
-        + ' (' + c.workStatus + (c.phone ? ' · ' + formatPhone(c.phone) : '') + ')'
-        + (curCg && String(c.id)===String(curCg.id) ? ' — 현재 담당' : '')
-        + '</option>').join('')
-    + '</select></div>';
+  const cgSelectHtml = '<div class="field" style="position:relative">'
+    + '<label>등록 방법 <span style="font-size:10px;font-weight:400;color:var(--gray)">(이름·연락처로 검색해서 기존 간병인 정보를 불러오거나, 아래 칸에 바로 직접 입력하세요)</span></label>'
+    + '<div style="position:relative">'
+    + '<input type="text" id="rep-cg-search" placeholder="🔍 이름 또는 연락처 검색" autocomplete="off"'
+    + ' oninput="renderRepCgOptions(\'' + ptIdEscSel + '\', this.value)"'
+    + ' onfocus="renderRepCgOptions(\'' + ptIdEscSel + '\', this.value)"'
+    + ' onblur="setTimeout(function(){var b=document.getElementById(\'rep-cg-options\'); if(b) b.style.display=\'none\';},150)"'
+    + ' style="padding:7px 10px;font-size:12px;width:100%;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface);color:var(--black)">'
+    + '<div id="rep-cg-options" style="display:none;position:absolute;z-index:30;left:0;right:0;top:100%;margin-top:2px;background:var(--surface);border:1px solid var(--border);border-radius:var(--rsm);max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>'
+    + '</div></div>';
   document.getElementById('replace-body').innerHTML = riHtml + cgSelectHtml
     + '<div class="g2">'
     + '<div class="field"><label>이름</label><input type="text" id="rep-name" value="' + (rep.name||'') + '"></div>'
@@ -7023,9 +7074,16 @@ function saveReplacementInfo(ptId) {
   }
 
   // 예정 교체 간병인 등록 시 업체보고 - 교체보고 자동 작성
-  const arriveDate = p.recruitInfo ? p.recruitInfo.startDate : '';
-  const arriveTime = p.recruitInfo ? p.recruitInfo.startTime : '';
-  const replaceMsg = buildReplaceReport(p, arriveDate, arriveTime, p.pendingReplacement);
+  // ⚠️ 위에서 즉시 인계(promotedNow)가 일어났다면 promotePendingReplacement()가 이미
+  // p.recruitInfo/p.pendingReplacement를 delete한 뒤이므로, 여기서 그 값을 그대로 읽으면
+  // 둘 다 텅 비어서 교체보고에 간병인명·연락처·도착일시가 전부 "________"로 나가버리는
+  // 문제가 있었음(인계 예정 시각이 이미 지난 뒤에 등록하는 경우 항상 재현됨). 즉시 인계된
+  // 경우엔 방금 만들어진 새 간병인 레코드(promotedNow)를 우선 사용해야 실제 입력한 정보가
+  // 메시지에 정확히 반영된다.
+  const arriveDate = promotedNow ? promotedNow.startDate : (p.recruitInfo ? p.recruitInfo.startDate : '');
+  const arriveTime = promotedNow ? promotedNow.startTime : (p.recruitInfo ? p.recruitInfo.startTime : '');
+  const replaceCg  = promotedNow || p.pendingReplacement;
+  const replaceMsg = buildReplaceReport(p, arriveDate, arriveTime, replaceCg);
   const now2 = new Date();
   const timeStr = now2.toLocaleDateString('ko-KR')+' '+now2.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
   const _rptId3 = genId();
@@ -8636,7 +8694,7 @@ function buildMatchMessage(pt, cg) {
   return `안녕하세요, 선생님.
 씨앤에이케어협회입니다.
 *통장사본(또는 계좌번호) 보내주시면 바로 매칭완료 처리 하겠습니다!
-일정: ${schedule} ~ ${endSchedule}${shiftNote}
+일정: ${schedule} 및 ${endSchedule}${shiftNote}
 기간: ${duration}
 병원 : ${hospital}
 환자 : ${ptName}
