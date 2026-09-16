@@ -1966,6 +1966,8 @@ function defaultHolidays() {
   return ["2026-01-01 신정","2026-02-16 설날연휴","2026-02-17 설날","2026-02-18 설날연휴","2026-03-01 삼일절","2026-03-02 대체공휴일(삼일절)","2026-05-05 어린이날","2026-05-24 부처님오신날","2026-05-25 대체공휴일(부처님오신날)","2026-06-03 지방선거일","2026-06-06 현충일","2026-07-17 제헌절","2026-08-15 광복절","2026-08-17 대체공휴일(광복절)","2026-09-24 추석연휴","2026-09-25 추석","2026-09-26 추석연휴","2026-10-03 개천절","2026-10-05 대체공휴일(개천절)","2026-10-09 한글날","2026-12-25 성탄절"];
 }
 if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays();
+// 급여 미지급 체크 목록 — 해제되기 전까지 원래 지급일과 무관하게 매일 대시보드에 노출됨
+if(!Array.isArray(cfg.unpaidPayments)) cfg.unpaidPayments = [];
 let blacklist  = JSON.parse(localStorage.getItem('cnc_blacklist') || '[]');
 let memos      = JSON.parse(localStorage.getItem('cnc_memos')     || '[]');
 let notices    = JSON.parse(localStorage.getItem('cnc_notices')   || '[]');
@@ -2203,7 +2205,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_15_06';
+const APP_BUILD = '26_09_15_08';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -2805,6 +2807,7 @@ function attachFirebaseListener() {
       } else {
         cfg = d.cfg;
         if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays(); // 예전 cfg 호환
+        if(!Array.isArray(cfg.unpaidPayments)) cfg.unpaidPayments = []; // 예전 cfg 호환
       }
       localStorage.setItem('cnc_cfg', JSON.stringify(cfg));
     }
@@ -9578,6 +9581,53 @@ function findOwnAssignHistoryByDates(cg) {
   }) || null;
 }
 
+// ── 급여 미지급 체크 ──
+// calcPayDates() 등은 값을 저장하지 않고 매번 다시 계산하는 방식이라, "이 특정 지급건은
+// 아직 안 나갔다"는 상태를 저장할 곳이 따로 없었음. 새 컬렉션을 만들지 않고 cfg(협회 설정)
+// 블롭에 함께 얹는다 — cfg는 이미 _ts 비교 + 2분 편집보호로 기기 간 동기화가 안전하게
+// 처리되고 있으므로 이 패턴을 그대로 재사용. 등록 시점의 이름/은행정보/금액을 스냅샷으로
+// 저장해서, 이후 간병인이 재배정되는 등 라이브 데이터가 바뀌어도 미지급 알림 카드 표시가
+// 흔들리지 않게 한다.
+function payUnpaidKey(cgId, date, label) { return String(cgId) + '|' + date + '|' + label; }
+
+function findUnpaidPay(cgId, date, label) {
+  var key = payUnpaidKey(cgId, date, label);
+  return (cfg.unpaidPayments || []).find(function(u){ return u.key === key; }) || null;
+}
+
+function markPayUnpaid(cgId, date, label, amount) {
+  if(!cfg.unpaidPayments) cfg.unpaidPayments = [];
+  var key = payUnpaidKey(cgId, date, label);
+  if(cfg.unpaidPayments.some(function(u){ return u.key === key; })) return; // 이미 등록됨
+  var cg = caregivers.find(function(c){ return String(c.id) === String(cgId); });
+  if(!cg) { toast('간병인 정보를 찾을 수 없어요', true); return; }
+  var pt = resolveCalPt(cg);
+  var ptStr = pt ? ' (' + pt.name + ')' : '';
+  var bankStr = (cg.bankName||cg.bankAccount)
+    ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
+    : '';
+  cfg.unpaidPayments.push({
+    id: genId(), key: key, cgId: String(cgId), cgName: cg.name || '', ptStr: ptStr,
+    origDate: date, label: label || '', amount: Number(amount) || 0, bankStr: bankStr,
+    markedAt: todayStr()
+  });
+  markCfgEdited();
+  save();
+  refreshCalendarIfOpen();
+  toast('⚠️ 미지급으로 표시했어요. 해제 전까지 매일 대시보드에 표시돼요.');
+}
+
+function releasePayUnpaid(id) {
+  if(!cfg.unpaidPayments) return;
+  var idx = cfg.unpaidPayments.findIndex(function(u){ return String(u.id) === String(id); });
+  if(idx === -1) return;
+  cfg.unpaidPayments.splice(idx, 1);
+  markCfgEdited();
+  save();
+  refreshCalendarIfOpen();
+  toast('✅ 미지급 해제했어요. 원래 지급일에만 표시돼요.');
+}
+
 function showCalDetail(dateStr) {
   var bodyEl = document.getElementById('cal-detail-body');
   if(!bodyEl) return;
@@ -9715,6 +9765,11 @@ function showCalDetail(dateStr) {
             + '</div></div>';
         }
       }
+      var unpaidEntry = findUnpaidPay(cg.id, p.date, p.label);
+      var unpaidHtml = unpaidEntry
+        ? '<div style="margin-top:6px;padding:6px 8px;background:#FEE2E2;border-radius:6px;font-size:11px;color:var(--red);font-weight:700">⚠️ 미지급 (등록일: ' + unpaidEntry.markedAt + ')</div>'
+          + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="releasePayUnpaid(\'' + unpaidEntry.id + '\')">✅ 미지급 해제</button>'
+        : '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center;border-color:var(--red);color:var(--red)" onclick="markPayUnpaid(\'' + cg.id + '\',\'' + p.date + '\',\'' + p.label + '\',' + (p.amount||0) + ')">⚠️ 미지급 체크</button>';
       payEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid ' + bdColor + ';margin-bottom:8px;background:' + bgColor + ';border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="font-size:11px;font-weight:700;color:' + bdColor + ';margin-bottom:3px">💰 ' + p.label + (p.isReserve?' [주말·공휴일 조정]':'') + '</div>'
@@ -9724,6 +9779,7 @@ function showCalDetail(dateStr) {
         + reserveStr
         + advanceNoteStr
         + expenseHtml
+        + unpaidHtml
         + '</div>' });
     });
   });
@@ -9794,6 +9850,13 @@ function showCalDetail(dateStr) {
       + '<div style="font-size:11px;color:var(--gray);margin-top:2px">사유: 도착 후 취소/현장 취소</div>'
       + bankHtml
       + expenseHtml
+      + (function(){
+          var u = findUnpaidPay(cg.id, cg.onsiteCancelDate, '현장 취소 지급');
+          return u
+            ? '<div style="margin-top:6px;padding:6px 8px;background:#FEE2E2;border-radius:6px;font-size:11px;color:var(--red);font-weight:700">⚠️ 미지급 (등록일: ' + u.markedAt + ')</div>'
+              + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="releasePayUnpaid(\'' + u.id + '\')">✅ 미지급 해제</button>'
+            : '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center;border-color:var(--red);color:var(--red)" onclick="markPayUnpaid(\'' + cg.id + '\',\'' + cg.onsiteCancelDate + '\',\'현장 취소 지급\',' + amount + ')">⚠️ 미지급 체크</button>';
+        })()
       + '</div>' });
   });
   // 당일 근무가 마감되는 간병인은 정규 급여 주기와 상관없이 자동으로 최종 정산 건 추가
@@ -9848,6 +9911,11 @@ function showCalDetail(dateStr) {
           + '</div></div>';
       }
     }
+    var finalUnpaidEntry = findUnpaidPay(cg.id, dateStr, '최종 정산 (근무 마감)');
+    var finalUnpaidHtml = finalUnpaidEntry
+      ? '<div style="margin-top:6px;padding:6px 8px;background:#FEE2E2;border-radius:6px;font-size:11px;color:var(--red);font-weight:700">⚠️ 미지급 (등록일: ' + finalUnpaidEntry.markedAt + ')</div>'
+        + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="releasePayUnpaid(\'' + finalUnpaidEntry.id + '\')">✅ 미지급 해제</button>'
+      : '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center;border-color:var(--red);color:var(--red)" onclick="markPayUnpaid(\'' + cg.id + '\',\'' + dateStr + '\',\'최종 정산 (근무 마감)\',' + settleAmount + ')">⚠️ 미지급 체크</button>';
     payEvents.push({ time: '', html:
       '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
       + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 최종 정산 (근무 마감)' + (wasAdjusted?' [주말·공휴일 조정]':'') + '</div>'
@@ -9857,6 +9925,7 @@ function showCalDetail(dateStr) {
       + bankHtml
       + reserveStr
       + expenseHtml
+      + finalUnpaidHtml
       + '</div>' });
   });
   // ── assignHistory 기반 미정산 이력 복구 ──
@@ -9990,6 +10059,25 @@ function showCalDetail(dateStr) {
     });
   });
 
+  // ── 미지급 알림: 오늘 날짜라면, 해제 안 된 미지급 건을 원래 지급일과 무관하게 매일 노출 ──
+  // 오늘이 원래 지급일인 건은 위 급여 카드 쪽에 이미 "⚠️ 미지급" 배지로 표시되므로 중복 방지.
+  var unpaidReminderEvents = [];
+  if(dateStr === todayStr()) {
+    (cfg.unpaidPayments || []).forEach(function(u) {
+      if(u.origDate === dateStr) return;
+      var bankHtml = u.bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + u.bankStr + '</div>' : '';
+      unpaidReminderEvents.push({ time: '', html:
+        '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:#FEE2E2;border-radius:0 var(--rsm) var(--rsm) 0">'
+        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">⚠️ 미지급 (원래 지급일: ' + u.origDate + ')</div>'
+        + '<div style="font-size:14px;font-weight:700">' + (u.cgName||'') + (u.ptStr||'') + '</div>'
+        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (u.label||'') + '</div>'
+        + (u.amount ? '<div style="font-size:15px;font-weight:900;color:var(--red);margin-top:4px">' + Number(u.amount).toLocaleString() + '원</div>' : '')
+        + bankHtml
+        + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="releasePayUnpaid(\'' + u.id + '\')">✅ 미지급 해제</button>'
+        + '</div>' });
+    });
+  }
+
   // 시간대순 정렬 (시간 없는 항목은 맨 뒤로)
   function sortByTime(arr) {
     return arr.slice().sort(function(a,b){
@@ -10007,13 +10095,14 @@ function showCalDetail(dateStr) {
       + events.map(function(e){ return e.html; }).join('');
   }
 
-  var sectionsHtml = sectionHtml('▶ 간병 시작', startEvents)
+  var sectionsHtml = sectionHtml('⚠️ 미지급 알림', unpaidReminderEvents)
+    + sectionHtml('▶ 간병 시작', startEvents)
     + sectionHtml('■ 간병 마감', endEvents)
     + sectionHtml('🔀 교체', swapEvents)
     + sectionHtml('🚫 도착 후 취소', onsiteCancelEvents)
     + sectionHtml('💰 급여 지급', payEvents);
 
-  bodyEl.innerHTML = (startEvents.length + endEvents.length + swapEvents.length + onsiteCancelEvents.length + payEvents.length) > 0
+  bodyEl.innerHTML = (unpaidReminderEvents.length + startEvents.length + endEvents.length + swapEvents.length + onsiteCancelEvents.length + payEvents.length) > 0
     ? sectionsHtml
     : '<div style="padding:2rem;text-align:center;color:var(--gray);font-size:13px">이날 일정이 없어요 😊</div>';
 }
