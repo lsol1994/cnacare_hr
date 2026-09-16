@@ -2205,7 +2205,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_15_08';
+const APP_BUILD = '26_09_16_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -9628,6 +9628,17 @@ function releasePayUnpaid(id) {
   toast('✅ 미지급 해제했어요. 원래 지급일에만 표시돼요.');
 }
 
+// 카드 상단 우측 구석에 작게 넣는 미지급 토글(뱃지/버튼). 미지급 상태면 빨간 알약 뱃지(클릭 시
+// 해제), 아니면 테두리만 있는 작은 버튼(클릭 시 등록)을 반환. 카드 헤더 줄(flex 컨테이너)의
+// 오른쪽 끝에 이어붙여 사용.
+function unpaidToggleHtml(cgId, date, label, amount) {
+  var u = findUnpaidPay(cgId, date, label);
+  if(u) {
+    return '<span title="등록일: ' + u.markedAt + '" style="font-size:10px;font-weight:700;color:#fff;background:var(--red);padding:2px 7px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayUnpaid(\'' + u.id + '\')">⚠️ 미지급</span>';
+  }
+  return '<span style="font-size:10px;font-weight:600;color:var(--red);border:1px solid var(--red);padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="markPayUnpaid(\'' + cgId + '\',\'' + date + '\',\'' + label + '\',' + (amount||0) + ')">미지급 체크</span>';
+}
+
 function showCalDetail(dateStr) {
   var bodyEl = document.getElementById('cal-detail-body');
   if(!bodyEl) return;
@@ -9765,21 +9776,18 @@ function showCalDetail(dateStr) {
             + '</div></div>';
         }
       }
-      var unpaidEntry = findUnpaidPay(cg.id, p.date, p.label);
-      var unpaidHtml = unpaidEntry
-        ? '<div style="margin-top:6px;padding:6px 8px;background:#FEE2E2;border-radius:6px;font-size:11px;color:var(--red);font-weight:700">⚠️ 미지급 (등록일: ' + unpaidEntry.markedAt + ')</div>'
-          + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="releasePayUnpaid(\'' + unpaidEntry.id + '\')">✅ 미지급 해제</button>'
-        : '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center;border-color:var(--red);color:var(--red)" onclick="markPayUnpaid(\'' + cg.id + '\',\'' + p.date + '\',\'' + p.label + '\',' + (p.amount||0) + ')">⚠️ 미지급 체크</button>';
       payEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid ' + bdColor + ';margin-bottom:8px;background:' + bgColor + ';border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:' + bdColor + ';margin-bottom:3px">💰 ' + p.label + (p.isReserve?' [주말·공휴일 조정]':'') + '</div>'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
+        + '<span style="font-size:11px;font-weight:700;color:' + bdColor + '">💰 ' + p.label + (p.isReserve?' [주말·공휴일 조정]':'') + '</span>'
+        + unpaidToggleHtml(cg.id, p.date, p.label, p.amount)
+        + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
         + amountStr
         + bankHtml
         + reserveStr
         + advanceNoteStr
         + expenseHtml
-        + unpaidHtml
         + '</div>' });
     });
   });
@@ -9844,19 +9852,15 @@ function showCalDetail(dateStr) {
     }
     payEvents.push({ time: '', html:
       '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-      + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">🚫 현장 취소 지급</div>'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
+      + '<span style="font-size:11px;font-weight:700;color:var(--amber)">🚫 현장 취소 지급</span>'
+      + unpaidToggleHtml(cg.id, cg.onsiteCancelDate, '현장 취소 지급', amount)
+      + '</div>'
       + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
       + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + amount.toLocaleString() + '원</div>'
       + '<div style="font-size:11px;color:var(--gray);margin-top:2px">사유: 도착 후 취소/현장 취소</div>'
       + bankHtml
       + expenseHtml
-      + (function(){
-          var u = findUnpaidPay(cg.id, cg.onsiteCancelDate, '현장 취소 지급');
-          return u
-            ? '<div style="margin-top:6px;padding:6px 8px;background:#FEE2E2;border-radius:6px;font-size:11px;color:var(--red);font-weight:700">⚠️ 미지급 (등록일: ' + u.markedAt + ')</div>'
-              + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="releasePayUnpaid(\'' + u.id + '\')">✅ 미지급 해제</button>'
-            : '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center;border-color:var(--red);color:var(--red)" onclick="markPayUnpaid(\'' + cg.id + '\',\'' + cg.onsiteCancelDate + '\',\'현장 취소 지급\',' + amount + ')">⚠️ 미지급 체크</button>';
-        })()
       + '</div>' });
   });
   // 당일 근무가 마감되는 간병인은 정규 급여 주기와 상관없이 자동으로 최종 정산 건 추가
@@ -9911,21 +9915,18 @@ function showCalDetail(dateStr) {
           + '</div></div>';
       }
     }
-    var finalUnpaidEntry = findUnpaidPay(cg.id, dateStr, '최종 정산 (근무 마감)');
-    var finalUnpaidHtml = finalUnpaidEntry
-      ? '<div style="margin-top:6px;padding:6px 8px;background:#FEE2E2;border-radius:6px;font-size:11px;color:var(--red);font-weight:700">⚠️ 미지급 (등록일: ' + finalUnpaidEntry.markedAt + ')</div>'
-        + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="releasePayUnpaid(\'' + finalUnpaidEntry.id + '\')">✅ 미지급 해제</button>'
-      : '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center;border-color:var(--red);color:var(--red)" onclick="markPayUnpaid(\'' + cg.id + '\',\'' + dateStr + '\',\'최종 정산 (근무 마감)\',' + settleAmount + ')">⚠️ 미지급 체크</button>';
     payEvents.push({ time: '', html:
       '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-      + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 최종 정산 (근무 마감)' + (wasAdjusted?' [주말·공휴일 조정]':'') + '</div>'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
+      + '<span style="font-size:11px;font-weight:700;color:var(--amber)">💰 최종 정산 (근무 마감)' + (wasAdjusted?' [주말·공휴일 조정]':'') + '</span>'
+      + unpaidToggleHtml(cg.id, dateStr, '최종 정산 (근무 마감)', settleAmount)
+      + '</div>'
       + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
       + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + settleAmount.toLocaleString() + '원</div>'
       + '<div style="font-size:11px;color:var(--gray);margin-top:2px">총 급여 ' + totalOwed.toLocaleString() + '원 − 기지급 ' + alreadyPaid.toLocaleString() + '원</div>'
       + bankHtml
       + reserveStr
       + expenseHtml
-      + finalUnpaidHtml
       + '</div>' });
   });
   // ── assignHistory 기반 미정산 이력 복구 ──
@@ -10068,12 +10069,14 @@ function showCalDetail(dateStr) {
       var bankHtml = u.bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + u.bankStr + '</div>' : '';
       unpaidReminderEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:#FEE2E2;border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">⚠️ 미지급 (원래 지급일: ' + u.origDate + ')</div>'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
+        + '<span style="font-size:11px;font-weight:700;color:var(--red)">⚠️ 미지급 (원래 지급일: ' + u.origDate + ')</span>'
+        + '<span style="font-size:10px;font-weight:600;color:var(--red);border:1px solid var(--red);padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayUnpaid(\'' + u.id + '\')">해제</span>'
+        + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + (u.cgName||'') + (u.ptStr||'') + '</div>'
         + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (u.label||'') + '</div>'
         + (u.amount ? '<div style="font-size:15px;font-weight:900;color:var(--red);margin-top:4px">' + Number(u.amount).toLocaleString() + '원</div>' : '')
         + bankHtml
-        + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="releasePayUnpaid(\'' + u.id + '\')">✅ 미지급 해제</button>'
         + '</div>' });
     });
   }
