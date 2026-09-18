@@ -2135,6 +2135,24 @@ function addDeletedPtId(id) {
 }
 function clearDeletedPtIds() { localStorage.removeItem('cnc_deletedPtIds'); }
 
+// 삭제된 ID - 블랙리스트/업무일지/알림용 (patients/caregivers와 동일한 원리를 컬렉션 인자화해서 재사용)
+// localStorage 키: cnc_deletedIds_<collection>
+function getDeletedIds(collection) {
+  try {
+    const raw = JSON.parse(localStorage.getItem('cnc_deletedIds_' + collection) || '{}');
+    return new Set(Object.keys(raw));
+  } catch(e) { return new Set(); }
+}
+function addDeletedId(collection, id) {
+  try {
+    const key = 'cnc_deletedIds_' + collection;
+    const raw = JSON.parse(localStorage.getItem(key) || '{}');
+    raw[String(id)] = Date.now();
+    localStorage.setItem(key, JSON.stringify(raw));
+  } catch(e) {}
+}
+function clearDeletedIds(collection) { localStorage.removeItem('cnc_deletedIds_' + collection); }
+
 // 삭제된 근무이력(assignHistory) 항목 - 동일 방식(localStorage, cgId별로 관리)
 // mergeCg()의 assignHistory 병합은 "절대 유실 방지" 원칙으로 로컬∪원격을 항상 합치는데,
 // 그 규칙 때문에 사용자가 deleteAssignHistoryEntry()로 명시적으로 지운 항목이 아직 지워지지
@@ -2205,7 +2223,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_16_02';
+const APP_BUILD = '26_09_18_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -2595,11 +2613,31 @@ function attachFirebaseListener() {
     const fbNotices     = objToArrById(d.notices);
 
     // id 있는 컬렉션 공용 병합: Firebase 우선 + 아직 동기화 안 된 로컬 신규 항목만 보존
-    function mergeIdCollection(localArr, fbArr, collectionName) {
+    // deletionProtected=true인 컬렉션(블랙리스트/업무일지/알림)은 patients/caregivers와 동일하게:
+    //   1) 로컬에서 지웠는데 아직 Firebase에서 완전히 안 지워진 항목은 되살리지 않음
+    //   2) 예전에 한 번이라도 동기화된 적 있는 로컬 항목이 지금 Firebase에 없다면
+    //      = 다른 기기에서 삭제된 것으로 간주하고 로컬에서도 제거 (요청 없는 4개 컬렉션은 인자 생략 → 기존 동작 100% 동일)
+    function mergeIdCollection(localArr, fbArr, collectionName, deletionProtected) {
       if(!fbArr || fbArr.length === 0) return localArr;
-      const fbIds = new Set(fbArr.map(x=>String(x.id)));
-      const localOnly = (localArr||[]).filter(x => x && x.id!=null && !fbIds.has(String(x.id)));
-      const merged = collectionName ? fbArr.map(fbItem => {
+
+      let workingFb = fbArr;
+      if(deletionProtected) {
+        const deletedIds = getDeletedIds(collectionName);
+        if(deletedIds.size > 0) {
+          const stillInFb = fbArr.some(x => x && deletedIds.has(String(x.id)));
+          if(!stillInFb) clearDeletedIds(collectionName); // Firebase에서도 실제로 사라진 게 확인되면 tombstone 해제
+          workingFb = fbArr.filter(x => !x || !deletedIds.has(String(x.id)));
+        }
+      }
+
+      const fbIds = new Set(workingFb.map(x=>String(x.id)));
+      const syncedIds = deletionProtected ? new Set(Object.keys(_lastSyncedById[collectionName] || {})) : null;
+      const localOnly = (localArr||[]).filter(x => {
+        if(!x || x.id==null || fbIds.has(String(x.id))) return false;
+        if(syncedIds && syncedIds.has(String(x.id))) return false; // 이미 동기화됐었는데 지금 없음 = 삭제된 것
+        return true;
+      });
+      const merged = collectionName ? workingFb.map(fbItem => {
         if(!fbItem || fbItem.id==null) return fbItem;
         const local = (localArr||[]).find(x => x && String(x.id)===String(fbItem.id));
         if(!local) return fbItem;
@@ -2609,7 +2647,7 @@ function attachFirebaseListener() {
         if(local._ts && fbItem._ts) return local._ts >= fbItem._ts ? local : fbItem;
         // 시각 정보가 없는 예전 데이터는 기존처럼 Firebase 값을 기본으로 사용
         return fbItem;
-      }) : fbArr;
+      }) : workingFb;
       return [...merged, ...localOnly];
     }
 
@@ -2791,7 +2829,7 @@ function attachFirebaseListener() {
       localStorage.setItem('cnc_rptlogs', JSON.stringify(reportLogs));
     }
     if(fbBlacklist.length > 0) {
-      blacklist = mergeIdCollection(blacklist, fbBlacklist, 'blacklist');
+      blacklist = mergeIdCollection(blacklist, fbBlacklist, 'blacklist', true);
       localStorage.setItem('cnc_blacklist', JSON.stringify(blacklist));
     }
     if(d.cfg && typeof d.cfg === 'object') {
@@ -2812,11 +2850,11 @@ function attachFirebaseListener() {
       localStorage.setItem('cnc_cfg', JSON.stringify(cfg));
     }
     if(fbMemos.length > 0) {
-      memos = mergeIdCollection(memos, fbMemos, 'memos');
+      memos = mergeIdCollection(memos, fbMemos, 'memos', true);
       localStorage.setItem('cnc_memos', JSON.stringify(memos));
     }
     if(fbNotices.length > 0) {
-      notices = mergeIdCollection(notices, fbNotices, 'notices');
+      notices = mergeIdCollection(notices, fbNotices, 'notices', true);
       localStorage.setItem('cnc_notices', JSON.stringify(notices));
     }
 
@@ -9391,6 +9429,7 @@ function saveBlacklistEntry() {
 function deleteBlacklistEntry(id) {
   if(!confirm('블랙리스트에서 삭제할까요?')) return;
   blacklist = blacklist.filter(b=>String(b.id)!==String(id));
+  addDeletedId('blacklist', id); // Firebase 복원 방지
   save();
   renderBlacklist();
   toast('삭제됐어요');
@@ -10355,6 +10394,7 @@ function deleteNoticeEntry() {
 
 function deleteNoticeById(id) {
   notices = notices.filter(n=>String(n.id)!==String(id));
+  addDeletedId('notices', id); // Firebase 복원 방지
   save(); renderNotices();
   toast('삭제됐어요');
 }
@@ -10591,6 +10631,7 @@ function saveMemoEntry() {
 function deleteMemoEntry() {
   if(!editMemoId || !confirm('이 일지를 삭제할까요?')) return;
   memos = memos.filter(m=>String(m.id)!==String(editMemoId));
+  addDeletedId('memos', editMemoId); // Firebase 복원 방지
   save(); renderMemo();
   document.getElementById('memo-editor').style.display = 'none';
   editMemoId = null;
