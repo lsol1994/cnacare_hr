@@ -2246,7 +2246,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_21_02';
+const APP_BUILD = '26_09_21_03';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3778,7 +3778,7 @@ function ptRowHTML(p) {
           </label>
         </div>
         ${p.status==='매칭완료'?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="openExtendPatient('${p.id}')">📅 연장</button>`:''}
-        ${(p.status==='매칭완료' && !p.recruitInfo)?`<button class="btn btn-sm" style="border-color:var(--green);color:var(--green)" onclick="openDirectSwap('${p.id}')">🔀 맞교체</button>`:''}
+        ${(p.status==='매칭완료' && !p.recruitInfo)?`<button class="btn btn-sm" style="border-color:var(--green);color:var(--green)" onclick="openDirectSwap('${p.id}')">🔀 맞교체</button><button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="openGapSwap('${p.id}')">⏱️ 교체(시차)</button>`:''}
         <button class="btn btn-sm" onclick="doCopy(patients.find(x=>String(x.id)==='${p.id}')?._editedPost || buildPost(patients.find(x=>String(x.id)==='${p.id}')))">
           <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>복사
         </button>
@@ -3946,9 +3946,10 @@ function openPatient(id) {
     <div style="font-size:12px;color:var(--gray-lt);padding:6px 0">아직 매칭된 간병인이 없어요</div>`}
     ${p.status==='매칭완료' && p.recruitInfo ? `
     <div class="hr"></div>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--amber);margin-bottom:8px">${p.recruitInfo.reason==='맞교체(예약)'?'🔀 맞교체 예정':'🔜 연장 후 예약 교체 진행중'}</div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--amber);margin-bottom:8px">${p.recruitInfo.reason==='맞교체(예약)'?'🔀 맞교체 예정':(p.recruitInfo.reason==='교체(시차)'?'⏱️ 교체(시차) 예정':'🔜 연장 후 예약 교체 진행중')}</div>
     <div style="background:var(--amber-lt);border-radius:var(--rsm);padding:10px 14px;margin-bottom:8px;font-size:12px;color:#92400e">
-      새 간병인 시작 예정일: <b>${p.recruitInfo.startDate||'—'} ${p.recruitInfo.startTime||''}</b><br>
+      ${p.recruitInfo.reason==='교체(시차)' ? `기존 간병인 퇴실 예정: <b>${cg?cg.endDate:''} ${cg?(cg.endTime||''):''}</b><br>` : ''}
+      새 간병인 ${p.recruitInfo.reason==='교체(시차)'?'입실':'시작'} 예정일: <b>${p.recruitInfo.startDate||'—'} ${p.recruitInfo.startTime||''}</b><br>
       (기존 간병인 근무 종료 후 자동으로 교체돼요)
     </div>
     ${p.recruitInfo.reason==='맞교체(예약)' ? `
@@ -3956,15 +3957,20 @@ function openPatient(id) {
       <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="openDirectSwap('${p.id}')">🕐 맞교체 일정 변경</button>
       <button class="btn btn-sm" style="flex:1;justify-content:center;border-color:var(--red);color:var(--red)" onclick="cancelDirectSwap('${p.id}')">✕ 맞교체 취소</button>
     </div>` : ''}
+    ${p.recruitInfo.reason==='교체(시차)' ? `
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="openGapSwap('${p.id}')">🕐 교체(시차) 일정 변경</button>
+      <button class="btn btn-sm" style="flex:1;justify-content:center;border-color:var(--red);color:var(--red)" onclick="cancelGapSwap('${p.id}')">✕ 교체(시차) 취소</button>
+    </div>` : ''}
     ${p.pendingReplacement ? `
     <div style="background:var(--green-lt);border-radius:var(--rsm);padding:10px 14px;display:flex;align-items:center;gap:12px">
       <div style="flex:1">
         <div style="font-size:13px;font-weight:700">🔜 ${p.pendingReplacement.name} <span style="font-size:11px;font-weight:400;color:var(--gray)">${p.pendingReplacement.age?p.pendingReplacement.age+'세':''} ${p.pendingReplacement.gender||''}</span></div>
         <div style="font-size:11px;color:var(--gray);margin-top:2px">${formatPhone(p.pendingReplacement.phone)||''}</div>
       </div>
-      <button class="btn btn-sm" onclick="openReplacementForm('${p.id}')">수정</button>
-    </div>` : `
-    <button class="btn btn-teal btn-sm" onclick="openReplacementForm('${p.id}')">🔜 예정 교체 간병인 등록</button>`}
+      ${p.recruitInfo.reason==='교체(시차)' ? '' : `<button class="btn btn-sm" onclick="openReplacementForm('${p.id}')">수정</button>`}
+    </div>` : (p.recruitInfo.reason==='교체(시차)' ? '' : `
+    <button class="btn btn-teal btn-sm" onclick="openReplacementForm('${p.id}')">🔜 예정 교체 간병인 등록</button>`)}
     ` : ''}
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:6px">발송 기록 (${pLogs.length}건)</div>
@@ -7056,6 +7062,277 @@ function cancelDirectSwap(ptId) {
   renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
   openPatient(ptId); // 환자 상세 팝업 내용 새로고침 (맞교체 예정 배너 제거)
   toast('✅ 맞교체가 취소됐어요. '+cg.name+'님이 계속 근무해요.');
+}
+
+// ══ 교체(시차): 기존 간병인 퇴실시각과 새 간병인 입실시각이 서로 다른 경우 전용 ══
+// (2026-09-21 추가) "맞교체"는 A 마감시각=B 시작시각이 완전히 같은 경우만 지원한다
+// (confirmDirectSwap이 하나의 일시를 cg.endDate/endTime과 p.recruitInfo.startDate/startTime에
+// 동시에 채워넣는 구조). 실제로는 인수인계 공백(예: A 14:30 퇴실 / B 16:00 입실)이 생기는
+// 경우가 있는데, 기존 구조로 무리하게 처리하면 checkAutoEnd()가 A 마감시각이 지나는 순간
+// pendingReplacement가 비어있다고 판단해 환자를 "모집중"으로 되돌려버리는 문제(맞교체가
+// "풀리는" 현상)가 생긴다. 이 기능은 퇴실/입실 예약과 동시에 교체 간병인 정보까지 한 번에
+// 저장해서(=pendingReplacement가 처음부터 채워져 있음) 그 문제 자체를 피해간다. 기존
+// "맞교체"(openDirectSwap 등)는 이 기능과 완전히 별개 진입점으로, 일절 손대지 않았다.
+function openGapSwap(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  if(!p) return;
+  const cg = caregivers.find(c=>String(c.patientId)===String(ptId)&&c.workStatus!=='종료');
+  if(!cg) { toast('현재 매칭된 간병인이 없어요', true); return; }
+  if(!p.endDate) { toast('환자 마감일을 먼저 등록해주세요', true); return; }
+  const isEdit = !!(p.recruitInfo && p.recruitInfo.reason === '교체(시차)');
+  const rep = isEdit ? (p.pendingReplacement || {}) : {};
+  const prefOutDate = isEdit ? (cg.endDate||'') : '';
+  const prefOutTime = isEdit ? (cg.endTime||'') : '';
+  const prefInDate  = isEdit ? (p.recruitInfo.startDate||'') : '';
+  const prefInTime  = isEdit ? (p.recruitInfo.startTime||'') : '';
+  const ptIdEsc = String(ptId).replace(/'/g,"\\'");
+  document.getElementById('swap-title').textContent = isEdit
+    ? '🕐 ' + p.name + ' 교체(시차) 일정 변경'
+    : '⏱️ ' + p.name + ' 간병인 교체(퇴실·입실 시간차 있음)';
+  const candidates = getSelectableReplacementCgs(ptId);
+  const selectOptionsHtml = '<option value="">✏️ 직접 입력</option>' + candidates.map(c =>
+    '<option value="' + c.id + '">' + c.name + ' (' + c.workStatus + (c.phone?' · '+formatPhone(c.phone):'') + ')</option>'
+  ).join('');
+  document.getElementById('swap-body').innerHTML = '<div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;margin-bottom:1rem;font-size:12px;color:var(--gray)">'
+    + '<div>현재 담당 간병인: <b style="color:var(--black)">' + cg.name + '</b></div>'
+    + '<div>환자 계약 마감일: <b style="color:var(--black)">' + p.endDate + ' ' + (p.endTime||'') + '</b> <span style="color:var(--teal)">(그대로 유지)</span></div>'
+    + '</div>'
+    + '<div class="field"><label>기존 간병인(' + cg.name + ') 퇴실 예정 <span style="color:var(--red)">*</span></label>'
+    + '<div class="g2"><input type="date" id="gswap-out-date" value="' + prefOutDate + '" oninput="onGapSwapPreview(&quot;' + ptIdEsc + '&quot;)">'
+    + '<input type="time" id="gswap-out-time" value="' + prefOutTime + '" oninput="onGapSwapPreview(&quot;' + ptIdEsc + '&quot;)"></div></div>'
+    + '<div class="field"><label>새 간병인 입실 예정 <span style="color:var(--red)">*</span></label>'
+    + '<div class="g2"><input type="date" id="gswap-in-date" value="' + prefInDate + '" oninput="onGapSwapPreview(&quot;' + ptIdEsc + '&quot;)">'
+    + '<input type="time" id="gswap-in-time" value="' + prefInTime + '" oninput="onGapSwapPreview(&quot;' + ptIdEsc + '&quot;)"></div></div>'
+    + '<div style="background:var(--teal-lt);border-radius:var(--rsm);padding:8px 12px;margin-bottom:.875rem;font-size:12px;color:var(--teal);font-weight:600;min-height:32px" id="gswap-preview"></div>'
+    + '<div class="hr"></div>'
+    + '<div class="field"><label>교체할 새 간병인 <span style="font-size:10px;font-weight:400;color:var(--gray)">(등록된 간병인을 고르면 정보가 자동으로 채워져요)</span></label>'
+    + '<select id="gswap-cg-select" onchange="gapFillFromCg(&quot;' + ptIdEsc + '&quot;, this.value)">' + selectOptionsHtml + '</select></div>'
+    + '<div class="g2">'
+    + '<div class="field"><label>이름 <span style="color:var(--red)">*</span></label><input type="text" id="gswap-name" value="' + (rep.name||'') + '"></div>'
+    + '<div class="field"><label>나이</label><input type="number" id="gswap-age" value="' + (rep.age||'') + '"></div>'
+    + '</div><div class="g2">'
+    + '<div class="field"><label>성별</label><select id="gswap-gender"><option value="">선택</option><option value="여자"' + (rep.gender==='여자'?' selected':'') + '>여자</option><option value="남자"' + (rep.gender==='남자'?' selected':'') + '>남자</option></select></div>'
+    + '<div class="field"><label>연락처</label><input type="tel" id="gswap-phone" value="' + (rep.phone||'') + '"></div>'
+    + '</div>'
+    + '<div class="field"><label>경력</label><input type="text" id="gswap-career" value="' + (rep.career||'') + '"></div>'
+    + '<div class="field"><label>주민번호 <span style="font-size:10px;font-weight:400;color:var(--gray)">(선택)</span></label><input type="text" id="gswap-ssn" value="' + (rep.ssn||'') + '" placeholder="000000-0000000"></div>'
+    + '<div class="g3">'
+    + '<div class="field"><label>은행명</label><input type="text" id="gswap-bankName" value="' + (rep.bankName||'') + '"></div>'
+    + '<div class="field"><label>계좌번호</label><input type="text" id="gswap-bankAccount" value="' + (rep.bankAccount||'') + '"></div>'
+    + '<div class="field"><label>예금주</label><input type="text" id="gswap-bankHolder" value="' + (rep.bankHolder||'') + '"></div>'
+    + '</div>'
+    + '<div class="field"><label>메모</label><textarea id="gswap-note">' + (rep.note||'') + '</textarea></div>'
+    + '<div style="font-size:11px;color:var(--gray);margin-bottom:.875rem">퇴실 시각부터 입실 시각까지는 담당 간병인이 없는 공백으로 처리돼요. 입실 시각이 되면 새 간병인이 자동으로 근무중 전환돼요.</div>'
+    + '<div style="display:flex;gap:8px;margin-top:1rem">'
+    + '<button class="btn btn-teal" style="flex:1;justify-content:center" onclick="confirmGapSwap(&quot;' + ptIdEsc + '&quot;)">' + (isEdit ? '변경 저장' : '교체 예약') + '</button>'
+    + '<button class="btn" onclick="closeOverlay(&quot;swap-overlay&quot;)">취소</button></div>';
+  document.getElementById('swap-overlay').classList.add('open');
+  if(isEdit) onGapSwapPreview(ptId);
+}
+
+// 퇴실일이 바뀌었는데 입실일이 아직 비어있으면 같은 날짜로 자동 채워줌(편의) + 미리보기 텍스트 갱신
+function onGapSwapPreview(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  const outDateEl = document.getElementById('gswap-out-date');
+  const inDateEl  = document.getElementById('gswap-in-date');
+  const prev = document.getElementById('gswap-preview');
+  if(!outDateEl || !inDateEl || !prev) return;
+  if(outDateEl.value && !inDateEl.value) inDateEl.value = outDateEl.value; // 편의: 입실일 비어있으면 퇴실일과 동일하게
+  const outDate = outDateEl.value, inDate = inDateEl.value;
+  const outTime = (document.getElementById('gswap-out-time')||{}).value || '';
+  const inTime  = (document.getElementById('gswap-in-time')||{}).value || '';
+  if(!outDate || !inDate || !p || !p.endDate) { prev.textContent=''; return; }
+  if(parseLocalDate(inDate) > parseLocalDate(p.endDate) || parseLocalDate(outDate) > parseLocalDate(p.endDate)) {
+    prev.textContent = '⚠️ 환자 마감일보다 늦을 수 없어요'; prev.style.color = 'var(--red)'; return;
+  }
+  const outMoment = new Date(outDate + 'T' + (outTime||'00:00'));
+  const inMoment   = new Date(inDate + 'T' + (inTime||'00:00'));
+  if(inMoment < outMoment) {
+    prev.textContent = '⚠️ 입실 시각이 퇴실 시각보다 빠를 수 없어요'; prev.style.color = 'var(--red)'; return;
+  }
+  const gapMin = Math.round((inMoment - outMoment) / 60000);
+  const days = Math.round((parseLocalDate(p.endDate)-parseLocalDate(inDate))/86400000);
+  const gapTxt = gapMin > 0 ? ('공백 ' + Math.floor(gapMin/60) + '시간' + (gapMin%60 ? ' '+(gapMin%60)+'분' : '')) : '공백 없음(동시 교대)';
+  prev.textContent = '→ ' + gapTxt + ' · 새 간병인 근무기간: ' + days + '일';
+  prev.style.color = 'var(--teal)';
+}
+
+// 드롭다운에서 기존 간병인을 선택하면 그 정보로 입력칸을 채워줌 (직접 입력 선택 시 기존 값 유지)
+function gapFillFromCg(ptId, cgId) {
+  if(!cgId) return;
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg) return;
+  const setVal = (id, v) => { const el = document.getElementById(id); if(el) el.value = v || ''; };
+  setVal('gswap-name', cg.name);
+  setVal('gswap-age', cg.age);
+  const genderEl = document.getElementById('gswap-gender');
+  if(genderEl) genderEl.value = cg.gender || '';
+  setVal('gswap-phone', cg.phone);
+  setVal('gswap-career', cg.career);
+  setVal('gswap-ssn', cg.ssn);
+  setVal('gswap-bankName', cg.bankName);
+  setVal('gswap-bankAccount', cg.bankAccount);
+  setVal('gswap-bankHolder', cg.bankHolder);
+  toast('✅ ' + cg.name + '님 정보를 불러왔어요. 필요하면 수정 후 저장하세요.');
+}
+
+function confirmGapSwap(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  if(!p) return;
+  const cg = caregivers.find(c=>String(c.patientId)===String(ptId)&&c.workStatus!=='종료');
+  if(!cg) { toast('현재 매칭된 간병인이 없어요', true); return; }
+  if(!p.endDate) { toast('환자 마감일이 없어요', true); return; }
+  const outDate = (document.getElementById('gswap-out-date')||{}).value || '';
+  const outTime = (document.getElementById('gswap-out-time')||{}).value || '';
+  const inDate  = (document.getElementById('gswap-in-date')||{}).value || '';
+  const inTime  = (document.getElementById('gswap-in-time')||{}).value || '';
+  const name    = (document.getElementById('gswap-name')||{}).value.trim() || '';
+  if(!outDate) { toast('퇴실 예정일을 입력해주세요', true); return; }
+  if(!inDate)  { toast('입실 예정일을 입력해주세요', true); return; }
+  if(!name)    { toast('새 간병인 이름을 입력해주세요', true); return; }
+  if(parseLocalDate(outDate) > parseLocalDate(p.endDate)) { toast('퇴실 예정일은 환자 마감일보다 늦을 수 없어요', true); return; }
+  if(parseLocalDate(inDate)  > parseLocalDate(p.endDate)) { toast('입실 예정일은 환자 마감일보다 늦을 수 없어요', true); return; }
+  if(cg.startDate && parseLocalDate(outDate) < parseLocalDate(cg.startDate)) { toast('퇴실 예정일은 현재 간병인 시작일보다 빠를 수 없어요', true); return; }
+  const outMoment = new Date(outDate + 'T' + (outTime||'00:00'));
+  const inMoment   = new Date(inDate + 'T' + (inTime||'00:00'));
+  if(inMoment < outMoment) { toast('입실 시각은 퇴실 시각보다 빠를 수 없어요', true); return; }
+
+  const isEdit = !!(p.recruitInfo && p.recruitInfo.reason === '교체(시차)');
+  const oldCgEndDate = cg.endDate; // 단축되기 전 마감일 (유령 간병일지 정리용)
+
+  // 기존 간병인 마감일만 퇴실일로 단축 (환자 마감일은 건드리지 않음 — 맞교체와 동일한 원칙)
+  cg.endDate = outDate; cg.endTime = outTime;
+  if(cg.startDate) {
+    const cgDays = Math.round((parseLocalDate(outDate)-parseLocalDate(cg.startDate))/86400000);
+    if(cgDays >= 0) cg.duration = cgDays+'일';
+  }
+
+  const repDays = Math.round((parseLocalDate(p.endDate)-parseLocalDate(inDate))/86400000);
+  p.recruitInfo = {
+    startDate: inDate, startTime: inTime, endDate: p.endDate,
+    duration: repDays+'일', reason: '교체(시차)'
+  };
+  // 맞교체와 달리, 예약과 동시에 교체 간병인 정보까지 함께 저장 — checkAutoEnd()가 퇴실시각에
+  // pendingReplacement 없음으로 판단해 환자를 모집중으로 되돌리는 문제를 원천적으로 막기 위함.
+  p.pendingReplacement = {
+    name,
+    age: (document.getElementById('gswap-age')||{}).value.trim() || '',
+    gender: (document.getElementById('gswap-gender')||{}).value || '',
+    phone: (document.getElementById('gswap-phone')||{}).value.trim() || '',
+    career: (document.getElementById('gswap-career')||{}).value.trim() || '',
+    ssn: (document.getElementById('gswap-ssn')||{}).value.trim() || '',
+    bankName: (document.getElementById('gswap-bankName')||{}).value.trim() || '',
+    bankAccount: (document.getElementById('gswap-bankAccount')||{}).value.trim() || '',
+    bankHolder: (document.getElementById('gswap-bankHolder')||{}).value.trim() || '',
+    note: (document.getElementById('gswap-note')||{}).value.trim() || ''
+  };
+  markCgEdited(cg.id);
+  markPtEdited(p.id);
+  save();
+  trimAttendanceGhosts(String(cg.id), oldCgEndDate, outDate);
+  autoFillAttendance(String(cg.id));
+  refreshCalendarIfOpen();
+
+  // 입실 예정시각이 이미 지났으면(예: 늦게 등록) 기다리지 않고 즉시 인계 처리 — saveReplacementInfo와 동일한 패턴
+  // (시각 미입력 시 00:00 기준 — 마감시각용 calcEndDt의 23:59 기본값과 달리, 입실은 "그 날 됐으면
+  // 시작"으로 보는 게 checkAutoStart의 시작시간 처리 관례와 일치해서 promotePendingReplacement
+  // 내부 판정과 동일하게 맞춤)
+  let promotedNow = null;
+  let handoverDt = null;
+  if(inDate) {
+    const [_ih, _im] = (inTime || '00:00').split(':').map(Number);
+    handoverDt = parseLocalDate(inDate);
+    if(handoverDt) handoverDt.setHours(_ih||0, _im||0, 0, 0);
+  }
+  if(handoverDt && new Date() >= handoverDt) {
+    promotedNow = promotePendingReplacement(p, outDate, outTime, inDate, inTime);
+    if(promotedNow) save();
+  }
+
+  closeOverlay('swap-overlay'); renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
+  if(document.getElementById('pt-overlay') && document.getElementById('pt-overlay').classList.contains('open')) openPatient(ptId);
+
+  // 업체보고 - 교체보고 자동 작성 (saveReplacementInfo와 동일한 패턴)
+  const arriveDate = promotedNow ? promotedNow.startDate : inDate;
+  const arriveTime = promotedNow ? promotedNow.startTime : inTime;
+  const replaceCg  = promotedNow || p.pendingReplacement;
+  const replaceMsg = buildReplaceReport(p, arriveDate, arriveTime, replaceCg);
+  const now2 = new Date();
+  const timeStr = now2.toLocaleDateString('ko-KR')+' '+now2.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
+  const _rptId4 = genId();
+  reportLogs.unshift({
+    id: _rptId4, patientId: String(p.id), patientName: p.name, type: 'replace',
+    time: timeStr, msg: replaceMsg, auto: true
+  });
+  markReportLogEdited(_rptId4);
+  save();
+
+  const popup = document.getElementById('remind-popup');
+  document.getElementById('remind-popup-body').innerHTML =
+    `🔄 <strong>${p.name}</strong> 교체보고가 자동 작성됐어요!\n\n` +
+    `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:6px;font-size:12px;white-space:pre-wrap;line-height:1.8">${replaceMsg}</div>`;
+  popup.style.display = 'block';
+  let copyBtn = document.getElementById('remind-copy-btn');
+  if(!copyBtn) {
+    copyBtn = document.createElement('button');
+    copyBtn.id = 'remind-copy-btn';
+    copyBtn.className = 'remind-close';
+    copyBtn.style.marginTop = '6px';
+    popup.appendChild(copyBtn);
+  }
+  copyBtn.textContent = '📋 교체보고 복사';
+  copyBtn.onclick = () => { doCopy(replaceMsg); toast('✅ 교체보고 복사됐어요!'); };
+  if(cfg.sound !== false) playBeep();
+
+  toast(promotedNow
+    ? `✅ 교체 정보 저장! 입실 예정시각이 이미 지나서 ${promotedNow.name}님으로 즉시 교체 처리됐어요.`
+    : (isEdit ? '✅ 교체(시차) 일정이 변경됐어요.' : `✅ 교체 예약됐어요. ${cg.name}님은 ${outDate} ${outTime}까지 근무하고, ${inDate} ${inTime}부터 ${name}님이 근무 시작해요.`));
+}
+
+// ── 교체(시차) 취소: 예약을 취소하고 기존 간병인이 계속 근무하도록 되돌림 ──
+function cancelGapSwap(ptId) {
+  const p = patients.find(x=>String(x.id)===String(ptId));
+  if(!p) return;
+  if(!p.recruitInfo || p.recruitInfo.reason !== '교체(시차)') return;
+  const cg = caregivers.find(c=>String(c.patientId)===String(ptId)&&c.workStatus!=='종료');
+  if(!cg) { toast('현재 매칭된 간병인을 찾을 수 없어요. 데이터를 직접 확인해주세요', true); return; }
+  const repName = (p.pendingReplacement && p.pendingReplacement.name) || '';
+  if(!confirm('교체(시차) 예약을 취소할까요?\n' + cg.name + '님이 원래 마감일(' + (p.endDate||'—') + ' ' + (p.endTime||'') + ')까지 계속 근무하는 것으로 되돌아가요.' + (repName ? '\n등록해둔 교체 예정 간병인(' + repName + ') 정보도 함께 취소돼요.' : ''))) return;
+
+  const oldCgEndDate = cg.endDate;
+  const hadPendingReplacement = !!p.pendingReplacement;
+
+  cg.endDate = p.endDate || '';
+  cg.endTime = p.endTime || '';
+  if(cg.startDate && cg.endDate) {
+    const days = Math.round((parseLocalDate(cg.endDate)-parseLocalDate(cg.startDate))/86400000);
+    if(days >= 0) cg.duration = days+'일';
+  }
+  delete p.recruitInfo;
+  delete p.pendingReplacement;
+
+  if(hadPendingReplacement) {
+    const replaceLogs = reportLogs.filter(l=>String(l.patientId)===String(p.id) && l.type==='replace');
+    if(replaceLogs.length) {
+      const latestId = Math.max(...replaceLogs.map(l=>Number(l.id)||0));
+      reportLogs = reportLogs.filter(l=>!(String(l.patientId)===String(p.id) && l.type==='replace' && Number(l.id)===latestId));
+    }
+  }
+
+  markCgEdited(cg.id);
+  markPtEdited(p.id);
+  save();
+
+  if(oldCgEndDate && oldCgEndDate !== cg.endDate) {
+    const stale = attendance.find(a=>String(a.cgId)===String(cg.id) && (a.inDate===oldCgEndDate || a.date===oldCgEndDate) && a.auto===true);
+    if(stale) { stale.outDate = oldCgEndDate; stale.outTime = '23:59'; markAttendEdited(stale.id); }
+  }
+
+  autoFillAttendance(String(cg.id));
+  refreshCalendarIfOpen();
+  renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
+  openPatient(ptId);
+  toast('✅ 교체(시차) 예약이 취소됐어요. '+cg.name+'님이 계속 근무해요.');
 }
 
 // 예정 교체 간병인으로 고를 수 있는 후보 목록 (예비/대기중(미배정)/종료 풀 + 이 환자의
@@ -12153,11 +12430,22 @@ function showPaySyncWarning(mismatches) {
 // ─── 자동 종료 처리 ───
 // ── 연장 후 예약 교체: 기존 간병인 마감 시 예정된 대체 간병인으로 인계 ──
 // 환자는 계속 "매칭완료" 상태를 유지한 채, 새 간병인 정보로 매칭만 교체된다.
-function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
+// incomingStartDate/incomingStartTime: 새 간병인이 실제로 근무를 "시작"하는 시각.
+// 생략하면(기존 맞교체/연장 후 교체처럼 퇴실=입실이 같은 순간인 경우) outgoingEndDate/Time과
+// 동일하게 취급 — 기존 호출부는 전혀 손대지 않아도 되도록 하위호환 유지.
+// (2026-09-21 추가: 퇴실시각≠입실시각인 "교체(시차)" 기능 지원용 — 전임자 마감시각과
+// 후임자 시작시각이 다를 때, 새 간병인 레코드를 실제 입실시각 기준으로 만들고
+// 그 시각이 아직 안 지났으면 workStatus를 '대기중'으로 등록해 checkAutoStart()가
+// 정상적으로 시간 됐을 때 '근무중'으로 자동 전환하도록 한다.)
+function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime, incomingStartDate, incomingStartTime) {
   if(!pt || !pt.pendingReplacement) return null;
   const rep = pt.pendingReplacement;
   const prevCgName = pt.caregiverName || ''; // 인계 전 기존 간병인 이름 보존
-  const isDirectSwap = !!(pt.recruitInfo && pt.recruitInfo.reason === '맞교체(예약)'); // 삭제 전에 미리 판단
+  const swapReason = pt.recruitInfo && pt.recruitInfo.reason; // 삭제 전에 미리 판단
+  const isDirectSwap = swapReason === '맞교체(예약)';
+  const isGapSwap = swapReason === '교체(시차)';
+  const inDate = incomingStartDate || outgoingEndDate;
+  const inTime = incomingStartDate ? (incomingStartTime || '') : (outgoingEndTime || '');
 
   // ── 퇴장하는 기존 간병인 마감 처리 (journal + 상태) ──
   // ⚠️ 이 함수는 checkAutoEnd() 루프①(정상 케이스 — 거기서 이미 기존 간병인을 먼저 마감
@@ -12183,17 +12471,28 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
     markCgEdited(outgoingCg.id); // Firebase 덮어쓰기 방지 (10초)
   }
 
+  // 입실 예정시각이 아직 안 지났으면(퇴실≠입실인 시차교체의 정상 케이스) '대기중'으로 등록해
+  // checkAutoStart()가 실제 시각이 됐을 때 자동으로 '근무중' 전환하게 한다. 이미 지났으면(기존
+  // 맞교체처럼 즉시 인계되는 경우 포함) 바로 '근무중' 처리 — 기존 동작과 동일.
+  let inDt = null;
+  if(inDate) {
+    const [ih, im] = (inTime || '00:00').split(':').map(Number);
+    inDt = parseLocalDate(inDate);
+    if(inDt) inDt.setHours(ih||0, im||0, 0, 0);
+  }
+  const startsInFuture = !!(inDt && inDt.getTime() > Date.now());
+
   const newCg = {
     id: genId(),
     patientId: String(pt.id),
     regDate: todayStr(),
-    workStatus: '근무중', // 인계 시점 = 시작 시점이므로 바로 근무중 처리
+    workStatus: startsInFuture ? '대기중' : '근무중',
     name: rep.name||'', ssn: rep.ssn||'', age: rep.age||'', gender: rep.gender||'',
     pay: rep.pay || (pt.pay ? String(Math.max(0, Number(pt.pay)-5000)) : ''),
     phone: rep.phone||'',
     bankName: rep.bankName||'', bankAccount: rep.bankAccount||'', bankHolder: rep.bankHolder||'',
     region: rep.region||'', hospital: pt.hospital||'',
-    startDate: outgoingEndDate||'', startTime: outgoingEndTime||'',
+    startDate: inDate||'', startTime: inTime||'',
     endDate: pt.endDate||'', endTime: pt.endTime||'',
     career: rep.career||'', dayOff: rep.dayOff||'', specialty: rep.specialty||'',
     accident: rep.accident||'', feedback: rep.note||''
@@ -12205,7 +12504,7 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime) {
   if(!pt.recruitHistory) pt.recruitHistory = [];
   pt.recruitHistory.push({
     endDate: outgoingEndDate||'', recruitDate: outgoingEndDate||'', recruitTime: outgoingEndTime||'',
-    reason: isDirectSwap ? '맞교체' : '연장 후 예약 교체', prevCg: prevCgName,
+    reason: isGapSwap ? '교체(시차)' : (isDirectSwap ? '맞교체' : '연장 후 예약 교체'), prevCg: prevCgName,
     newCg: newCg.name||'', remainDuration: (pt.recruitInfo && pt.recruitInfo.duration) || '',
     recordedAt: new Date().toLocaleDateString('ko-KR')
   });
@@ -12357,7 +12656,11 @@ function checkAutoEnd() {
     if(pt && pt.status !== '종료') {
       if(pt.pendingReplacement) {
         // 연장 후 예약 교체: 미리 등록해둔 대체 간병인으로 인계 (환자는 계속 매칭 상태 유지)
-        const newCg = promotePendingReplacement(pt, cg.endDate, cg.endTime);
+        // 새 간병인 입실시각은 recruitInfo.startDate/Time을 우선 사용 — 기존 맞교체/연장은 이 값이
+        // cg.endDate/endTime과 항상 같아서 동작 변화 없음. "교체(시차)"는 이 값이 퇴실시각보다
+        // 늦게 잡혀있으므로, 새 간병인이 그 시각까지는 '대기중'으로 등록됨(promotePendingReplacement 참고).
+        const newCg = promotePendingReplacement(pt, cg.endDate, cg.endTime,
+          pt.recruitInfo && pt.recruitInfo.startDate, pt.recruitInfo && pt.recruitInfo.startTime);
         if(newCg) promotedItems.push({pt, newCg});
         changed = true;
         skipEndReport = true;
@@ -12394,7 +12697,8 @@ function checkAutoEnd() {
     if(!pt.pendingReplacement || !pt.recruitInfo || !pt.recruitInfo.startDate) return;
     const handoverDt = calcEndDt(pt.recruitInfo.startDate, pt.recruitInfo.startTime);
     if(!handoverDt || now < handoverDt) return;
-    const newCg = promotePendingReplacement(pt, pt.recruitInfo.startDate, pt.recruitInfo.startTime);
+    const newCg = promotePendingReplacement(pt, pt.recruitInfo.startDate, pt.recruitInfo.startTime,
+      pt.recruitInfo.startDate, pt.recruitInfo.startTime);
     if(newCg) {
       promotedItems.push({pt, newCg});
       changed = true;
