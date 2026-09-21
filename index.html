@@ -2246,7 +2246,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_21_01';
+const APP_BUILD = '26_09_21_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -2777,9 +2777,25 @@ function attachFirebaseListener() {
             winner = local._ts >= dc._ts ? local : dc;
           } else {
             // 시각 정보가 없는 예전 데이터는 기존 휴리스틱 규칙으로 판단 (하위 호환)
+            // ⚠️ 2026-09-21 사고 이후 수정: 예전엔 "local이 종료인데 dc가 아직 근무중"인
+            // 방향만 보호했음 — 그 반대(dc는 이미 종료됐는데 local이 _ts 없는 예전 데이터라
+            // 여전히 근무중인 경우)는 보호가 없어서, _ts가 없는 낡은 기기가 다른 기기의
+            // 정상 종료 처리를 되돌릴 수 있었음. 양방향으로 동일하게 보호하되, 종료된 쪽의
+            // 마감일보다 "이후" 시작일을 가진 근무중 쪽은 같은 근무건이 아니라 재배정으로
+            // 생긴 새 근무일 수 있으므로(checkAutoEnd의 ③ 정합성 복구와 동일한 기준) 이
+            // 경우엔 보호를 적용하지 않고 그대로 dc를 기본값으로 둔다.
             winner = dc;
-            if(local.workStatus==='종료' && dc.workStatus!=='종료') winner = local;
-            else if(local.patientId && String(local.patientId)!==String(dc.patientId||'')) winner = local;
+            const localTerminal = local.workStatus === '종료';
+            const dcTerminal    = dc.workStatus === '종료';
+            if(localTerminal && !dcTerminal) {
+              const isNewerAssignment = dc.startDate && local.endDate && dc.startDate > local.endDate;
+              if(!isNewerAssignment) winner = local;
+            } else if(dcTerminal && !localTerminal) {
+              const isNewerAssignment = local.startDate && dc.endDate && local.startDate > dc.endDate;
+              winner = isNewerAssignment ? local : dc;
+            } else if(local.patientId && String(local.patientId)!==String(dc.patientId||'')) {
+              winner = local;
+            }
           }
 
           // 보험 정보는 승자와 무관하게, 값이 있는 쪽을 항상 보존
@@ -4210,6 +4226,20 @@ function savePatientEdit(id) {
   // 매칭된 간병인 업데이트
   const matched = caregivers.filter(c=>String(c.patientId)===String(p.id));
   if(matched.length > 0) {
+    // ⚠️ 2026-09-21 사고 이후 수정: 아래서 실제로 값이 바뀐 간병인만 markCgEdited()로
+    // 보호해야 함 — 예전엔 이 환자와 매칭된(로컬 기준) 간병인 전원을 무조건 markCgEdited()
+    // 했는데, 이 PC의 로컬 데이터가 낡아서(다른 기기가 이미 종료/맞교체 처리한 걸 아직
+    // 못 받은 경우) 간병인과 무관한 환자 정보만 고쳐도 그 낡은 간병인 레코드의 _ts가
+    // "지금 막 수정됨"으로 갱신돼버림 — 그러면 정작 다른 기기가 처리한 진짜 종료 기록이
+    // 이 오염된(하지만 아무 내용도 안 바뀐) _ts에 밀려서 동기화 때 되돌아가는 사고로
+    // 이어짐(4번 PC에서 종료 처리한 간병인이 1번 PC엔 계속 "근무중"으로 남아 주급을
+    // 지급할 뻔했던 사고). 그래서 적용 전 값을 스냅샷으로 남겨두고, 실제로 달라진
+    // 간병인만 골라서 markCgEdited()를 호출하도록 바꿈.
+    const _beforeSnap = new Map(matched.map(c => [c.id, JSON.stringify({
+      pay: c.pay, endDate: c.endDate, endTime: c.endTime,
+      startDate: c.startDate, startTime: c.startTime, duration: c.duration
+    })]));
+
     // ① 간병비 자동 업데이트 (환자 일급 - 5,000원)
     if(p.pay) {
       const cgPay = Math.max(0, Number(p.pay) - 5000);
@@ -4245,7 +4275,15 @@ function savePatientEdit(id) {
     }
 
     // 간병일지 동기화 + 캘린더(급여·지출내용) 새로고침
-    matched.forEach(c => { markCgEdited(c.id); autoFillAttendance(String(c.id)); }); // Firebase 덮어쓰기 방지 (10초)
+    // "최근 수정" 보호(markCgEdited)는 실제로 값이 바뀐 간병인에게만 적용 — 위 사고 방지
+    matched.forEach(c => {
+      const _after = JSON.stringify({
+        pay: c.pay, endDate: c.endDate, endTime: c.endTime,
+        startDate: c.startDate, startTime: c.startTime, duration: c.duration
+      });
+      if(_beforeSnap.get(c.id) !== _after) markCgEdited(c.id); // Firebase 덮어쓰기 방지 (2분) — 실제 변경 시에만
+      autoFillAttendance(String(c.id));
+    });
     refreshCalendarIfOpen();
 
     toast(`✅ 환자 정보 수정 + 간병인 정보 동시 업데이트됐어요`);
@@ -12014,6 +12052,8 @@ function startRemind() {
   setInterval(autoFillAllAttendance, 60 * 60 * 1000);
   // 5분마다 자동저장
   setInterval(autoSave, 5 * 60 * 1000);
+  // 오늘 급여 대상 간병인 최신 상태 재확인 15분마다 (안전망, 2026-09-21 사고 이후 추가)
+  setInterval(verifyTodaysPayCaregivers, 15 * 60 * 1000);
   // 실시간 연결이 오류 콜백조차 없이 조용히 끊기는 드문 경우까지 대비해서,
   // 10분마다 리스너를 통째로 다시 연결함 (정상 연결 상태에서도 안전하게 반복 가능한 가벼운 작업)
   setInterval(() => {
@@ -12042,6 +12082,72 @@ function startRemind() {
   setTimeout(checkUpcomingArrivals, 2700);
   setTimeout(checkAllRemind, 5000);  // 하루 1회 통합 알림 (앱 시작 시)
   setTimeout(autoFillAllAttendance, 7000);
+  setTimeout(verifyTodaysPayCaregivers, 12000); // 오늘 급여 대상 최신 상태 재확인 (안전망, 2026-09-21 사고 이후 추가)
+}
+
+// ─── 급여 지급 예정 간병인 최신 상태 재확인 (안전망) ───
+// 2026-09-21: 4번 PC에서 종료 처리한 간병인이 1번 PC 로컬 데이터엔 여전히 "근무중"으로
+// 남아있어서, 그 간병인에게 정규 주급을 지급할 뻔한 사고가 있었음. 로컬 병합 결과를
+// 무조건 믿지 않고, "오늘 급여 지급 카드에 뜨는 간병인"만 콕 집어 Firebase 원본과 한 번 더
+// 직접 대조한다. 병합 로직 자체를 못 믿어서가 아니라(위에서 이미 두 겹으로 고쳤음), 실제
+// 돈이 나가는 지점 바로 앞에 마지막 방어선 하나를 더 두는 것.
+async function verifyTodaysPayCaregivers() {
+  if(!db || !_fbReady) return; // Firebase 연결 전/오프라인이면 검증 불가 — 조용히 넘어감 (기존 동작에 영향 없음)
+  const dateStr = toLocalDateStr(new Date());
+  const idsToCheck = new Set();
+  caregivers.forEach(cg => {
+    if(!cg.startDate) return;
+    // 오늘이 정규 급여 지급일이거나, 오늘이 마감일(=최종정산 대상)인 간병인만 좁혀서 검사
+    let isPayToday = false;
+    try { isPayToday = calcPayDates(cg).some(p => p.date === dateStr); } catch(e) {}
+    let isSettleToday = false;
+    if(cg.endDate) {
+      const rawEnd = parseLocalDate(cg.endDate);
+      const adj = rawEnd ? adjustPayDateToMonday(rawEnd) : null;
+      if(adj && toLocalDateStr(adj) === dateStr) isSettleToday = true;
+    }
+    if(isPayToday || isSettleToday) idsToCheck.add(String(cg.id));
+  });
+  if(idsToCheck.size === 0) return;
+
+  const mismatches = [];
+  for(const id of idsToCheck) {
+    try {
+      const snap = await db.ref('cnc/caregivers/' + id).once('value');
+      const remote = snap.val();
+      if(!remote) continue;
+      const local = caregivers.find(c => String(c.id) === id);
+      if(!local) continue;
+      // 원격이 로컬보다 확실히 더 최근 저장분인데, 근무상태/매칭환자가 다르다면
+      // = 이 PC가 아직 못 받은 변경이 있다는 뜻 (지금 화면을 그대로 믿으면 안 됨)
+      const remoteNewer = Number(remote._ts || 0) > Number(local._ts || 0);
+      const statusDiffers = remote.workStatus !== local.workStatus
+        || String(remote.patientId || '') !== String(local.patientId || '');
+      if(remoteNewer && statusDiffers) mismatches.push({ id, name: local.name || remote.name || id });
+    } catch(e) { /* 네트워크 문제 등은 조용히 무시 — 기존 화면에 영향 없음 */ }
+  }
+  if(mismatches.length > 0) showPaySyncWarning(mismatches);
+}
+
+function showPaySyncWarning(mismatches) {
+  if(document.getElementById('pay-sync-warning-banner')) return; // 이미 표시 중이면 중복 생성 안 함
+  const el = document.createElement('div');
+  el.id = 'pay-sync-warning-banner';
+  el.style.cssText = [
+    'position:fixed', 'top:0', 'left:0', 'right:0',
+    'background:#B91C1C', 'color:#fff', 'z-index:999999',
+    'padding:10px 14px', 'font-size:13px', 'font-weight:700',
+    'display:flex', 'align-items:center', 'justify-content:center', 'gap:12px',
+    'flex-wrap:wrap', 'box-shadow:0 2px 10px rgba(0,0,0,.25)'
+  ].join(';');
+  const names = mismatches.map(m => m.name).join(', ');
+  el.innerHTML = '⚠️ 오늘 급여 대상 중 최신 정보와 다른 간병인이 있어요: ' + names + ' — 지급 전 꼭 새로고침해서 다시 확인하세요'
+    + '<button id="pay-sync-reload-btn" style="background:#fff;color:#B91C1C;border:none;border-radius:6px;padding:6px 14px;font-weight:700;cursor:pointer">지금 새로고침</button>';
+  document.body.appendChild(el);
+  document.getElementById('pay-sync-reload-btn').onclick = () => {
+    if(_pendingSave && !confirm('저장 중인 변경사항이 있어요. 그래도 새로고침 할까요?')) return;
+    location.reload();
+  };
 }
 
 // ─── 자동 종료 처리 ───
