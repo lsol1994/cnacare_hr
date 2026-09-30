@@ -1144,6 +1144,9 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
           <button id="ins-flt-none"    class="btn btn-sm btn-teal" onclick="setInsFlt('none')"    style="font-size:11px">가입전</button>
           <button id="ins-flt-active"  class="btn btn-sm btn-teal" onclick="setInsFlt('active')"  style="font-size:11px">가입</button>
           <button id="ins-flt-expired" class="btn btn-sm" onclick="setInsFlt('expired')" style="font-size:11px">만료</button>
+          <button id="ins-flt-roster"  class="btn btn-sm" onclick="setInsFlt('roster')"  style="font-size:11px" title="보험사 등록된 전문인내역 기준 간병인·매칭환자 자동 연결">📄 보험사 등록내역</button>
+          <button class="btn btn-sm" onclick="openInsRosterUpload()" style="font-size:11px" title="보험사 사이트에서 받은 등록된_전문인내역.xls 업로드">📤 전문인내역 업로드</button>
+          <input type="file" id="ins-roster-file" accept=".xls,.xlsx,.htm,.html,.csv" style="display:none" onchange="onInsRosterFile(this)">
         </div>
         <div id="ins-search-row" style="display:none;width:100%;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px;padding-top:8px;border-top:1px dashed var(--border)">
           <span style="font-size:11px;color:var(--gray);font-weight:700;text-transform:none;letter-spacing:0">📅 만료 이력 검색</span>
@@ -2285,7 +2288,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_30_07';
+const APP_BUILD = '26_09_30_08';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -8390,6 +8393,7 @@ const MANUAL_SECTIONS = [
 <img class="manual-img" src="${MANUAL_IMG.img26}" alt="출퇴근 체크">
 <div class="manual-sub-title">배상보험 현황</div>
 <p class="manual-p">전체 / 가입전 / 가입 / 만료 상태로 필터링해서 배상보험 가입 현황을 관리합니다. 설정 화면에서 지정한 일수만큼 만료 예정을 미리 알려주며, 만료 이력은 연도·월로 검색할 수 있습니다.</p>
+<p class="manual-p">"📤 전문인내역 업로드"로 보험사 사이트에서 받은 <b>등록된_전문인내역.xls</b>를 올리면, "📄 보험사 등록내역" 탭에서 가입/해지 건마다 간병인(생년월일·이름 기준)과 그 시점에 담당하던 환자가 자동으로 연결됩니다. 자동 연결이 안 된 건은 "연결" 버튼으로 직접 지정하면 같은 사람은 다음부터 자동 연결되고, "현황에 반영"을 누르면 미리보기 확인 후 간병인별 배상보험 가입일·해지일(현재 건/과거 이력)이 자동으로 채워집니다. 연결 결과는 엑셀로도 내려받을 수 있습니다.</p>
 <img class="manual-img" src="${MANUAL_IMG.img27}" alt="배상보험 현황">
 <div class="manual-sub-title">중도 종료 — 재모집 / 완전종료</div>
 <p class="manual-p">근무 중인 간병인이 예정보다 일찍 그만두는 경우 사용합니다. 카드의 "중도종료" 버튼을 누르면 종료 유형을 선택하는 팝업이 뜹니다. 🔄 재모집(환자는 "모집중"으로 돌아가고 이전 담당 간병인 이름·종료 사유가 재모집 이력에 남으며, 새 간병인이 매칭되면 교체 보고가 자동 작성됨) 또는 🚫 완전 종료(환자와 간병인이 모두 "종료" 상태로 함께 처리됨) 중에서 선택합니다.</p>
@@ -12529,10 +12533,11 @@ function isInsEligible(c) {
 
 function setInsFlt(flt) {
   insFlt = flt;
-  ['all','none','active','expired'].forEach(t=>{
+  ['all','none','active','expired','roster'].forEach(t=>{
     const btn = document.getElementById('ins-flt-'+t);
     if(!btn) return;
     const isOn = flt===t || (flt==='default' && (t==='none'||t==='active'));
+    btn.classList.toggle('btn-teal', isOn); // 초기 HTML의 btn-teal 고정 클래스 때문에 다른 탭 선택 시에도 가입전/가입이 켜져 보이던 문제
     btn.style.background  = isOn ? 'var(--teal)' : '';
     btn.style.color       = isOn ? '#fff' : '';
     btn.style.borderColor = isOn ? 'var(--teal)' : '';
@@ -12792,6 +12797,9 @@ function renderInsurance() {
   const searchYear  = showSearch ? (document.getElementById('ins-search-year')?.value || '')  : '';
   const searchMonth = showSearch ? (document.getElementById('ins-search-month')?.value || '') : '';
 
+  // 보험사 등록내역(전문인내역 업로드) 보기
+  if(insFlt === 'roster') { renderInsRoster(el); return; }
+
   if(!caregivers.length){ el.innerHTML='<div class="empty" style="padding:1rem 0"><p>등록된 간병인이 없어요</p></div>'; return; }
 
   // 연도/월이 하나라도 선택되면, 만료된 건(현재 만료 상태 + 과거 보관 이력)만 모아서
@@ -12896,6 +12904,493 @@ function renderInsurance() {
       </div>` : ''}
     </div>`;
   }).join('');
+}
+
+// ─── 배상보험: 보험사 "등록된 전문인내역" 업로드 → 간병인 + 그 시점 매칭환자 자동 연결 ───
+// 보험사 사이트에서 내려받는 "등록된_전문인내역.xls"(실제로는 HTML 표 형식, 진짜 xls/xlsx도 지원)를
+// 올리면 가입일/해지일/이름/생년월일/성별을 읽어 cfg.insRoster에 보관(기기 간 동기화됨)하고,
+// 각 행을 ① 생년월일(주민번호 앞 6자리) ② 이름(한글/영문, 괄호 안 이름 포함)으로 간병인과 연결한 뒤,
+// 그 간병인의 전체 담당기간(getAssignPeriods: 라이브+assignHistory) 중 보험 가입일 시점에 담당하던
+// 환자를 찾아 자동으로 채워줌. 외국인 간병인은 보험사엔 영문, 앱엔 한글로 등록된 경우가 많아서
+// 생년월일이 1차 기준이고, 자동으로 못 찾거나 잘못 찾은 건은 "연결" 버튼으로 직접 지정하면
+// cfg.insAlias(생년월일+이름 → 간병인 id)에 기억돼서 이후 업로드부터 같은 사람은 자동 연결됨.
+// "현황에 반영"은 미리보기 확인 후에만 실제 간병인 보험 데이터(현재 건/과거 이력)에 기록함.
+let insRosterMonth = '';        // 등록내역 보기: 가입월 필터 ('' = 전체)
+let insRosterOnlyUnmatched = false;
+let _insApplyPlan = null;
+
+function insEsc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function insNormName(s) { return String(s||'').toUpperCase().replace(/[^A-Z가-힣]/g,''); }
+// "ZINSHUNJIN(김순금)" → ['ZINSHUNJIN','김순금']
+function insRowNames(name) {
+  const s = String(name||'');
+  const m = s.match(/^([^(（]*)[(（]([^)）]*)[)）]?/);
+  const out = m ? [insNormName(m[1]), insNormName(m[2])] : [insNormName(s)];
+  return out.filter(Boolean);
+}
+function insCgBirth6(cg) { return String(cg.ssn||'').replace(/\D/g,'').slice(0,6); }
+function insNormBirth(v) {
+  let d = String(v ?? '').replace(/\D/g,'');
+  if(!d) return '';
+  if(d.length === 8 && /^(19|20)/.test(d)) d = d.slice(2);   // 19840321 → 840321
+  if(d.length < 6) d = d.padStart(6,'0');                     // 엑셀이 숫자로 바꾼 050101 → 50101 복원
+  return d.slice(0,6);
+}
+function insNormDate(v) {
+  if(v === null || v === undefined || v === '') return '';
+  if(Object.prototype.toString.call(v) === '[object Date]') { // 자정 근처 오차(몇 초~몇 분) 보정 후 날짜만
+    if(isNaN(v.getTime())) return '';
+    const t = new Date(v.getFullYear(), v.getMonth(), v.getDate());
+    if(v.getHours() >= 12) t.setDate(t.getDate() + 1);
+    return toLocalDateStr(t);
+  }
+  if(typeof v === 'number' && v > 20000 && v < 80000) { // 엑셀 날짜 일련번호
+    const d = new Date(Math.round((v - 25569) * 86400000));
+    return toLocalDateStr(new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  }
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})/);
+  if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return '';
+}
+function insDayNum(dateStr) { const d = parseLocalDate(dateStr); return d ? Math.round(d.getTime()/86400000) : null; }
+function insAliasKey(r) { return (r.b||'000000') + '_' + (insRowNames(r.n).join('_') || 'X'); }
+function insRowKey(r) { return r.s + '|' + insNormName(r.n) + '|' + (r.b||''); }
+// onclick 인자로 안전하게 넘기기 위한 인코딩 (따옴표·괄호 등이 이름에 섞여도 깨지지 않게)
+function insKeyArg(r) { return encodeURIComponent(insRowKey(r)).replace(/'/g,'%27'); }
+
+// 표(2차원 배열)에서 헤더 행을 찾아 등록내역 행 목록으로 변환
+function insRosterFromAoa(aoa) {
+  const hi = aoa.findIndex(row => {
+    const cells = row.map(c => String(c??'').replace(/\s/g,''));
+    return cells.includes('가입일') && cells.includes('이름');
+  });
+  if(hi < 0) throw new Error('"가입일/이름" 제목줄을 찾지 못했어요. 보험사 전문인내역 파일이 맞는지 확인해주세요');
+  const hdr = aoa[hi].map(c => String(c??'').replace(/\s/g,''));
+  const col = k => hdr.indexOf(k);
+  const iS = col('가입일'), iE = col('해지일'), iN = col('이름'), iB = col('생년월일'), iG = col('성별');
+  const rows = [];
+  for(let r = hi+1; r < aoa.length; r++) {
+    const row = aoa[r] || [];
+    const s = insNormDate(row[iS]);
+    const n = String(row[iN] ?? '').trim();
+    if(!s || !n) continue; // 맨 아래 "가입 104명 / 해지 97명" 합계줄 등은 가입일이 날짜가 아니라 자동 제외
+    rows.push({
+      s, e: iE >= 0 ? insNormDate(row[iE]) : '', n,
+      b: iB >= 0 ? insNormBirth(row[iB]) : '',
+      g: iG >= 0 ? String(row[iG] ?? '').trim() : '',
+    });
+  }
+  if(!rows.length) throw new Error('읽을 수 있는 등록내역이 없어요');
+  return rows;
+}
+
+function insParseRosterBuffer(buf) {
+  const bytes = new Uint8Array(buf);
+  const isZip = bytes[0]===0x50 && bytes[1]===0x4B;   // xlsx
+  const isOle = bytes[0]===0xD0 && bytes[1]===0xCF;   // 진짜 구형 xls
+  if(!isZip && !isOle) {
+    let text = new TextDecoder('utf-8').decode(bytes);
+    if(!/charset\s*=\s*["']?utf-?8/i.test(text) && (text.match(/�/g)||[]).length > 3) {
+      try { text = new TextDecoder('euc-kr').decode(bytes); } catch(e) {}
+    }
+    if(/<table/i.test(text)) { // 보험사 다운로드 파일: 확장자만 .xls인 HTML 표
+      const doc = new DOMParser().parseFromString(text, 'text/html');
+      const aoa = [...doc.querySelectorAll('tr')].map(tr =>
+        [...tr.children].filter(c => c.tagName==='TD' || c.tagName==='TH').map(c => c.textContent.trim()));
+      return insRosterFromAoa(aoa);
+    }
+  }
+  if(typeof XLSX === 'undefined') throw new Error('엑셀 라이브러리(SheetJS)를 불러오지 못했어요. 새로고침 후 다시 시도해주세요');
+  const wb = XLSX.read(bytes, {type:'array'}); // 날짜는 일련번호로 받아 insNormDate에서 변환 (시간대 오차 방지)
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return insRosterFromAoa(XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:''}));
+}
+
+function openInsRosterUpload() {
+  const inp = document.getElementById('ins-roster-file');
+  if(inp) inp.click();
+}
+
+function onInsRosterFile(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    let rows;
+    try { rows = insParseRosterBuffer(ev.target.result); }
+    catch(err) { toast('❌ ' + err.message, true); return; }
+    // 기존 내역과 합침: (가입일+이름+생년월일) 묶음 단위로 새 파일 내용으로 교체하고, 새 파일에 없는 예전 묶음은 보존.
+    // 보험사 파일엔 같은 날 같은 사람이 2줄(성별 정정 재등록 등)인 경우가 있어서 행 단위가 아니라 묶음 단위로 교체함
+    const prev = (cfg.insRoster && Array.isArray(cfg.insRoster.rows)) ? cfg.insRoster.rows : [];
+    const group = list => { const g = new Map(); list.forEach(r => { if(!r || !r.s) return; const k = insRowKey(r); if(!g.has(k)) g.set(k, []); g.get(k).push(r); }); return g; };
+    const oldG = group(prev), newG = group(rows);
+    const sig = list => list.map(r => [r.e, r.g, r.n].join('/')).sort().join('|');
+    let added = 0, updated = 0;
+    newG.forEach((list, k) => {
+      const old = oldG.get(k);
+      if(!old) added += list.length;
+      else if(sig(old) !== sig(list)) updated += list.length;
+      oldG.set(k, list);
+    });
+    const merged = [].concat(...oldG.values()).sort((a,b) => a.s.localeCompare(b.s) || String(a.n).localeCompare(String(b.n)));
+    cfg.insRoster = { uploadedAt: todayStr() + ' ' + new Date().toTimeString().slice(0,5), fileName: f.name, rows: merged };
+    markCfgEdited();
+    save();
+    insRosterMonth = '';
+    setInsFlt('roster');
+    toast(`✅ 전문인내역 ${rows.length}건 읽음 (신규 ${added} · 변경 ${updated})`);
+    // 실제 간병인 보험 데이터에 반영할 변경사항이 있으면 미리보기부터 띄움 (바로 쓰지 않음)
+    const plan = insBuildApplyPlan();
+    if(plan.length) previewInsRosterApply();
+  };
+  reader.onerror = () => toast('❌ 파일을 읽지 못했어요', true);
+  reader.readAsArrayBuffer(f);
+}
+
+// 간병인의 담당기간 중 보험기간(가입일~해지일)에 해당하는 근무건 1개 선택
+//  1순위: 가입일 당일을 포함하는 근무건(여러 개면 더 늦게 시작한 건 = 같은 날 교대한 새 건)
+//  2순위: 보험기간과 가장 많이 겹치는 근무건
+//  3순위: 가입일 ±3일 안에 시작한 근무건(가입을 하루 이틀 먼저/늦게 한 경우)
+function insPickPeriod(cg, r) {
+  const s = insDayNum(r.s);
+  const e = r.e ? insDayNum(r.e) : 9e9;
+  if(s === null) return null;
+  let best = null, bestScore = -Infinity;
+  getAssignPeriods(cg).forEach(p => {
+    const ps = insDayNum(p.startDate);
+    if(ps === null) return;
+    const pe = p.endDate ? (insDayNum(p.endDate) ?? 9e9) : 9e9;
+    let score = null;
+    if(ps <= s && s <= pe) score = 3e9 + ps;
+    else if(ps <= e && pe >= s) score = 2e9 + (Math.min(pe, e) - Math.max(ps, s));
+    else if(Math.abs(ps - s) <= 3) score = 1e9 - Math.abs(ps - s);
+    if(score !== null && score > bestScore) { bestScore = score; best = p; }
+  });
+  return best;
+}
+
+function insPeriodPatient(cg, period) {
+  if(!period) return { name:'', hospital:'' };
+  const pt = patients.find(p => String(p.id) === String(period.patientId));
+  if(pt) return { name: pt.name || '', hospital: pt.hospital || '' };
+  const h = (cg.assignHistory||[]).find(x => String(x.patientId) === String(period.patientId) && x.startDate === period.startDate)
+         || (cg.assignHistory||[]).find(x => String(x.patientId) === String(period.patientId));
+  return { name: h ? (h.patientName||'') : '', hospital: h ? (h.hospital||'') : '' };
+}
+
+// 등록내역 1행 → { row, cg, how, period, patientName, hospital, candidates }
+// how: manual(직접 연결) / auto(생년월일+이름 일치) / birth(생년월일만 일치) / name(이름만 일치) / ''(미매칭)
+function insMatchRosterRow(r) {
+  const names = insRowNames(r.n);
+  let cg = null, how = '', candidates = [];
+  const alias = cfg.insAlias ? cfg.insAlias[insAliasKey(r)] : '';
+  if(alias) { cg = caregivers.find(c => String(c.id) === String(alias)) || null; if(cg) how = 'manual'; }
+  if(!cg) {
+    const byBirth = r.b ? caregivers.filter(c => insCgBirth6(c) === r.b) : [];
+    const byName  = names.length ? caregivers.filter(c => names.includes(insNormName(c.name))) : [];
+    const both    = byBirth.filter(c => byName.includes(c));
+    const pick = list => {
+      if(list.length === 1) return list[0];
+      const withPeriod = list.filter(c => insPickPeriod(c, r));
+      return withPeriod.length === 1 ? withPeriod[0] : null;
+    };
+    if(both.length)        { cg = pick(both);    how = 'auto';  candidates = both; }
+    if(!cg && byBirth.length) { cg = pick(byBirth); how = 'birth'; candidates = byBirth; }
+    if(!cg && byName.length)  { cg = pick(byName);  how = 'name';  candidates = byName; }
+    if(!cg) how = '';
+  }
+  const period = cg ? insPickPeriod(cg, r) : null;
+  const pi = insPeriodPatient(cg, period);
+  return { row: r, cg, how, period, patientName: pi.name, hospital: pi.hospital, candidates };
+}
+
+function insRosterRows() {
+  return (cfg.insRoster && Array.isArray(cfg.insRoster.rows)) ? cfg.insRoster.rows.filter(r => r && r.s) : [];
+}
+
+function renderInsRoster(el) {
+  const rows = insRosterRows();
+  if(!rows.length) {
+    el.innerHTML = `<div class="empty" style="padding:1.25rem 0">
+      <p style="font-size:13px">아직 업로드된 전문인내역이 없어요</p>
+      <p style="font-size:11px;color:var(--gray);margin-top:4px">보험사 사이트에서 받은 <b>등록된_전문인내역.xls</b>를 올리면<br>간병인과 그 시점 매칭환자가 자동으로 채워져요</p>
+      <button class="btn btn-teal btn-sm" style="margin-top:10px" onclick="openInsRosterUpload()">📤 전문인내역 업로드</button>
+    </div>`;
+    return;
+  }
+  const today = todayStr();
+  const all = rows.map(insMatchRosterRow);
+  const months = [...new Set(rows.map(r => r.s.slice(0,7)))].sort((a,b) => b.localeCompare(a));
+  if(insRosterMonth && !months.includes(insRosterMonth)) insRosterMonth = '';
+  let list = all.filter(m => !insRosterMonth || m.row.s.slice(0,7) === insRosterMonth
+                                              || (m.row.e && m.row.e.slice(0,7) === insRosterMonth));
+  if(insRosterOnlyUnmatched) list = list.filter(m => !m.cg || !m.period);
+  list = list.slice().sort((a,b) => b.row.s.localeCompare(a.row.s));
+
+  const cntActive = all.filter(m => !m.row.e).length; // 보험사 파일의 "현재 가입인원"과 같은 기준(해지일 없는 건)
+  const cntNoCg   = all.filter(m => !m.cg).length;
+  const cntNoPt   = all.filter(m => m.cg && !m.period).length;
+  const plan = insBuildApplyPlan();
+  const info = cfg.insRoster || {};
+
+  const howBadge = {
+    manual: ['직접연결','var(--teal)'], auto: ['자동','var(--green)'],
+    birth: ['생년월일 일치','var(--amber)'], name: ['이름만 일치','var(--amber)'],
+  };
+  const badge = (txt, color) => `<span class="badge" style="background:${color}22;color:${color};border:1px solid ${color}44;font-size:10px">${txt}</span>`;
+
+  el.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;font-size:12px">
+      <span style="color:var(--gray)">📄 ${insEsc(info.fileName||'전문인내역')} · ${insEsc(info.uploadedAt||'')} 업로드</span>
+      <span style="margin-left:auto;display:flex;gap:5px;flex-wrap:wrap">
+        <button class="btn btn-sm" style="font-size:11px" onclick="openInsRosterUpload()">📤 새 파일 업로드</button>
+        <button class="btn btn-sm" style="font-size:11px" onclick="downloadInsRosterXLSX()">⬇ 엑셀 다운로드</button>
+        <button class="btn btn-sm ${plan.length?'btn-teal':''}" style="font-size:11px" onclick="previewInsRosterApply()">🔄 현황에 반영${plan.length?' ('+plan.length+')':''}</button>
+        <button class="btn btn-sm btn-red" style="font-size:11px" onclick="clearInsRoster()">비우기</button>
+      </span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;font-size:12px">
+      ${badge('전체 '+all.length+'건','var(--gray)')}
+      ${badge('현재 가입중 '+cntActive+'명','var(--green)')}
+      ${badge('간병인 미매칭 '+cntNoCg,'#dc2626')}
+      ${badge('해당시점 환자 없음 '+cntNoPt,'var(--amber)')}
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <select onchange="insRosterMonth=this.value;renderInsurance()" style="width:auto;font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--black)">
+        <option value="">가입·해지월 전체</option>
+        ${months.map(m => `<option value="${m}" ${m===insRosterMonth?'selected':''}>${m.slice(0,4)}년 ${parseInt(m.slice(5))}월</option>`).join('')}
+      </select>
+      <label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer">
+        <input type="checkbox" ${insRosterOnlyUnmatched?'checked':''} onchange="insRosterOnlyUnmatched=this.checked;renderInsurance()" style="width:15px;height:15px;accent-color:var(--teal)">
+        <span style="color:var(--gray)">매칭 안 된 건만</span>
+      </label>
+      <span style="font-size:11px;color:var(--gray)">${list.length}건 표시</span>
+    </div>
+    ${!list.length ? '<div class="empty" style="padding:.75rem 0"><p style="font-size:12px">해당하는 내역이 없어요</p></div>' :
+    list.map(m => {
+      const r = m.row;
+      const sameDay = r.e && r.e === r.s;
+      const stateBadge = sameDay ? badge('당일해지(정정)','var(--gray)')
+        : !r.e ? badge('가입중','var(--green)')
+        : r.e > today ? badge('해지예정 '+r.e.slice(5),'var(--amber)')
+        : badge('해지','var(--gray)');
+      const hb = m.cg ? howBadge[m.how] : null;
+      const cgLine = m.cg
+        ? `<b style="color:var(--black)">${insEsc(m.cg.name)}</b> ${hb?badge(hb[0],hb[1]):''}`
+        : `<span style="color:#dc2626;font-weight:700">간병인 미매칭</span>${m.candidates.length>1?` <span style="font-size:10px;color:var(--gray)">(후보 ${m.candidates.length}명)</span>`:''}`;
+      const ptLine = !m.cg ? '' : m.period
+        ? `👤 <b style="color:var(--black)">${insEsc(m.patientName||'(환자 정보 없음)')}</b>${m.hospital?' · '+insEsc(m.hospital):''} <span style="color:var(--gray-lt)">(담당 ${m.period.startDate}~${m.period.endDate||'진행중'})</span>`
+        : `<span style="color:var(--amber)">⚠ 이 기간에 담당한 환자를 못 찾았어요</span>`;
+      return `<div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+        <div style="flex:1;min-width:180px">
+          <div style="font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-family:var(--mono);color:var(--gray)">${r.s} ~ ${r.e||'　　　　　'}</span>
+            <span style="font-weight:700">${insEsc(r.n)}</span>
+            <span style="font-size:11px;color:var(--gray)">${insEsc(r.b)}${r.g?' · '+insEsc(r.g):''}</span>
+            ${stateBadge}
+          </div>
+          <div style="font-size:12px;margin-top:3px">→ ${cgLine}</div>
+          ${ptLine ? `<div style="font-size:12px;margin-top:2px">${ptLine}</div>` : ''}
+        </div>
+        <button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="openInsRosterLink('${insKeyArg(r)}')">🔗 ${m.cg?'연결변경':'연결'}</button>
+      </div>`;
+    }).join('')}`;
+}
+
+// 자동 연결이 안 되거나 잘못된 건: 간병인을 직접 지정 → 같은 사람(생년월일+보험사 이름)은 이후 자동 연결
+function openInsRosterLink(rowKey) {
+  rowKey = decodeURIComponent(rowKey);
+  const r = insRosterRows().find(x => insRowKey(x) === rowKey);
+  if(!r) return;
+  const m = insMatchRosterRow(r);
+  const names = insRowNames(r.n);
+  const rank = c => (insCgBirth6(c) === r.b ? 0 : 2) + (names.includes(insNormName(c.name)) ? 0 : 1);
+  const opts = caregivers.slice().sort((a,b) => rank(a)-rank(b) || String(a.name).localeCompare(String(b.name)));
+  const aliasKey = insAliasKey(r);
+  const hasAlias = !!(cfg.insAlias && cfg.insAlias[aliasKey]);
+  document.getElementById('cg-modal-title').textContent = r.n + ' — 간병인 연결';
+  document.getElementById('cg-form-body').innerHTML = `
+    <div style="font-size:12px;background:var(--surface2);padding:8px 10px;border-radius:var(--rsm);margin-bottom:1rem;line-height:1.7">
+      보험사 등록: <b>${insEsc(r.n)}</b> · ${insEsc(r.b)}${r.g?' · '+insEsc(r.g):''}<br>
+      보험기간: ${r.s} ~ ${r.e||'(가입중)'}
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">여기서 연결하면 같은 사람(생년월일+이름이 같은 다른 가입/해지 건)도 앞으로 모두 이 간병인으로 자동 연결돼요.</div>
+    </div>
+    <div class="field">
+      <label>간병인 <span style="font-size:10px;font-weight:400;color:var(--gray)">(생년월일·이름이 같은 사람이 위에 먼저 나와요)</span></label>
+      <select id="ins-link-cg" style="width:100%">
+        ${opts.map(c => {
+          const b6 = insCgBirth6(c);
+          const mark = b6 === r.b ? '★ ' : '';
+          return `<option value="${insEsc(c.id)}" ${m.cg && String(m.cg.id)===String(c.id)?'selected':''}>${mark}${insEsc(c.name)} (${b6||'주민번호 없음'} · ${insEsc(c.workStatus||'')})</option>`;
+        }).join('')}
+      </select>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:1rem;flex-wrap:wrap">
+      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveInsRosterLink('${insKeyArg(r)}')">연결 저장</button>
+      ${hasAlias ? `<button class="btn" onclick="clearInsRosterLink('${insKeyArg(r)}')">직접연결 해제</button>` : ''}
+      <button class="btn" onclick="closeOverlay('cg-overlay')">취소</button>
+    </div>`;
+  document.getElementById('cg-overlay').classList.add('open');
+}
+
+function saveInsRosterLink(rowKey) {
+  rowKey = decodeURIComponent(rowKey);
+  const r = insRosterRows().find(x => insRowKey(x) === rowKey);
+  const sel = document.getElementById('ins-link-cg');
+  if(!r || !sel || !sel.value) return;
+  if(!cfg.insAlias || typeof cfg.insAlias !== 'object') cfg.insAlias = {};
+  cfg.insAlias[insAliasKey(r)] = String(sel.value);
+  markCfgEdited(); save(); closeOverlay('cg-overlay'); renderInsurance();
+  toast('✅ 간병인 연결 저장됐어요');
+}
+
+function clearInsRosterLink(rowKey) {
+  rowKey = decodeURIComponent(rowKey);
+  const r = insRosterRows().find(x => insRowKey(x) === rowKey);
+  if(!r || !cfg.insAlias) return;
+  delete cfg.insAlias[insAliasKey(r)];
+  markCfgEdited(); save(); closeOverlay('cg-overlay'); renderInsurance();
+  toast('직접연결을 해제했어요 (자동매칭으로 돌아감)');
+}
+
+function clearInsRoster() {
+  if(!confirm('업로드된 전문인내역을 비울까요?\n(간병인 보험 현황/이력에 이미 반영된 내용과 직접 연결 정보는 그대로 남아요)')) return;
+  cfg.insRoster = { uploadedAt:'', fileName:'', rows:[] };
+  markCfgEdited(); save(); renderInsurance();
+  toast('전문인내역을 비웠어요');
+}
+
+function downloadInsRosterXLSX() {
+  if(typeof XLSX === 'undefined') { toast('❌ 엑셀 라이브러리를 불러오지 못했어요', true); return; }
+  const rows = insRosterRows().map(insMatchRosterRow)
+    .filter(m => !insRosterMonth || m.row.s.slice(0,7) === insRosterMonth || (m.row.e && m.row.e.slice(0,7) === insRosterMonth));
+  if(!rows.length) { toast('내보낼 내역이 없어요', true); return; }
+  const howTxt = { manual:'직접연결', auto:'자동', birth:'생년월일 일치', name:'이름만 일치' };
+  const aoa = [['가입일','해지일','이름(보험사)','생년월일','성별','간병인','연결방법','해당시점 환자','병원','담당기간']];
+  rows.forEach(m => aoa.push([
+    m.row.s, m.row.e||'', m.row.n, m.row.b, m.row.g,
+    m.cg ? m.cg.name : '(미매칭)', m.cg ? (howTxt[m.how]||'') : '',
+    m.period ? (m.patientName||'') : '', m.period ? (m.hospital||'') : '',
+    m.period ? `${m.period.startDate}~${m.period.endDate||'진행중'}` : '',
+  ]));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:11},{wch:11},{wch:18},{wch:9},{wch:5},{wch:10},{wch:12},{wch:10},{wch:18},{wch:24}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '배상보험 현황');
+  XLSX.writeFile(wb, `배상보험_현황_${insRosterMonth || todayStr()}.xlsx`);
+}
+
+// 등록내역 → 간병인 보험 데이터 반영 계획.
+// 같은 간병인·같은 근무건에 여러 행(재가입/정정)이 있으면 하나로 합침(가입일=가장 이른 날, 해지일=가장 늦은 날,
+// 아직 해지 안 된 행이 하나라도 있으면 해지일 없음). 가입일=해지일인 "당일해지(정정)" 행은 반영 대상 제외.
+// 라이브 근무건이면 현재 보험 칸(insuranceActive/StartDate/Expiry/Terminated), 과거 근무건이면 insuranceHistory에 기록.
+function insBuildApplyPlan() {
+  const groups = new Map();
+  insRosterRows().forEach(r => {
+    if(r.e && r.e === r.s) return;
+    const m = insMatchRosterRow(r);
+    if(!m.cg || !m.period) return;
+    const k = m.cg.id + '|' + m.period.patientId + '|' + m.period.startDate;
+    const g = groups.get(k);
+    if(!g) { groups.set(k, { cg:m.cg, period:m.period, s:r.s, e:r.e||'', open:!r.e, patientName:m.patientName }); return; }
+    if(r.s < g.s) g.s = r.s;
+    if(!r.e) g.open = true; else if(r.e > g.e) g.e = r.e;
+  });
+  const plan = [];
+  groups.forEach(g => {
+    const e = g.open ? '' : g.e;
+    const term = !!e;
+    const cg = g.cg, p = g.period;
+    const isCur = String(cg.patientId||'') === String(p.patientId) && (cg.startDate||'') === p.startDate;
+    if(isCur) {
+      if(cg.insuranceActive && (cg.insuranceStartDate||'') === g.s && (cg.insuranceExpiry||'') === e && !!cg.insuranceTerminated === term) return;
+      plan.push({ type:'current', cg, period:p, s:g.s, e, term, patientName:g.patientName,
+        before: cg.insuranceActive ? `${cg.insuranceStartDate||'?'}~${cg.insuranceExpiry||''}` : '가입전' });
+    } else {
+      const hist = cg.insuranceHistory || [];
+      const sNum = insDayNum(g.s);
+      const h = hist.find(x => String(x.patientId) === String(p.patientId) && x.periodStart === p.startDate)
+             || hist.find(x => String(x.patientId) === String(p.patientId) && !x.periodStart
+                           && (!x.startDate || Math.abs((insDayNum(x.startDate) ?? 9e9) - sNum) <= 31));
+      if(h && h.active && (h.startDate||'') === g.s && (h.expiry||'') === e && !!h.terminated === term) return;
+      plan.push({ type: h ? 'hist-upd' : 'hist-new', cg, period:p, s:g.s, e, term, patientName:g.patientName, histId: h ? h.id : null,
+        before: h ? (h.active ? `${h.startDate||'?'}~${h.expiry||''}` : '미가입') : '없음' });
+    }
+  });
+  plan.sort((a,b) => b.s.localeCompare(a.s));
+  return plan;
+}
+
+function previewInsRosterApply() {
+  const plan = insBuildApplyPlan();
+  if(!plan.length) { toast('반영할 변경사항이 없어요 (이미 현황과 같아요)'); return; }
+  _insApplyPlan = plan;
+  const typeTxt = { current:'현재 건', 'hist-upd':'과거이력 수정', 'hist-new':'과거이력 추가' };
+  document.getElementById('cg-modal-title').textContent = '배상보험 현황에 반영 — ' + plan.length + '건';
+  document.getElementById('cg-form-body').innerHTML = `
+    <div style="font-size:12px;color:var(--gray);margin-bottom:.75rem;line-height:1.6">
+      전문인내역 기준으로 아래 간병인들의 배상보험 가입일/해지일을 채워요.<br>
+      해지일이 있는 건은 <b>만료처리 완료</b>로, 해지일이 없는 건은 <b>가입중</b>으로 기록돼요.
+    </div>
+    <div style="max-height:50vh;overflow:auto;border:1px solid var(--border);border-radius:var(--rsm);padding:0 10px">
+      ${plan.map(x => `<div style="padding:7px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <b>${insEsc(x.cg.name)}</b> → ${insEsc(x.patientName||'(환자 정보 없음)')}
+        <span class="badge" style="font-size:10px;margin-left:4px">${typeTxt[x.type]}</span>
+        <div style="color:var(--gray);font-size:11px;margin-top:2px">
+          ${insEsc(x.before)} ⟶ <b style="color:var(--black)">${x.s} ~ ${x.e||'(가입중)'}</b>${x.term?' · 만료처리':''}
+        </div>
+      </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:1rem">
+      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="applyInsRoster()">반영하기</button>
+      <button class="btn" onclick="closeOverlay('cg-overlay')">취소</button>
+    </div>`;
+  document.getElementById('cg-overlay').classList.add('open');
+}
+
+function applyInsRoster() {
+  const plan = _insApplyPlan || insBuildApplyPlan();
+  _insApplyPlan = null;
+  const defMemo = cfg.insuranceMemo || 'KB2025개인간병인배상책임보험(3천)/2025-3561946-1';
+  let n = 0;
+  plan.forEach(x => {
+    const cg = caregivers.find(c => String(c.id) === String(x.cg.id));
+    if(!cg) return;
+    if(x.type === 'current') {
+      // 미리보기 이후 다른 기기에서 배정이 바뀌었으면 건너뜀 (엉뚱한 근무건에 쓰지 않도록)
+      if(String(cg.patientId||'') !== String(x.period.patientId) || (cg.startDate||'') !== x.period.startDate) return;
+      cg.insuranceActive = true;
+      cg.insuranceStartDate = x.s;
+      cg.insuranceExpiry = x.e;
+      cg.insuranceTerminated = x.term;
+      if(!cg.insuranceMemo) cg.insuranceMemo = defMemo;
+      cg.insurancePatientId = String(cg.patientId);
+    } else {
+      if(!cg.insuranceHistory) cg.insuranceHistory = [];
+      let h = x.histId ? cg.insuranceHistory.find(y => String(y.id) === String(x.histId)) : null;
+      if(!h) {
+        h = { id: genId(), patientId: String(x.period.patientId), patientName: x.patientName || '', memo: defMemo, archivedAt: todayStr() };
+        cg.insuranceHistory.unshift(h);
+      }
+      h.active = true;
+      h.startDate = x.s;
+      h.expiry = x.e;
+      h.terminated = x.term;
+      h.periodStart = x.period.startDate; // 어느 근무건 기록인지 표시 (다음 반영 때 같은 건을 정확히 찾도록)
+      if(!h.patientName && x.patientName) h.patientName = x.patientName;
+      if(!h.memo) h.memo = defMemo;
+    }
+    markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (2분)
+    n++;
+  });
+  save(); closeOverlay('cg-overlay'); renderInsurance();
+  toast(`✅ 배상보험 현황에 ${n}건 반영했어요`);
 }
 
 function toggleInsHistory(cgId) {
