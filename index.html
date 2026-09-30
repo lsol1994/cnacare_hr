@@ -2285,7 +2285,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_30_02';
+const APP_BUILD = '26_09_30_03';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -8671,7 +8671,7 @@ const QNA_ITEMS_RAW = [
   { cat:'memo', q:'업무일지는 환자·간병인과 연결해서 기록할 수 있나요?', a:'네. "일지 작성"에서 날짜·작성자·내용을 입력할 때 필요하면 관련 환자·간병인을 연결해 기록할 수 있습니다. 월 선택창으로 원하는 달의 기록만 모아볼 수도 있어요.', keywords:['업무일지','일지작성','환자간병인연결','월별조회','작성자'] },
 
   // 설정
-  { cat:'settings', q:'명절기간에 급여를 더 주는 건 어떻게 처리하나요?', a:'설정 → "명절 할증"에서 명절 이름·시작일시·종료일시(업체 기준 14:00, 수정 가능)·1일 할증료(기본 20,000원)를 등록하면, 그 기간에 근무한 모든 간병인의 주급·단기 급여·최종 정산에 자동으로 더해집니다. 24시간 근무 중 12시간 이상이 명절기간에 걸치면 1일 할증이에요(9/24 14:00~9/27 14:00 등록 시 09:00 교대는 9/24·9/25·9/26 시작 근무, 14:00 교대도 9/24·9/25·9/26 시작 근무 = 3일). 시각 없이 날짜만 등록된 예전 명절은 기존처럼 근무 시작 날짜 기준으로 계산돼요. 10시간 미만 자투리(OT)는 할증이 없습니다. 이미 지난 주급에도 소급 반영되고, "내역 저장"으로 계산 결과를 명절별로 보관할 수 있어요. 협회 수수료 공제는 현재 보류(0원)입니다.' },
+  { cat:'settings', q:'명절기간에 급여를 더 주는 건 어떻게 처리하나요?', a:'설정 → "명절 할증"에서 명절 이름·시작일시·종료일시(업체 기준 14:00, 수정 가능)·1일 할증료(기본 20,000원)를 등록하면, 그 기간에 근무한 모든 간병인의 주급·단기 급여·최종 정산에 자동으로 더해집니다. 명절 당일 기준시각(예: 14:00)에 근무 중이면 그 날 1일 할증이고, 그 시각이 속한 주차 주급(단기는 단기 급여)에 들어가요(9/24 14:00~9/27 14:00 등록 시 9/24·9/25·9/26 14:00에 근무 중인지로 판정 = 최대 3일. 8/21 16:00 시작 근무라면 9/24·9/25분은 9/25 주급, 9/26분은 다음 주급). 시각 없이 날짜만 등록된 예전 명절은 기존처럼 근무 시작 날짜 기준으로 계산돼요. 10시간 미만 자투리(OT)는 할증이 없습니다. 이미 지난 주급에도 소급 반영되고, "내역 저장"으로 계산 결과를 명절별로 보관할 수 있어요. 협회 수수료 공제는 현재 보류(0원)입니다.' },
   { cat:'settings', q:'공휴일 목록은 왜 등록해야 하나요?', a:'공휴일 목록을 "YYYY-MM-DD 공휴일명" 형식으로 등록해두면, 급여지급일이 주말·공휴일과 겹칠 때 다음 월요일로 자동 조정됩니다. 연도가 바뀌면 이 목록을 갱신해주세요.', keywords:['공휴일목록','급여지급일','자동조정','연도갱신','협회정보'] },
   { cat:'settings', q:'유지보수 도구는 언제, 어떻게 사용하나요?', a:'날짜 꼬임, 중복 데이터 등 정합성 문제를 점검·정리할 때 사용합니다. 대부분의 버튼은 누르는 즉시 실행되지 않고 먼저 설명 팝업이 뜬 뒤 확인해야 실제로 실행되니 안심하고 눌러봐도 됩니다. 다만 "중복 간병인 전체 일괄 정리"는 확인 없이 바로 처리되므로 신중히 사용하세요.', keywords:['유지보수도구','확인팝업','데이터정합성','중복간병인전체일괄정리','설정'] },
   { cat:'settings', q:'JSON 백업과 복원은 어떻게 하나요?', a:'"JSON 백업"으로 앱 전체 데이터를 파일로 내려받아 안전하게 보관할 수 있고, "JSON 불러오기"로 백업 파일을 다시 복원할 수 있습니다. "전체 초기화"는 모든 데이터를 지우는 되돌릴 수 없는 작업이니 각별히 주의하세요.', keywords:['JSON백업','JSON복원','전체초기화','데이터보관','되돌릴수없음'] },
@@ -9928,10 +9928,14 @@ function ptDdayBadge(p) {
 // 급여 금액을 저장하지 않고 매번 다시 계산하는 구조라, 명절기간을 나중에 등록해도 이미 지난 주급까지 소급 반영됨.
 // ── (26_09_30_02) 명절기간 시간 포함 ──
 // 업체 기준: 명절기간은 "시작일 14:00 ~ 종료일 14:00" 처럼 시각까지 지정 (startTime/endTime).
-//   시간 있는 명절: 24시간 근무블록 중 12시간 이상이 명절기간 [시작일시, 종료일시) 안에 들어가면 1일 할증
-//                   (= 블록 한가운데 시각이 기간 안). 교대시각과 상관없이 쭉 근무하면 (종료−시작)/24h 일수만큼 정확히 할증.
-//     예) 9/24 14:00 ~ 9/27 14:00, 09:00 교대 → 9/24·9/25·9/26 09:00 시작 블록 (3일)
-//         같은 기간, 14:00 교대 → 9/24·9/25·9/26 14:00 시작 블록 (3일)
+// ── (26_09_30_03) 업체 문자 기준으로 판정 변경 ──
+//   시간 있는 명절: 기간 시작일시부터 24시간마다 "명절일 기준시각"(예: 9/24·9/25·9/26 14:00)을 찍고,
+//                   그 시각에 근무 중이면(근무시작 ≤ 기준시각 < 근무종료) 그 명절일 1일 할증.
+//                   할증은 기준시각이 속한 24시간 근무블록(=그 블록이 속한 주차 주급 / 단기 급여)에 들어감.
+//     예) 9/24 14:00 ~ 9/27 14:00 등록 → 기준시각 9/24·9/25·9/26 14:00 (3일)
+//         8/21 16:00 시작 장기 근무: 9/24·9/25 14:00은 9/18~9/25 16:00 주차, 9/26 14:00은 다음 주차 → 4만 + 2만
+//         9/21 17:00 ~ 9/26 09:00 단기: 9/26 14:00엔 이미 종료 → 2일 (4만)
+//     10시간 규칙(OT)과 무관 — 기준시각에 근무 중이었으면 할증 (업체 문자: "시작일, 종료일 기준 14시")
 //   시간 없는 예전 명절(날짜만 등록): 기존 규칙 그대로 — 블록 "시작 날짜"가 기간 안이면 할증 (소급 금액 변동 없음)
 function hpIsTimed(p) { return !!(p && p.startTime && p.endTime); }
 function hpTimeToMin(t) {
@@ -9995,24 +9999,29 @@ function holidayPremiumBlocks(w, fromIdx, toIdx) {
     const amt = holidayPremiumCgAmount(p);
     if(amt <= 0) return;
     if(hpIsTimed(p)) {
-      // 시간 있는 명절: 블록 k = [근무시작 + k×24h, +24h), 한가운데(+12h)가 [s, e) 안이면 할증
+      // 시간 있는 명절 (26_09_30_03 업체 기준): 기준시각 c = 기간시작 + n×24h (< 기간종료).
+      // c에 근무 중이면(ws ≤ c < we) 할증 1일, c가 속한 블록 idx = floor((c − ws)/24h)
       const r = hpPeriodRange(p);
       if(!r) return;
       const [sh=8, sm=0] = (w.startTime||'08:00').split(':').map(Number); // countedWorkDays와 같은 기본값
       const ws = start.getTime() + (sh*60+sm)*60000;
       if(isNaN(ws)) return;
-      const DAY = 86400000, HALF = 43200000;
-      const kFrom = Math.max(0, Math.ceil((r.s - ws - HALF) / DAY));
-      const kTo   = Math.ceil((r.e - ws - HALF) / DAY); // 미포함
-      for(let idx = kFrom; idx < kTo && idx < kFrom + 400; idx++) {
-        const mid = ws + idx*DAY + HALF;
-        if(mid < r.s || mid >= r.e) continue;
-        if(maxIdx !== null && idx >= maxIdx) continue;
+      let we = Infinity; // 마감일 없으면(진행중) 끝 제한 없음
+      if(w.endDate) {
+        const ed = parseLocalDate(w.endDate);
+        const [eh=8, em=0] = (w.endTime||'08:00').split(':').map(Number);
+        we = ed ? ed.getTime() + (eh*60+em)*60000 : NaN;
+        if(isNaN(we) || we <= ws) return;
+      }
+      const DAY = 86400000;
+      for(let n = 0, c = r.s; c < r.e && n < 400; n++, c += DAY) {
+        if(c < ws || c >= we) continue; // 기준시각에 근무 중이 아님
+        const idx = Math.floor((c - ws) / DAY);
         if(fromIdx != null && idx < fromIdx) continue;
         if(toIdx != null && idx >= toIdx) continue;
         if(seen['i'+idx]) continue; // 명절기간이 겹쳐 등록돼도 같은 블록은 한 번만
         seen['i'+idx] = true;
-        out.push({ idx, date: toLocalDateStr(new Date(ws + idx*DAY)), periodId: String(p.id||''), periodName: p.name||'', amount: amt });
+        out.push({ idx, date: toLocalDateStr(new Date(c)), periodId: String(p.id||''), periodName: p.name||'', amount: amt });
       }
       return;
     }
@@ -11611,17 +11620,12 @@ function hpUpdateFormPreview() {
     const tp = { start, end, startTime, endTime };
     const r = hpPeriodRange(tp);
     if(!r) { pv.innerHTML = '<span style="color:var(--red)">⚠️ 종료일시가 시작일시보다 빠르거나 같아요.</span>'; return; }
-    // 교대시각별 예시 — 실제 계산 엔진과 같은 규칙(블록의 12시간 이상이 기간 안)으로 계산
-    const ex = t => {
-      const ws = hpDateTimeMs(start, t) - 86400000; // 명절 전날부터 쭉 근무한다고 가정
-      const DAY = 86400000, HALF = 43200000, list = [];
-      for(let k = 0; k < 40; k++) { const bs = ws + k*DAY, mid = bs + HALF; if(mid >= r.e) break; if(mid >= r.s) list.push(bs); }
-      if(!list.length) return t + ' 교대: 해당 없음';
-      return t + ' 교대 → ' + list.map(ms => { const d = new Date(ms); return (d.getMonth()+1) + '/' + d.getDate(); }).join('·') + ' ' + t + ' 시작 근무 (' + list.length + '일)';
-    };
-    pv.innerHTML = '📅 <b>' + hpFmtMD(start) + ' ' + startTime + ' ~ ' + hpFmtMD(end) + ' ' + endTime + ' (' + hpPeriodSpanText(tp) + ')</b> — 24시간 근무 중 <b>12시간 이상이 이 기간에 걸치면</b> 1일 ' + cgAmt.toLocaleString() + '원 추가<br>'
-      + '예) ' + ex('09:00') + '<br>&nbsp;&nbsp;&nbsp;&nbsp;' + ex(startTime === '09:00' ? '20:00' : startTime) + '<br>'
-      + '10시간 미만 자투리(OT)는 할증 없음';
+    // 기준시각 목록 — 실제 계산 엔진과 같은 규칙(기간시작 + n×24h, 그 시각에 근무 중이면 할증)
+    const cps = [];
+    for(let c = r.s; c < r.e && cps.length < 40; c += 86400000) cps.push(c);
+    const cpText = cps.map(ms => { const d = new Date(ms); return (d.getMonth()+1) + '/' + d.getDate(); }).join('·') + ' ' + startTime;
+    pv.innerHTML = '📅 <b>' + hpFmtMD(start) + ' ' + startTime + ' ~ ' + hpFmtMD(end) + ' ' + endTime + ' (' + hpPeriodSpanText(tp) + ')</b> — <b>' + cpText + '</b>에 근무 중이면 1일 ' + cgAmt.toLocaleString() + '원 추가 (최대 ' + cps.length + '일)<br>'
+      + '할증은 그 시각이 속한 주차 주급(단기는 단기 급여)에 포함 · 기준시각 전에 종료했거나 이후에 시작하면 그 날은 제외';
     return;
   }
   // 시각 비움 = 예전 방식(날짜 기준) — 기존 등록분 수정 시에만 사용
@@ -11859,7 +11863,7 @@ function hpRenderResult(p) {
 
   const tile = (label, val) => '<div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;flex:1;min-width:120px"><div style="font-size:11px;color:var(--gray)">' + label + '</div><div style="font-size:18px;font-weight:700;color:var(--teal)">' + val + '</div></div>';
 
-  let html = '<div class="card-hd"><span class="dot"></span>📊 ' + hpEsc(p.name) + ' 할증 계산 <span style="font-size:10px;font-weight:400;color:var(--gray);text-transform:none;letter-spacing:0">' + hpEsc(hpPeriodLabel(p)) + (hpIsTimed(p) ? ' (12시간 이상 걸친 근무)' : ' 시작 근무') + ' · 1일 ' + holidayPremiumCgAmount(p).toLocaleString() + '원</span></div>'
+  let html = '<div class="card-hd"><span class="dot"></span>📊 ' + hpEsc(p.name) + ' 할증 계산 <span style="font-size:10px;font-weight:400;color:var(--gray);text-transform:none;letter-spacing:0">' + hpEsc(hpPeriodLabel(p)) + (hpIsTimed(p) ? ' (매일 ' + p.startTime + ' 근무 중 기준)' : ' 시작 근무') + ' · 1일 ' + holidayPremiumCgAmount(p).toLocaleString() + '원</span></div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:.75rem">'
     + tile('대상 간병인', valid.length + '명') + tile('할증 일수 합계', totalDays + '일') + tile('할증 총액', totalAmt.toLocaleString() + '원')
     + '</div>';
