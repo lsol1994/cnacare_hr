@@ -2285,7 +2285,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_30_04';
+const APP_BUILD = '26_09_30_05';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -4147,7 +4147,7 @@ function editPatient(id) {
           <input type="date" id="ep-endDate" value="${p.endDate||''}" onchange="onEpEndDateChange()">
         </div>
         <div class="field" style="margin-bottom:0">
-          <input type="time" id="ep-endTime" value="${p.endTime||''}">
+          <input type="time" id="ep-endTime" value="${p.endTime || (p.endDate ? (p.startTime||'') : '')}">
         </div>
       </div>
       <div id="ep-duration-preview" style="font-size:11px;color:var(--teal);margin-top:6px;font-weight:600"></div>
@@ -4244,7 +4244,8 @@ function savePatientEdit(id) {
   if(newEndDate) {
     // 종료일이 직접 입력됨 → 이걸 기준으로 기간 재계산 (시작일/시간 건드리지 않음)
     p.endDate = newEndDate;
-    p.endTime = newEndTime;
+    // 종료시간을 비워두면 입실시간과 동일하게 (간병 일급 24시간 단위 관례) — 26_09_30_05
+    p.endTime = newEndTime || p.startTime || '';
     if(p.startDate) {
       const days = Math.round((parseLocalDate(newEndDate) - parseLocalDate(p.startDate)) / 86400000);
       if(days >= 0) p.duration = days + '일';
@@ -4257,8 +4258,8 @@ function savePatientEdit(id) {
       if(d) {
         d.setDate(d.getDate() + days);
         p.endDate = toLocalDateStr(d);
-        // ⚠️ 시작시간은 종료시간에 영향 주지 않음 (독립)
-        if(!p.endTime) p.endTime = '';
+        // 종료시간이 이미 있으면 유지, 비어 있을 때만 입실시간을 기본값으로 (26_09_30_05)
+        if(!p.endTime) p.endTime = p.startTime || '';
       }
     }
   }
@@ -6263,7 +6264,7 @@ function openQuickEditCgEndTime(cgId) {
     '<div style="font-size:12px;color:var(--gray);margin-bottom:.875rem">환자 정보를 거치지 않고 이 간병인의 마감일시만 바로 수정해요.</div>'
     + '<div class="g2">'
     + '<div class="field"><label>마감일</label><input type="date" id="qe-endDate" value="' + (cg.endDate||'') + '"></div>'
-    + '<div class="field"><label>마감시간</label><input type="time" id="qe-endTime" value="' + (cg.endTime||'') + '"></div>'
+    + '<div class="field"><label>마감시간</label><input type="time" id="qe-endTime" value="' + (cg.endTime||cg.startTime||'') + '"></div>'
     + '</div>'
     + '<div style="display:flex;gap:8px;margin-top:1rem">'
     + '<button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveQuickEditCgEndTime(&quot;' + String(cgId).replace(/"/g,'&quot;') + '&quot;)">저장</button>'
@@ -6275,7 +6276,7 @@ function saveQuickEditCgEndTime(cgId) {
   const cg = caregivers.find(c=>String(c.id)===String(cgId));
   if(!cg) return;
   const newEndDate = document.getElementById('qe-endDate').value;
-  const newEndTime = document.getElementById('qe-endTime').value;
+  const newEndTime = document.getElementById('qe-endTime').value || cg.startTime || ''; // 비우면 입실시간 (26_09_30_05)
   if(!newEndDate) { toast('마감일을 입력해주세요', true); return; }
 
   cg.endDate = newEndDate;
@@ -6871,7 +6872,7 @@ function openExtendPatient(ptId) {
     + '<div class="field"><label>새 마감일 <span style="color:var(--red)">*</span></label>'
     + '<input type="date" id="ext-endDate" value="' + (p.endDate||'') + '" oninput="onExtDateChange(&quot;' + sdEsc + '&quot;)"></div>'
     + '<div class="field"><label>새 마감시간</label>'
-    + '<input type="time" id="ext-endTime" value="' + (p.endTime||'') + '"></div>'
+    + '<input type="time" id="ext-endTime" value="' + (p.endTime||p.startTime||'') + '"></div>'
     + '<div style="background:var(--teal-lt);border-radius:var(--rsm);padding:8px 12px;margin-bottom:.875rem;font-size:12px;color:var(--teal);font-weight:600;min-height:32px" id="ext-preview"></div>'
     + '<div class="field"><label>간병인 변경</label>'
     + '<select id="ext-cg-change" style="font-size:13px;padding:8px;border:1px solid var(--border);border-radius:var(--rsm);width:100%">'
@@ -6897,7 +6898,7 @@ function confirmExtend(ptId) {
   var p = patients.find(function(x){return String(x.id)===String(ptId);});
   if(!p) return;
   var newEndDate = document.getElementById('ext-endDate')&&document.getElementById('ext-endDate').value;
-  var newEndTime = (document.getElementById('ext-endTime')&&document.getElementById('ext-endTime').value)||'';
+  var newEndTime = (document.getElementById('ext-endTime')&&document.getElementById('ext-endTime').value)||p.startTime||''; // 비우면 입실시간 (26_09_30_05)
   var cgChange   = document.getElementById('ext-cg-change')&&document.getElementById('ext-cg-change').value;
   if(!newEndDate){toast('새 마감일을 입력해주세요',true);return;}
   var cg   = caregivers.find(function(c){return String(c.patientId)===String(ptId)&&c.workStatus!=='종료';});
@@ -9566,6 +9567,10 @@ function onEpEndDateChange() {
     preview.style.color = 'var(--teal)';
     document.getElementById('ep-duration').value = days + '일';
   }
+  // 종료시간 칸이 비어 있으면 입실시간으로 채워줌 (직접 입력한 값은 유지) — 26_09_30_05
+  const epEndTime = document.getElementById('ep-endTime');
+  const epStartTime = document.getElementById('ep-startTime');
+  if(epEndTime && !epEndTime.value && epStartTime && epStartTime.value) epEndTime.value = epStartTime.value;
 }
 
 function fixRecruitDates() {
