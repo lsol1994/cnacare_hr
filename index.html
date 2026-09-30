@@ -1144,8 +1144,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
           <button id="ins-flt-none"    class="btn btn-sm btn-teal" onclick="setInsFlt('none')"    style="font-size:11px">가입전</button>
           <button id="ins-flt-active"  class="btn btn-sm btn-teal" onclick="setInsFlt('active')"  style="font-size:11px">가입</button>
           <button id="ins-flt-expired" class="btn btn-sm" onclick="setInsFlt('expired')" style="font-size:11px">만료</button>
-          <button id="ins-flt-roster"  class="btn btn-sm" onclick="setInsFlt('roster')"  style="font-size:11px" title="보험사 등록된 전문인내역 기준 간병인·매칭환자 자동 연결">📄 보험사 등록내역</button>
-          <button class="btn btn-sm" onclick="openInsRosterUpload()" style="font-size:11px" title="보험사 사이트에서 받은 등록된_전문인내역.xls 업로드">📤 전문인내역 업로드</button>
+          <button id="ins-flt-roster"  class="btn btn-sm" onclick="setInsFlt('roster')"  style="font-size:11px" title="보험사 전문인내역 업로드 · 간병인/매칭환자 자동 연결 · 확인 필요 건 수정">📄 보험사 등록내역</button>
           <input type="file" id="ins-roster-file" accept=".xls,.xlsx,.htm,.html,.csv" style="display:none" onchange="onInsRosterFile(this)">
         </div>
         <div id="ins-search-row" style="display:none;width:100%;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px;padding-top:8px;border-top:1px dashed var(--border)">
@@ -2288,7 +2287,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_30_08';
+const APP_BUILD = '26_09_30_10';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -2847,6 +2846,8 @@ function attachFirebaseListener() {
             winner.insuranceExpiry     = local.insuranceExpiry;
             winner.insuranceMemo       = local.insuranceMemo;
             winner.insuranceTerminated = local.insuranceTerminated;
+            winner.insuranceCarried    = local.insuranceCarried || false;   // 연속 재배정 이어짐 표시
+            winner.insurancePolicyKey  = local.insurancePolicyKey || '';
           }
           if(local._snapshot && !winner._snapshot) winner._snapshot = local._snapshot;
 
@@ -7877,6 +7878,8 @@ function confirmEarlyTerminate(cgId) {
       expiry:     cg.insuranceExpiry || '',
       memo:       cg.insuranceMemo || '',
       terminated: cg.insuranceTerminated || false,
+      carried:    cg.insuranceCarried || false,
+      policyKey:  cg.insurancePolicyKey || '',
     }
   };
 
@@ -8062,6 +8065,8 @@ function cancelEarlyTerminate(cgId) {
     cg.insuranceExpiry    = snap.insurance.expiry;
     cg.insuranceMemo      = snap.insurance.memo;
     cg.insuranceTerminated= snap.insurance.terminated;
+    cg.insuranceCarried   = !!snap.insurance.carried;
+    cg.insurancePolicyKey = snap.insurance.policyKey || '';
     cg.insurancePatientId = ptId;
     if(snap.archivedInsuranceHistoryId && cg.insuranceHistory) {
       cg.insuranceHistory = cg.insuranceHistory.filter(h => String(h.id) !== String(snap.archivedInsuranceHistoryId));
@@ -8392,8 +8397,8 @@ const MANUAL_SECTIONS = [
 <p class="manual-p">날짜를 선택하면 그날 근무중인 간병인의 출근/퇴근 여부를 확인·기록할 수 있습니다. "간병일지 자동생성" 유지보수 도구(설정)를 사용하면 비어 있는 날짜의 출퇴근 기록을 근무 일정 기준으로 한 번에 채울 수 있습니다.</p>
 <img class="manual-img" src="${MANUAL_IMG.img26}" alt="출퇴근 체크">
 <div class="manual-sub-title">배상보험 현황</div>
-<p class="manual-p">전체 / 가입전 / 가입 / 만료 상태로 필터링해서 배상보험 가입 현황을 관리합니다. 설정 화면에서 지정한 일수만큼 만료 예정을 미리 알려주며, 만료 이력은 연도·월로 검색할 수 있습니다.</p>
-<p class="manual-p">"📤 전문인내역 업로드"로 보험사 사이트에서 받은 <b>등록된_전문인내역.xls</b>를 올리면, "📄 보험사 등록내역" 탭에서 가입/해지 건마다 간병인(생년월일·이름 기준)과 그 시점에 담당하던 환자가 자동으로 연결됩니다. 자동 연결이 안 된 건은 "연결" 버튼으로 직접 지정하면 같은 사람은 다음부터 자동 연결되고, "현황에 반영"을 누르면 미리보기 확인 후 간병인별 배상보험 가입일·해지일(현재 건/과거 이력)이 자동으로 채워집니다. 연결 결과는 엑셀로도 내려받을 수 있습니다.</p>
+<p class="manual-p">전체 / 가입전 / 가입 / 만료 상태로 필터링해서 배상보험 가입 현황을 관리합니다. 가입전인 간병인은 근무 시작일이 되면 가입 알림이, 가입된 간병인은 서비스 마감일이 다가오면(설정의 사전 알림 일수) 해지 신고 알림이 뜹니다 — 보험 해지는 <b>서비스 마감일 +1일</b>로 신고하세요. 만료 이력은 연도·월로 검색할 수 있습니다.</p>
+<p class="manual-p">"📄 보험사 등록내역" 탭에서 보험사 사이트의 <b>등록된_전문인내역.xls</b>를 업로드하면, 파일을 기준으로 간병인(생년월일·이름)과 가입일 당시 담당 환자가 자동 매칭되어 배상보험 현황(현재 건·과거 이력)에 바로 반영됩니다. 이미 등록돼 있던 같은 보험 건은 하나로 합쳐져 중복되지 않습니다. 간병인을 못 찾았거나 가입일에 담당 환자가 없는 건은 "확인 필요"에 따로 모이며(가입전·가입·만료에는 나오지 않음), [수정]에서 간병인·가입일·환자를 맞추면 매칭 완료로 옮겨지고 현황에 반영됩니다.</p>
 <img class="manual-img" src="${MANUAL_IMG.img27}" alt="배상보험 현황">
 <div class="manual-sub-title">중도 종료 — 재모집 / 완전종료</div>
 <p class="manual-p">근무 중인 간병인이 예정보다 일찍 그만두는 경우 사용합니다. 카드의 "중도종료" 버튼을 누르면 종료 유형을 선택하는 팝업이 뜹니다. 🔄 재모집(환자는 "모집중"으로 돌아가고 이전 담당 간병인 이름·종료 사유가 재모집 이력에 남으며, 새 간병인이 매칭되면 교체 보고가 자동 작성됨) 또는 🚫 완전 종료(환자와 간병인이 모두 "종료" 상태로 함께 처리됨) 중에서 선택합니다.</p>
@@ -8681,7 +8686,7 @@ const QNA_ITEMS_RAW = [
   { cat:'settings', q:'유지보수 도구는 언제, 어떻게 사용하나요?', a:'날짜 꼬임, 중복 데이터 등 정합성 문제를 점검·정리할 때 사용합니다. 대부분의 버튼은 누르는 즉시 실행되지 않고 먼저 설명 팝업이 뜬 뒤 확인해야 실제로 실행되니 안심하고 눌러봐도 됩니다. 다만 "중복 간병인 전체 일괄 정리"는 확인 없이 바로 처리되므로 신중히 사용하세요.', keywords:['유지보수도구','확인팝업','데이터정합성','중복간병인전체일괄정리','설정'] },
   { cat:'settings', q:'JSON 백업과 복원은 어떻게 하나요?', a:'"JSON 백업"으로 앱 전체 데이터를 파일로 내려받아 안전하게 보관할 수 있고, "JSON 불러오기"로 백업 파일을 다시 복원할 수 있습니다. "전체 초기화"는 모든 데이터를 지우는 되돌릴 수 없는 작업이니 각별히 주의하세요.', keywords:['JSON백업','JSON복원','전체초기화','데이터보관','되돌릴수없음'] },
   { cat:'settings', q:'엑셀 파일로 환자·간병인 정보를 한 번에 등록할 수 있나요?', a:'CSV 또는 엑셀(.xlsx/.xls) 파일을 끌어다 놓거나 선택해서 업로드하면 "환자관리"/"간병인관리" 시트를 자동으로 인식해 중복을 제외하고 등록합니다. 반대로 환자관리·간병인관리·간병일지 데이터를 파일로 다운로드할 수도 있어요.', keywords:['엑셀업로드','CSV업로드','자동인식','중복제외등록','엑셀다운로드'] },
-  { cat:'settings', q:'배상보험 만료 예정을 미리 알림받을 수 있나요?', a:'설정에서 배상보험 해지 사전 알림 일수(1~14일, 끄기)를 지정해두면 지정한 일수만큼 만료 예정을 미리 알려줍니다. 배상보험 기본 정보를 미리 등록해두면 간병인 보험 가입 시 자동으로 입력돼요.', keywords:['배상보험','만료예정알림','사전알림일수','배상보험기본정보','설정'] },
+  { cat:'settings', q:'배상보험 만료 예정을 미리 알림받을 수 있나요?', a:'설정에서 배상보험 해지 사전 알림 일수(1~14일, 끄기)를 지정해두면 서비스 마감일 기준으로 그 일수 전부터 해지 신고 알림을 드려요(보험 해지는 서비스 마감일 +1일로 신고). 가입전 간병인은 근무 시작일에 가입 알림이 떠요. 배상보험 기본 정보를 미리 등록해두면 간병인 보험 가입 시 자동으로 입력돼요.', keywords:['배상보험','만료예정알림','사전알림일수','배상보험기본정보','설정'] },
 ];
 // 카테고리별 순번을 id로 부여 (예: patients-1, patients-2 …)
 const QNA_ITEMS = (()=>{
@@ -12555,10 +12560,14 @@ function syncInsuranceForPatientChange(cg, oldPatientId, newPatientId, prevPatie
   if(oldPatientId === newPatientId) return; // 같은 환자 그대로면(단순 정보 수정 등) 유지
 
   // 이전에 뭔가 등록되어 있었으면(가입여부/메모/만료일/가입일 중 하나라도) 이력에 보관
+  let archived = null;
   if(cg.insuranceActive || cg.insuranceExpiry || cg.insuranceMemo || cg.insuranceStartDate) {
     if(!cg.insuranceHistory) cg.insuranceHistory = [];
     const oldPt = oldPatientId ? patients.find(p=>String(p.id)===oldPatientId) : null;
-    cg.insuranceHistory.unshift({
+    // 이 보험이 커버한 "이 환자 담당기간" — saveCg 수정 경로에선 cg.startDate가 이미 새 값으로
+    // 덮여 있을 수 있어서, 방금 저장된 근무이력(assignHistory)의 기간을 우선 사용
+    const ah = oldPatientId ? insLatestAssignFor(cg, oldPatientId) : null;
+    archived = {
       id: genId(),
       patientId: oldPatientId,
       patientName: oldPt ? oldPt.name : (prevPatientNameOverride || ''),
@@ -12568,7 +12577,12 @@ function syncInsuranceForPatientChange(cg, oldPatientId, newPatientId, prevPatie
       memo: cg.insuranceMemo || '',
       terminated: cg.insuranceTerminated || false,
       archivedAt: todayStr(),
-    });
+      coverFrom: ah ? (ah.startDate||'') : (cg.startDate||''),
+      coverTo:   ah ? (ah.endDate||'')   : (cg.endDate||''),
+    };
+    if(cg.insurancePolicyKey) archived.policyKey = cg.insurancePolicyKey;
+    if(cg.insuranceCarried)   archived.carried   = true;
+    cg.insuranceHistory.unshift(archived);
   }
   // 새 배정을 위해 현재 보험 상태 초기화(=이 건은 "가입전"부터 다시 시작)
   cg.insuranceActive = false;
@@ -12576,7 +12590,60 @@ function syncInsuranceForPatientChange(cg, oldPatientId, newPatientId, prevPatie
   cg.insuranceExpiry = '';
   cg.insuranceMemo = '';
   cg.insuranceTerminated = false;
+  cg.insuranceCarried = false;
+  cg.insurancePolicyKey = '';
   cg.insurancePatientId = newPatientId;
+
+  // ── 연속 재배정: 이전 근무건 보험을 해지하지 않았으면 새 환자 건으로 그대로 이어감 ──
+  // (간병인이 연이어 재배정되면 보험을 해지하지 않고 계속 유지하는 운영 방식 반영.
+  //  "가입전"으로 초기화해버리면 실제로는 가입 중인데 가입 필요 알림·가입전 탭에 떠서 중복 가입 위험)
+  if(newPatientId) {
+    const src = (archived && insEntryOpen(archived)) ? archived : insFindCarrySource(cg);
+    if(src) {
+      if(!src.policyKey) src.policyKey = String(src.rosterPeriod || src.id);
+      src.continued = true;               // 이 근무건 보험은 다음 근무건으로 이어짐(여기서 해지 안 함)
+      cg.insuranceActive     = true;
+      cg.insuranceStartDate  = src.startDate || '';
+      cg.insuranceExpiry     = '';         // 예정 해지일은 연속 배정으로 무효 → 새 근무건 마감 기준으로 다시 안내
+      cg.insuranceMemo       = src.memo || '';
+      cg.insuranceTerminated = false;
+      cg.insuranceCarried    = true;
+      cg.insurancePolicyKey  = src.policyKey;
+    }
+  }
+}
+
+// 연속 재배정 보험 이어가기 기준: 직전 근무건이 끝나고 이 일수 안에 재배정되면 이어감
+// (그보다 오래 쉬었으면 실제로는 해지했을 가능성이 높으므로 자동으로 이어가지 않음 — 전문인내역 업로드 시엔 해지일 기준으로 정확히 다시 맞춤)
+var INS_CARRY_MAX_GAP_DAYS = 14; // var: 스크립트 초기 실행 중 호출돼도 TDZ 오류 없게
+
+// 이 간병인의 해당 환자 근무이력 중 가장 최근 건
+function insLatestAssignFor(cg, patientId) {
+  const list = (cg.assignHistory||[]).filter(h => String(h.patientId) === String(patientId));
+  if(!list.length) return null;
+  return list.slice().sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''))[0];
+}
+// 해지되지 않고 살아있는 보험 기록인지
+function insEntryOpen(h) {
+  if(!h || !h.active || h.terminated) return false;
+  if(h.expiry && h.expiry < todayStr()) return false;
+  return true;
+}
+// 직전 근무건(가장 최근 근무이력)의 보험 기록 중 해지 안 된 것 (없으면 null)
+// 직전 근무건 것만 보므로, 예전에 정리 안 된 오래된 미해지 기록이 엉뚱하게 이어지지 않음
+function insFindCarrySource(cg) {
+  const last = (cg.assignHistory||[]).slice().sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''))[0];
+  if(!last) return null;
+  const cands = (cg.insuranceHistory||[]).filter(h =>
+    String(h.patientId||'') === String(last.patientId) && insEntryOpen(h) && !h.continued);
+  if(!cands.length) return null;
+  const src = cands.sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''))[0];
+  const endD = src.coverTo || last.endDate || '';
+  if(endD) {
+    const gap = insDayNum(todayStr()) - insDayNum(endD);
+    if(gap > INS_CARRY_MAX_GAP_DAYS) return null;
+  }
+  return src;
 }
 
 // 배상보험 이력 관리 도입 전 데이터 정리(1회성): 이미 새 환자로 매칭되어 있는데
@@ -12748,6 +12815,7 @@ function renderInsuranceSearchResults(el, year, month) {
       });
     }
     (c.insuranceHistory||[]).forEach(h => {
+      if(h.continued) return; // 연속 재배정으로 다음 근무건에 이어진 건은 같은 보험이라 마지막 근무건 1건으로만 표시
       if(matchYM(h.expiry)) {
         rows.push({
           type: 'history', cgId: c.id, cgName: c.name, histId: h.id,
@@ -12797,8 +12865,9 @@ function renderInsurance() {
   const searchYear  = showSearch ? (document.getElementById('ins-search-year')?.value || '')  : '';
   const searchMonth = showSearch ? (document.getElementById('ins-search-month')?.value || '') : '';
 
-  // 보험사 등록내역(전문인내역 업로드) 보기
+  // 보험사 등록내역(전문인내역 업로드 · 확인 필요 · 매칭 완료) 보기
   if(insFlt === 'roster') { renderInsRoster(el); return; }
+  refreshInsRosterTabLabel(); // 다른 탭에서도 "확인 필요" 건수 표시
 
   if(!caregivers.length){ el.innerHTML='<div class="empty" style="padding:1rem 0"><p>등록된 간병인이 없어요</p></div>'; return; }
 
@@ -12824,6 +12893,10 @@ function renderInsurance() {
 
   // 대상: 대기중/근무중/종료 간병인만 (예비 제외) - 필터로 세부 구분
   let list = caregivers.filter(isInsEligible);
+  // 전문인내역에서 "확인 필요"(가입일에 담당 환자 없음)인 건이 현재 근무건과 관련된 간병인은
+  // 가입전/가입/만료에 섞지 않고 보험사 등록내역 탭의 확인 필요에서 먼저 바로잡도록 함 (전체 탭에는 표시 + 배지)
+  const insHold = insRosterHoldIds();
+  if(insFlt !== 'all') list = list.filter(c => !insHold.has(String(c.id)));
   if(insFlt === 'none')         list = list.filter(c=>c.workStatus!=='종료' && getInsStatus(c)==='none');
   else if(insFlt === 'active')  list = list.filter(c=>c.workStatus!=='종료' && getInsStatus(c)==='active');
   else if(insFlt === 'expired') list = list.filter(c=>getInsStatus(c)==='expired' || c.workStatus==='종료');
@@ -12857,18 +12930,26 @@ function renderInsurance() {
       : `D-${diff}`;
     const histCount = (c.insuranceHistory||[]).length;
     const curPt = c.patientId ? patients.find(p=>String(p.id)===String(c.patientId)) : null;
+    // 담당 환자 없이(종료) 직전 근무건 보험이 아직 해지 안 된 채 남아있으면 표시 (연속 재배정 대기 / 해지 신고 필요)
+    const openSrc = !c.patientId ? insFindCarrySource(c) : null;
     return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <div style="flex:1;min-width:100px">
-          <div style="font-size:13px;font-weight:700">${c.name}${curPt?` <span style="font-weight:400;color:var(--gray);font-size:11px">— ${curPt.name} 담당중</span>`:''}</div>
+          <div style="font-size:13px;font-weight:700">${insHold.has(String(c.id))?'<span class="badge" style="font-size:10px;background:#dc262622;color:#dc2626;border:1px solid #dc262644;margin-right:4px">확인 필요</span>':''}${c.name}${curPt?` <span style="font-weight:400;color:var(--gray);font-size:11px">— ${curPt.name} 담당중</span>`:''}</div>
           <div style="font-size:11px;color:var(--gray);margin-top:2px">
             ${c.insuranceActive?'✅ 가입':'❌ 미가입'}
             ${c.insuranceStartDate?'· 가입일 '+c.insuranceStartDate:''}
             ${c.insuranceExpiry?'· 만료 '+c.insuranceExpiry:''}
+            ${c.insuranceActive && !c.insuranceTerminated && c.endDate ? `· <b style="color:var(--amber)">서비스 마감 ${c.endDate} → 해지신고일 ${insAddDays(c.endDate,1)}</b>` : ''}
           </div>
+          ${c.insuranceActive && c.insuranceCarried ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 연속 재배정 — 이전 근무건 보험을 해지 없이 이어서 유지 중 (가입일 ${c.insuranceStartDate||'?'})</div>` : ''}
+          ${openSrc ? `<div style="font-size:11px;margin-top:3px;padding:3px 6px;border-radius:5px;background:#d9770611;color:#b45309">🛡 <b>보험 미해지</b> — ${insEsc(openSrc.patientName||'직전 근무건')} 건 (가입 ${openSrc.startDate||'?'}${openSrc.coverTo?' · 서비스 마감 '+openSrc.coverTo:''}) · 연이어 재배정하면 새 근무건으로 자동 이어지고, 재배정 없으면 <b>해지 신고${openSrc.coverTo?'('+insAddDays(openSrc.coverTo,1)+')':''}</b> 후 [해지완료] 체크</div>` : ''}
           ${c.insuranceMemo?`<div style="font-size:11px;color:var(--teal);margin-top:2px;font-family:var(--mono)">🔖 ${c.insuranceMemo}</div>`:''}
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          ${openSrc ? `<label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer">
+            <input type="checkbox" style="width:15px;height:15px;accent-color:var(--teal)" onchange="terminateInsuranceHistory('${c.id}','${openSrc.id}',this.checked)">
+            <span style="color:#b45309">해지완료</span></label>` : ''}
           <span class="badge" style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44">${statusTxt}</span>
           ${c.insuranceActive && diff !== null && diff >= 0 ? `
           <label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer">
@@ -12890,10 +12971,13 @@ function renderInsurance() {
       </div>
       ${histCount ? `
       <div id="ins-hist-${c.id}" style="display:none;margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm)">
-        ${c.insuranceHistory.map(h => `
+        ${insSortedHistory(c).map(h => `
           <div style="font-size:11px;color:var(--gray);padding:4px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
             <div style="flex:1;min-width:0">
-              <b style="color:var(--black)">${h.patientName||'(환자 정보 없음)'}</b> · ${h.active?'가입':'미가입'}${h.startDate?' · 가입일 '+h.startDate:''}${h.expiry?' · 만료 '+h.expiry:''}${h.terminated?' · 만료처리됨':''}
+              <b style="color:var(--black)">${h.patientName||'(환자 정보 없음)'}</b> · ${h.active?'가입':'미가입'}${h.startDate?' · 가입일 '+h.startDate:''}${h.expiry?' · '+(h.continued?'해지 ':'만료 ')+h.expiry:''}${h.terminated && !h.continued?' · 만료처리됨':''}
+              ${(h.coverFrom||h.coverTo)?`<span style="color:var(--gray-lt)"> · 담당 ${h.coverFrom||'?'}~${h.coverTo||'진행중'}</span>`:''}
+              ${h.carried?' <span class="badge" style="font-size:9px;background:#0b7a6e14;color:var(--teal);border:1px solid #0b7a6e33">🔗 이전 건에서 이어짐</span>':''}
+              ${h.continued?' <span class="badge" style="font-size:9px;background:#0b7a6e14;color:var(--teal);border:1px solid #0b7a6e33">➡ 다음 근무건으로 이어짐</span>':''}
               ${h.memo?`<div style="color:var(--teal);font-family:var(--mono);margin-top:2px">🔖 ${h.memo}</div>`:''}
             </div>
             <div style="display:flex;gap:4px;flex-shrink:0">
@@ -12906,18 +12990,19 @@ function renderInsurance() {
   }).join('');
 }
 
-// ─── 배상보험: 보험사 "등록된 전문인내역" 업로드 → 간병인 + 그 시점 매칭환자 자동 연결 ───
-// 보험사 사이트에서 내려받는 "등록된_전문인내역.xls"(실제로는 HTML 표 형식, 진짜 xls/xlsx도 지원)를
-// 올리면 가입일/해지일/이름/생년월일/성별을 읽어 cfg.insRoster에 보관(기기 간 동기화됨)하고,
-// 각 행을 ① 생년월일(주민번호 앞 6자리) ② 이름(한글/영문, 괄호 안 이름 포함)으로 간병인과 연결한 뒤,
-// 그 간병인의 전체 담당기간(getAssignPeriods: 라이브+assignHistory) 중 보험 가입일 시점에 담당하던
-// 환자를 찾아 자동으로 채워줌. 외국인 간병인은 보험사엔 영문, 앱엔 한글로 등록된 경우가 많아서
-// 생년월일이 1차 기준이고, 자동으로 못 찾거나 잘못 찾은 건은 "연결" 버튼으로 직접 지정하면
-// cfg.insAlias(생년월일+이름 → 간병인 id)에 기억돼서 이후 업로드부터 같은 사람은 자동 연결됨.
-// "현황에 반영"은 미리보기 확인 후에만 실제 간병인 보험 데이터(현재 건/과거 이력)에 기록함.
-let insRosterMonth = '';        // 등록내역 보기: 가입월 필터 ('' = 전체)
-let insRosterOnlyUnmatched = false;
-let _insApplyPlan = null;
+// ─── 배상보험: 보험사 "등록된 전문인내역" = 배상보험 현황의 기준 데이터 ───
+// 규칙
+//  1) 업로드한 전문인내역 엑셀이 기준. (cfg.insRoster에 보관 → 모든 기기 동기화)
+//  2) 각 행의 간병인(생년월일 앞 6자리 + 이름)과, 그 "가입일"에 그 간병인이 담당하던 환자를 매칭.
+//     (가입일이 담당기간 안이거나, 담당 시작일 ±3일 이내면 매칭 / 같은 날 교대면 새로 시작한 건)
+//  3) 매칭된 건은 업로드 즉시 배상보험 현황(현재 건 = 간병인 보험 칸, 지난 근무건 = 과거 이력)에 자동 반영.
+//  4) 이미 등록돼 있던 같은 보험 건(직접 입력한 이력 포함)은 새로 만들지 않고 1건으로 합침 → 몇 번을 올려도 중복 없음.
+//  5) 간병인을 못 찾았거나, 가입일에 맞는 담당 환자가 없는 건은 "확인 필요"로 따로 분류(현황에는 반영 안 함).
+//     [수정]에서 간병인/가입일/담당 환자를 바로잡으면 그 즉시 매칭 완료로 옮겨지고 현황에 반영됨.
+//  6) 연속 재배정(해지 없이 보험 유지): 가입건 이후 "해지일 전에 시작한" 다음 근무건들도 같은 보험으로 보고
+//     환자(근무건)별로 나눠서 분류함 (앞 근무건 = "다음 근무건으로 이어짐", 뒤 근무건 = "이전 건에서 이어짐").
+//  7) 업로드/다시 맞추기는 변경 전·후 미리보기를 먼저 보여주고 [적용]을 눌러야 반영됨 (2026-09-30~)
+let insRosterMonth = '';   // 매칭 완료 목록: 가입·해지월 필터 ('' = 전체)
 
 function insEsc(s) {
   return String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -12958,10 +13043,14 @@ function insNormDate(v) {
   return '';
 }
 function insDayNum(dateStr) { const d = parseLocalDate(dateStr); return d ? Math.round(d.getTime()/86400000) : null; }
+function insAddDays(dateStr, n) { const d = parseLocalDate(dateStr); if(!d) return ''; d.setDate(d.getDate() + n); return toLocalDateStr(d); }
 function insAliasKey(r) { return (r.b||'000000') + '_' + (insRowNames(r.n).join('_') || 'X'); }
 function insRowKey(r) { return r.s + '|' + insNormName(r.n) + '|' + (r.b||''); }
+// 행별 수정값(cfg.insRowFix) 저장 키 — Firebase 키로 안전한 문자만 사용
+function insFixKey(r) { return r.s + '_' + (insNormName(r.n) || 'X') + '_' + (r.b||'000000'); }
 // onclick 인자로 안전하게 넘기기 위한 인코딩 (따옴표·괄호 등이 이름에 섞여도 깨지지 않게)
 function insKeyArg(r) { return encodeURIComponent(insRowKey(r)).replace(/'/g,'%27'); }
+function insPeriodKey(p) { return String(p.patientId) + '|' + p.startDate; }
 
 // 표(2차원 배열)에서 헤더 행을 찾아 등록내역 행 목록으로 변환
 function insRosterFromAoa(aoa) {
@@ -13025,41 +13114,32 @@ function onInsRosterFile(input) {
     let rows;
     try { rows = insParseRosterBuffer(ev.target.result); }
     catch(err) { toast('❌ ' + err.message, true); return; }
-    // 기존 내역과 합침: (가입일+이름+생년월일) 묶음 단위로 새 파일 내용으로 교체하고, 새 파일에 없는 예전 묶음은 보존.
+    // 기존 내역과 합침: (가입일+이름+생년월일) 묶음 단위로 새 파일 내용으로 교체, 새 파일에 없는 예전 묶음은 보존.
     // 보험사 파일엔 같은 날 같은 사람이 2줄(성별 정정 재등록 등)인 경우가 있어서 행 단위가 아니라 묶음 단위로 교체함
-    const prev = (cfg.insRoster && Array.isArray(cfg.insRoster.rows)) ? cfg.insRoster.rows : [];
+    const prev = insRosterRows();
     const group = list => { const g = new Map(); list.forEach(r => { if(!r || !r.s) return; const k = insRowKey(r); if(!g.has(k)) g.set(k, []); g.get(k).push(r); }); return g; };
     const oldG = group(prev), newG = group(rows);
-    const sig = list => list.map(r => [r.e, r.g, r.n].join('/')).sort().join('|');
-    let added = 0, updated = 0;
-    newG.forEach((list, k) => {
-      const old = oldG.get(k);
-      if(!old) added += list.length;
-      else if(sig(old) !== sig(list)) updated += list.length;
-      oldG.set(k, list);
-    });
+    newG.forEach((list, k) => oldG.set(k, list));
     const merged = [].concat(...oldG.values()).sort((a,b) => a.s.localeCompare(b.s) || String(a.n).localeCompare(String(b.n)));
     cfg.insRoster = { uploadedAt: todayStr() + ' ' + new Date().toTimeString().slice(0,5), fileName: f.name, rows: merged };
     markCfgEdited();
-    save();
+    save(); // 등록내역 자체만 먼저 저장 — 현황 반영은 아래 미리보기에서 [적용]을 눌러야 함
     insRosterMonth = '';
     setInsFlt('roster');
-    toast(`✅ 전문인내역 ${rows.length}건 읽음 (신규 ${added} · 변경 ${updated})`);
-    // 실제 간병인 보험 데이터에 반영할 변경사항이 있으면 미리보기부터 띄움 (바로 쓰지 않음)
-    const plan = insBuildApplyPlan();
-    if(plan.length) previewInsRosterApply();
+    const chk = insRosterRows().map(insMatchRosterRow).filter(m => m.state === 'nocg' || m.state === 'noperiod').length;
+    toast(`✅ 전문인내역 ${rows.length}건 읽음${chk ? ' · ⚠ 확인 필요 ' + chk + '건' : ''} — 현황 변경 내용을 확인해주세요`);
+    openInsReconcilePreview('📤 전문인내역 반영 — 변경 미리보기');
   };
   reader.onerror = () => toast('❌ 파일을 읽지 못했어요', true);
   reader.readAsArrayBuffer(f);
 }
 
-// 간병인의 담당기간 중 보험기간(가입일~해지일)에 해당하는 근무건 1개 선택
-//  1순위: 가입일 당일을 포함하는 근무건(여러 개면 더 늦게 시작한 건 = 같은 날 교대한 새 건)
-//  2순위: 보험기간과 가장 많이 겹치는 근무건
-//  3순위: 가입일 ±3일 안에 시작한 근무건(가입을 하루 이틀 먼저/늦게 한 경우)
-function insPickPeriod(cg, r) {
-  const s = insDayNum(r.s);
-  const e = r.e ? insDayNum(r.e) : 9e9;
+// 가입일(dateStr)에 이 간병인이 담당하던 근무건 1개
+//  ① 가입일이 담당기간(시작~마감) 안 → 여러 개면 더 늦게 시작한 건(같은 날 교대한 새 건)
+//  ② 가입일 ±3일 안에 담당 시작(가입을 하루 이틀 먼저/늦게 한 경우)
+//  그 외는 매칭하지 않음 → "확인 필요"
+function insPickPeriod(cg, dateStr) {
+  const s = insDayNum(dateStr);
   if(s === null) return null;
   let best = null, bestScore = -Infinity;
   getAssignPeriods(cg).forEach(p => {
@@ -13067,8 +13147,7 @@ function insPickPeriod(cg, r) {
     if(ps === null) return;
     const pe = p.endDate ? (insDayNum(p.endDate) ?? 9e9) : 9e9;
     let score = null;
-    if(ps <= s && s <= pe) score = 3e9 + ps;
-    else if(ps <= e && pe >= s) score = 2e9 + (Math.min(pe, e) - Math.max(ps, s));
+    if(ps <= s && s <= pe) score = 2e9 + ps;
     else if(Math.abs(ps - s) <= 3) score = 1e9 - Math.abs(ps - s);
     if(score !== null && score > bestScore) { bestScore = score; best = p; }
   });
@@ -13084,183 +13163,554 @@ function insPeriodPatient(cg, period) {
   return { name: h ? (h.patientName||'') : '', hospital: h ? (h.hospital||'') : '' };
 }
 
-// 등록내역 1행 → { row, cg, how, period, patientName, hospital, candidates }
-// how: manual(직접 연결) / auto(생년월일+이름 일치) / birth(생년월일만 일치) / name(이름만 일치) / ''(미매칭)
+function insGetFix(r) { return (cfg.insRowFix && cfg.insRowFix[insFixKey(r)]) || null; }
+
+// 등록내역 1행 → { row, cg, how, date, period, patientName, hospital, candidates, state }
+// how: manual(직접 지정) / auto(생년월일+이름) / birth(생년월일만) / name(이름만)
+// state: ok(매칭 완료) / void(가입일=해지일 정정건, 반영 제외) / nocg(간병인 못 찾음) / noperiod(가입일에 담당 환자 없음)
 function insMatchRosterRow(r) {
   const names = insRowNames(r.n);
+  const fix = insGetFix(r);
+  const date = (fix && fix.d) || r.s;
   let cg = null, how = '', candidates = [];
-  const alias = cfg.insAlias ? cfg.insAlias[insAliasKey(r)] : '';
-  if(alias) { cg = caregivers.find(c => String(c.id) === String(alias)) || null; if(cg) how = 'manual'; }
+  if(fix && fix.cg) { cg = caregivers.find(c => String(c.id) === String(fix.cg)) || null; if(cg) how = 'manual'; }
+  if(!cg) {
+    const alias = cfg.insAlias ? cfg.insAlias[insAliasKey(r)] : '';
+    if(alias) { cg = caregivers.find(c => String(c.id) === String(alias)) || null; if(cg) how = 'manual'; }
+  }
   if(!cg) {
     const byBirth = r.b ? caregivers.filter(c => insCgBirth6(c) === r.b) : [];
     const byName  = names.length ? caregivers.filter(c => names.includes(insNormName(c.name))) : [];
     const both    = byBirth.filter(c => byName.includes(c));
     const pick = list => {
       if(list.length === 1) return list[0];
-      const withPeriod = list.filter(c => insPickPeriod(c, r));
+      const withPeriod = list.filter(c => insPickPeriod(c, date));
       return withPeriod.length === 1 ? withPeriod[0] : null;
     };
-    if(both.length)        { cg = pick(both);    how = 'auto';  candidates = both; }
+    if(both.length)           { cg = pick(both);    how = 'auto';  candidates = both; }
     if(!cg && byBirth.length) { cg = pick(byBirth); how = 'birth'; candidates = byBirth; }
     if(!cg && byName.length)  { cg = pick(byName);  how = 'name';  candidates = byName; }
     if(!cg) how = '';
   }
-  const period = cg ? insPickPeriod(cg, r) : null;
+  let period = null;
+  if(cg) {
+    if(fix && fix.p) period = getAssignPeriods(cg).find(p => insPeriodKey(p) === fix.p) || null;
+    if(!period) period = insPickPeriod(cg, date);
+  }
   const pi = insPeriodPatient(cg, period);
-  return { row: r, cg, how, period, patientName: pi.name, hospital: pi.hospital, candidates };
+  const state = (r.e && r.e === r.s) ? 'void' : !cg ? 'nocg' : !period ? 'noperiod' : 'ok';
+  return { row: r, cg, how, date, period, patientName: pi.name, hospital: pi.hospital, candidates, state, fixed: !!fix };
 }
 
 function insRosterRows() {
   return (cfg.insRoster && Array.isArray(cfg.insRoster.rows)) ? cfg.insRoster.rows.filter(r => r && r.s) : [];
 }
 
+// ─── 현황 반영(중복 없이) ───
+// 기존 이력은 "과거 이력 추가"로 직접 입력한 건(patientId 없음, 환자명만)과 자동 보관된 건(patientId 있음),
+// 이전 버전에서 반영된 건(periodStart 표시)이 섞여 있음. 아래 중 하나라도 맞으면 "같은 보험 건"으로 보고 1건으로 합침:
+//  · 이미 이 근무건으로 반영된 건(rosterPeriod / periodStart 표시)
+//  · 보험 가입일이 같은 건
+//  · 환자가 같고(ID 또는 이름, 또는 환자 정보 없음) 보험기간이 겹치거나 날짜가 비어있는 건
+function insHistSamePatient(h, p, ptName) {
+  if(h.patientId && String(h.patientId) === String(p.patientId)) return true;
+  const hn = insNormName(h.patientName), pn = insNormName(ptName);
+  if(hn && pn && hn === pn) return true;
+  return !h.patientId && !hn; // 환자 정보가 아예 없는 이력
+}
+function insRangeSame(s1, e1, s2, e2) {
+  if(!s1 || !s2) return false;
+  if(s1 === s2) return true;
+  const a1 = insDayNum(s1), a2 = insDayNum(s2);
+  const b1 = e1 ? insDayNum(e1) : 9e9, b2 = e2 ? insDayNum(e2) : 9e9;
+  return Math.max(a1, a2) < Math.min(b1, b2); // 하루 경계만 맞닿는 교대 건은 다른 건
+}
+function insHistIsEmpty(h) { return !h.active && !h.startDate && !h.expiry; }
+// byP: 같은 간병인의 전체 대상(근무건별) — 같은 보험이 이어진 다른 근무건 몫을 가로채지 않기 위해 사용
+function insHistMatches(h, T, byP) {
+  const pk = T.pkey;
+  if(h.rosterPeriod) return h.rosterPeriod === pk;
+  if(h.periodStart && String(h.patientId) === String(T.period.patientId) && h.periodStart === T.period.startDate) return true;
+  const samePt = insHistSamePatient(h, T.period, T.patientName);
+  if(h.startDate && h.startDate === T.s) {
+    if(samePt) return true;
+    // 가입일은 같은데 환자가 다른 기록: 연속 재배정으로 같은 보험이 이어진 다른 근무건의 기록이면 그쪽 몫.
+    // 그런 근무건이 없을 때만(=예전 방식으로 엉뚱한 환자명이 붙은 기록) 가입건의 첫 근무건이 1건으로 합침
+    if(T.via !== 'anchor') return false;
+    const other = byP ? [...byP.values()].some(o => o !== T && o.policy === T.policy && insHistSamePatient(h, o.period, o.patientName)) : false;
+    return !other;
+  }
+  return samePt && (insHistIsEmpty(h) || !h.startDate || insRangeSame(h.startDate, h.expiry, T.s, T.e));
+}
+
+// 등록내역 → 간병인별·근무건별 반영 대상
+//  ① 가입건(anchor): 등록내역 1줄의 가입일에 담당하던 근무건 (같은 근무건에 여러 줄이면 가입일=가장 이른 날, 해지일=가장 늦은 날, 미해지 줄 있으면 가입중)
+//  ② 연속 재배정(carry): 해지하지 않고 이어간 경우, 가입건 이후 "해지일 전에 시작한" 다음 근무건들도 같은 보험으로 환자별 분류
+//     단, 같은 간병인의 다음 가입건(새로 가입한 날) 이후 근무건은 그 가입건 몫이고, 자기 가입건이 있는 근무건은 항상 그쪽 우선
+//     해지일 당일 이후 시작한 근무건은 이어진 것으로 보지 않음(해지 = 서비스 마감 +1일 신고 기준)
+// T = { period, pkey, s(가입일), e(해지일), open, patientName, via:'anchor'|'carry', policy(가입건 근무건 키), next(다음 근무건으로 이어짐) }
+function insBuildTargets() {
+  const byCg = new Map();
+  insRosterRows().forEach(r => {
+    const m = insMatchRosterRow(r);
+    if(m.state !== 'ok') return;
+    const k = String(m.cg.id);
+    if(!byCg.has(k)) byCg.set(k, { cg: m.cg, list: [] });
+    byCg.get(k).list.push(m);
+  });
+  const targets = new Map();
+  byCg.forEach(({ cg, list }, cgKey) => {
+    const anchors = new Map();
+    list.forEach(m => {
+      const pkey = insPeriodKey(m.period), r = m.row;
+      const A = anchors.get(pkey);
+      if(!A) { anchors.set(pkey, { period: m.period, pkey, s: m.date, e: r.e || '', open: !r.e, patientName: m.patientName }); return; }
+      if(m.date < A.s) A.s = m.date;
+      if(!r.e) A.open = true; else if(r.e > A.e) A.e = r.e;
+    });
+    const aList = [...anchors.values()].sort((a,b) => a.s.localeCompare(b.s) || (a.period.startDate||'').localeCompare(b.period.startDate||''));
+    const byP = new Map();
+    aList.forEach(A => { if(A.open) A.e = ''; byP.set(A.pkey, Object.assign({}, A, { via: 'anchor', policy: A.pkey, next: false })); });
+    const periods = getAssignPeriods(cg);
+    aList.forEach(A => {
+      const nextS = aList.map(x => x.s).filter(x => x > A.s).sort()[0] || '';
+      const endN = A.e ? insDayNum(A.e) : Infinity;
+      periods.forEach(p => {
+        const pk = insPeriodKey(p);
+        if(byP.has(pk)) return;                                          // 자기 가입건이 있거나 이미 다른 보험에 연결됨
+        if(!p.startDate || p.startDate <= (A.period.startDate||'')) return; // 가입건 이후 근무건만
+        if(!(insDayNum(p.startDate) < endN)) return;                     // 해지일 당일·이후 시작 → 이어진 게 아님
+        if(nextS && p.startDate >= nextS) return;                        // 다음 가입건 이후 → 그 가입건 몫
+        byP.set(pk, { period: p, pkey: pk, s: A.s, e: A.e, open: A.open,
+          patientName: insPeriodPatient(cg, p).name, via: 'carry', policy: A.pkey, next: false });
+      });
+    });
+    const pol = new Map();
+    byP.forEach(T => { if(!pol.has(T.policy)) pol.set(T.policy, []); pol.get(T.policy).push(T); });
+    pol.forEach(ts => {
+      ts.sort((a,b) => (a.period.startDate||'').localeCompare(b.period.startDate||''));
+      ts.forEach((T, i) => { T.next = i < ts.length - 1; });
+    });
+    targets.set(cgKey, byP);
+  });
+  return targets;
+}
+
+// 등록내역의 매칭 완료 건을 간병인 보험 데이터에 맞춤. 반복 실행해도 결과가 같음(멱등).
+// opts.dry = true 이면 미리보기용(복제본 대상) — 동기화 보호/삭제 표시(tombstone)를 남기지 않음
+function insReconcile(opts) {
+  const dry = !!(opts && opts.dry);
+  const st = { touched: 0, merged: 0, carryCleared: 0 };
+  const rows = insRosterRows();
+  if(!rows.length) return st;
+  const defMemo = cfg.insuranceMemo || 'KB2025개인간병인배상책임보험(3천)/2025-3561946-1';
+  const targets = insBuildTargets();
+  // 간병인별 "해지된 가입건" (가입일 → 해지일) — 등록내역상 이미 해지된 보험이 현재 근무건에 "이어짐"으로 잘못 남은 경우 정리용
+  const closedByCg = new Map();
+  targets.forEach((byP, k) => byP.forEach(T => {
+    if(T.via !== 'anchor' || !T.e) return;
+    if(!closedByCg.has(k)) closedByCg.set(k, new Map());
+    closedByCg.get(k).set(T.s, T.e);
+  }));
+  const only = opts && opts.only ? opts.only : null; // 특정 간병인만 맞출 때(등록내역 1건 수정 등)
+  caregivers.forEach(cg => {
+    const cgKey = String(cg.id);
+    if(only && !only.has(cgKey)) return;
+    const byP = targets.get(cgKey);
+    const hist0 = cg.insuranceHistory || [];
+    // 예전에 등록내역으로 반영했지만 지금은 더 이상 그 근무건으로 매칭되지 않는 건(연결 수정 등) → 정리
+    const orphan = hist0.filter(h => h.rosterPeriod && !(byP && byP.has(h.rosterPeriod)));
+    const Ts = byP ? [...byP.values()].sort((a,b) => a.s.localeCompare(b.s) || (a.period.startDate||'').localeCompare(b.period.startDate||'')) : [];
+    const liveT = Ts.find(T => String(cg.patientId||'') === String(T.period.patientId) && (cg.startDate||'') === T.period.startDate) || null;
+    const closed = closedByCg.get(cgKey);
+    const closedE = closed ? closed.get(cg.insuranceStartDate || '') : '';
+    const staleCarry = !liveT && cg.insuranceCarried && cg.insuranceActive && !cg.insuranceTerminated
+                       && closedE && cg.startDate && closedE <= cg.startDate;
+    if(!byP && !orphan.length && !staleCarry) return;
+    let touched = false;
+    let hist = hist0.filter(h => !orphan.includes(h));
+    const removed = orphan.slice();
+    if(orphan.length) touched = true;
+    const claimed = new Set();
+    Ts.forEach(T => {
+      const term = !!T.e;
+      const carried = T.via === 'carry';
+      const same = hist.filter(h => !claimed.has(h) && insHistMatches(h, T, byP));
+      same.forEach(h => claimed.add(h));
+      const memoFrom = (same.find(h => h.memo) || {}).memo || '';
+      if(T === liveT) {
+        const ok = cg.insuranceActive && (cg.insuranceStartDate||'') === T.s && (cg.insuranceExpiry||'') === T.e
+                   && !!cg.insuranceTerminated === term && String(cg.insurancePatientId||'') === String(cg.patientId)
+                   && !!cg.insuranceCarried === carried && (cg.insurancePolicyKey||'') === T.policy;
+        if(!ok) {
+          cg.insuranceActive = true; cg.insuranceStartDate = T.s; cg.insuranceExpiry = T.e;
+          cg.insuranceTerminated = term; cg.insurancePatientId = String(cg.patientId);
+          cg.insuranceCarried = carried; cg.insurancePolicyKey = T.policy;
+          touched = true;
+        }
+        if(!cg.insuranceMemo) { cg.insuranceMemo = memoFrom || defMemo; touched = true; }
+        if(same.length) { hist = hist.filter(h => !same.includes(h)); removed.push(...same); st.merged += same.length; touched = true; } // 현재 건과 같은 과거 이력 = 중복
+      } else {
+        const keep = same.find(h => h.rosterPeriod === T.pkey) || same.find(h => h.startDate === T.s && insHistSamePatient(h, T.period, T.patientName))
+                  || same.find(h => h.startDate === T.s) || same.find(h => !insHistIsEmpty(h)) || same[0] || null;
+        const dups = same.filter(h => h !== keep);
+        let h = keep;
+        if(!h) { h = { id: genId(), memo: '', archivedAt: todayStr() }; hist.unshift(h); touched = true; }
+        const ptName = T.patientName || h.patientName || (dups.find(d => d.patientName) || {}).patientName || '';
+        const cFrom = T.period.startDate || '', cTo = T.period.endDate || '';
+        const ok = h.active && (h.startDate||'') === T.s && (h.expiry||'') === T.e && !!h.terminated === term
+                   && h.rosterPeriod === T.pkey && String(h.patientId||'') === String(T.period.patientId) && (h.patientName||'') === ptName
+                   && !!h.carried === carried && !!h.continued === T.next && (h.policyKey||'') === T.policy
+                   && (h.coverFrom||'') === cFrom && (h.coverTo||'') === cTo;
+        if(!ok) {
+          Object.assign(h, { active: true, startDate: T.s, expiry: T.e, terminated: term,
+            patientId: String(T.period.patientId), patientName: ptName, rosterPeriod: T.pkey, periodStart: T.period.startDate,
+            carried, continued: T.next, policyKey: T.policy, coverFrom: cFrom, coverTo: cTo });
+          touched = true;
+        }
+        if(!h.memo) { h.memo = memoFrom || defMemo; touched = true; }
+        if(dups.length) { hist = hist.filter(x => !dups.includes(x)); removed.push(...dups); st.merged += dups.length; touched = true; }
+        // 지난 근무건 보험이 "현재 건" 칸에 그대로 남아있던 경우(가입일 같음) → 이력으로 넘어갔으니 현재 칸은 비움
+        // (현재 근무건도 같은 보험으로 이어진 경우(liveT)는 위에서 현재 칸을 맞추므로 건드리지 않음)
+        if(!liveT && cg.insuranceStartDate && cg.insuranceStartDate === T.s) {
+          if(cg.insuranceCarried) st.carryCleared++; // 해지된 보험이 현재 근무건에 "이어짐"으로 잘못 남아있던 것
+          cg.insuranceActive = false; cg.insuranceStartDate = ''; cg.insuranceExpiry = '';
+          cg.insuranceTerminated = false; cg.insuranceCarried = false; cg.insurancePolicyKey = '';
+          cg.insurancePatientId = cg.patientId ? String(cg.patientId) : '';
+          touched = true;
+        }
+      }
+    });
+    // 등록내역상 이미 해지된 보험이 현재 근무건에 "이어짐"으로 남아있으면(해지했는데 만료처리 체크를 안 한 경우) → 가입전으로
+    if(staleCarry && cg.insuranceActive && cg.insuranceCarried) {
+      cg.insuranceActive = false; cg.insuranceStartDate = ''; cg.insuranceExpiry = '';
+      cg.insuranceTerminated = false; cg.insuranceCarried = false; cg.insurancePolicyKey = '';
+      cg.insurancePatientId = cg.patientId ? String(cg.patientId) : '';
+      st.carryCleared++; touched = true;
+    }
+    if(touched) {
+      cg.insuranceHistory = hist;
+      if(!dry) {
+        markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (2분)
+        // 정리로 지운 이력은 다른 기기의 옛 값이 동기화 병합(합집합)으로 되살아나지 않게 삭제 표시
+        removed.forEach(h => { if(h && h.id) addDeletedInsHistKey(cg.id, _insHistKeyFor(h)); });
+      }
+      st.touched++;
+    }
+  });
+  return st;
+}
+
+// ─── 현황 정리 미리보기 → 확인 후 적용 ───
+// 전문인내역 기준으로 현황을 다시 맞출 때(업로드 / 다시 맞추기), 실제 데이터를 바꾸기 전에
+// 복제본에서 먼저 돌려보고 "바뀌는 간병인"만 변경 전/후로 보여준 뒤, [적용]을 눌러야 반영함
+function insPtNameById(id) { const p = id ? patients.find(x => String(x.id) === String(id)) : null; return p ? p.name : ''; }
+function insDescCurrent(c) {
+  if(!c.insuranceActive) return '가입전' + (c.patientId ? ` (${insPtNameById(c.patientId)||'환자'} 담당중)` : '');
+  return `${insPtNameById(c.insurancePatientId || c.patientId) || '현재 건'} · 가입 ${c.insuranceStartDate||'?'} ~ ${c.insuranceExpiry||'유지중'}`
+    + (c.insuranceCarried ? ' · 🔗이전 근무건에서 이어짐' : '') + (c.insuranceTerminated ? ' · 만료처리' : '');
+}
+function insDescHist(h) {
+  const cover = (h.coverFrom || h.coverTo) ? ` [담당 ${h.coverFrom||'?'}~${h.coverTo||'진행중'}]` : '';
+  return `${h.patientName || '(환자 정보 없음)'} · ${h.active ? '가입' : '미가입'} ${h.startDate||'?'} ~ ${h.expiry||''}${cover}`
+    + (h.carried ? ' · 🔗이전 건에서 이어짐' : '') + (h.continued ? ' · ➡다음 근무건으로 이어짐' : '') + (h.terminated ? ' · 만료처리' : '');
+}
+function insSnapOf(c) {
+  return { cur: insDescCurrent(c), hist: insSortedHistory(c).map(insDescHist) };
+}
+function insReconcilePreview() {
+  const real = caregivers;
+  const before = new Map(real.map(c => [String(c.id), insSnapOf(c)]));
+  let st;
+  caregivers = JSON.parse(JSON.stringify(real));
+  let changes = [];
+  try {
+    st = insReconcile({ dry: true });
+    caregivers.forEach(c => {
+      const b = before.get(String(c.id));
+      const a = insSnapOf(c);
+      if(b && JSON.stringify(b) !== JSON.stringify(a)) changes.push({ name: c.name, before: b, after: a });
+    });
+  } finally {
+    caregivers = real; // 반드시 원래 데이터로 되돌림
+  }
+  changes.sort((x,y) => String(x.name).localeCompare(String(y.name)));
+  return { st, changes };
+}
+let _insPreviewPending = false;
+function openInsReconcilePreview(title) {
+  const { st, changes } = insReconcilePreview();
+  if(!changes.length) {
+    renderInsurance();
+    toast('이미 전문인내역과 현황이 같아요 (바뀌는 내용 없음)');
+    return;
+  }
+  _insPreviewPending = true;
+  const list = arr => arr.length ? arr.map(t => `<div style="padding:1px 0">${insEsc(t)}</div>`).join('') : '<div style="color:var(--gray-lt)">(없음)</div>';
+  const col = (label, snap, color) => `
+    <div style="flex:1;min-width:220px;padding:6px 8px;border-radius:6px;background:${color}0d;border:1px solid ${color}33">
+      <div style="font-size:10px;font-weight:700;color:${color};margin-bottom:3px">${label}</div>
+      <div style="font-size:11px"><b>현재 건</b>: ${insEsc(snap.cur)}</div>
+      <div style="font-size:11px;margin-top:3px"><b>과거 이력</b>${list(snap.hist)}</div>
+    </div>`;
+  document.getElementById('cg-modal-title').textContent = title || '배상보험 현황 정리 미리보기';
+  document.getElementById('cg-form-body').innerHTML = `
+    <div style="font-size:12px;background:var(--surface2);padding:8px 10px;border-radius:var(--rsm);margin-bottom:10px;line-height:1.7">
+      전문인내역 기준으로 <b>${changes.length}명</b>의 배상보험 현황이 아래처럼 바뀌어요.${st.merged ? ` (중복 ${st.merged}건 합침)` : ''}${st.carryCleared ? ` (해지된 보험 이어짐 ${st.carryCleared}건 해제)` : ''}<br>
+      <span style="font-size:11px;color:var(--gray)">연속 재배정으로 해지 없이 이어간 보험은 근무건(환자)별로 나눠서 분류돼요. 확인 후 <b>[적용]</b>을 눌러야 실제로 반영돼요.</span>
+    </div>
+    <div style="max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:var(--rsm);padding:4px 8px">
+      ${changes.map(ch => `
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="font-size:13px;font-weight:700;margin-bottom:4px">${insEsc(ch.name)}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${col('변경 전', ch.before, '#6b7280')}${col('변경 후', ch.after, '#0b7a6e')}</div>
+        </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:1rem;flex-wrap:wrap">
+      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="applyInsReconcile()">적용 (${changes.length}명)</button>
+      <button class="btn" onclick="_insPreviewPending=false;closeOverlay('cg-overlay');renderInsurance()">취소</button>
+    </div>`;
+  document.getElementById('cg-overlay').classList.add('open');
+}
+function applyInsReconcile() {
+  if(!_insPreviewPending) return;
+  _insPreviewPending = false;
+  const st = insReconcile();
+  if(st.touched) save();
+  closeOverlay('cg-overlay');
+  renderInsurance();
+  toast(st.touched ? `✅ 현황 ${st.touched}명 정리${st.merged ? ' · 중복 ' + st.merged + '건 합침' : ''}${st.carryCleared ? ' · 이어짐 해제 ' + st.carryCleared + '건' : ''}` : '이미 전문인내역과 현황이 같아요');
+}
+
+function rerunInsReconcile() {
+  openInsReconcilePreview('🔄 다시 맞추기 — 변경 미리보기');
+}
+
+// 등록내역 1행(매칭 완료)의 보험이 해지 없이 이어진 다음 근무건들 (가입건 근무건 제외, 시간순)
+function insRowChain(tgts, m) {
+  if(!m || m.state !== 'ok' || !m.cg || !m.period) return [];
+  const byP = tgts.get(String(m.cg.id));
+  if(!byP) return [];
+  const pk = insPeriodKey(m.period);
+  return [...byP.values()].filter(T => T.via === 'carry' && T.policy === pk)
+    .sort((a,b) => (a.period.startDate||'').localeCompare(b.period.startDate||''));
+}
+
+// ─── 보험사 등록내역 탭 ───
+function insRosterCheckCount() {
+  return insRosterRows().map(insMatchRosterRow).filter(m => m.state === 'nocg' || m.state === 'noperiod').length;
+}
+// 확인 필요(담당 환자 없음) 건 중, 아직 해지 안 됐거나 간병인의 현재 근무건 시작일 이후까지 걸친 건 → 그 간병인은 현황 탭에서 보류
+function insRosterHoldIds() {
+  const ids = new Set();
+  insRosterRows().forEach(r => {
+    const m = insMatchRosterRow(r);
+    if(m.state !== 'noperiod') return;
+    if(!r.e || (m.cg.startDate && r.e >= m.cg.startDate)) ids.add(String(m.cg.id));
+  });
+  return ids;
+}
+function refreshInsRosterTabLabel(cnt) {
+  const btn = document.getElementById('ins-flt-roster');
+  if(!btn) return;
+  if(cnt === undefined) cnt = insRosterCheckCount();
+  btn.innerHTML = '📄 보험사 등록내역' + (cnt ? ` <span style="background:#dc2626;color:#fff;border-radius:9px;padding:0 6px;font-size:10px;margin-left:2px">확인 ${cnt}</span>` : '');
+}
+
 function renderInsRoster(el) {
   const rows = insRosterRows();
   if(!rows.length) {
+    refreshInsRosterTabLabel(0);
     el.innerHTML = `<div class="empty" style="padding:1.25rem 0">
       <p style="font-size:13px">아직 업로드된 전문인내역이 없어요</p>
-      <p style="font-size:11px;color:var(--gray);margin-top:4px">보험사 사이트에서 받은 <b>등록된_전문인내역.xls</b>를 올리면<br>간병인과 그 시점 매칭환자가 자동으로 채워져요</p>
+      <p style="font-size:11px;color:var(--gray);margin-top:4px">보험사 사이트에서 받은 <b>등록된_전문인내역.xls</b>를 올리면<br>간병인과 가입일 당시 매칭환자가 자동으로 연결되고 배상보험 현황에 반영돼요</p>
       <button class="btn btn-teal btn-sm" style="margin-top:10px" onclick="openInsRosterUpload()">📤 전문인내역 업로드</button>
     </div>`;
     return;
   }
-  const today = todayStr();
   const all = rows.map(insMatchRosterRow);
-  const months = [...new Set(rows.map(r => r.s.slice(0,7)))].sort((a,b) => b.localeCompare(a));
+  const tgts = insBuildTargets(); // 연속 재배정으로 이어진 근무건 표시용
+  const check = all.filter(m => m.state === 'nocg' || m.state === 'noperiod').sort((a,b) => b.row.s.localeCompare(a.row.s));
+  const done  = all.filter(m => m.state === 'ok' || m.state === 'void');
+  refreshInsRosterTabLabel(check.length);
+  const months = [...new Set(done.map(m => m.row.s.slice(0,7)))].sort((a,b) => b.localeCompare(a));
   if(insRosterMonth && !months.includes(insRosterMonth)) insRosterMonth = '';
-  let list = all.filter(m => !insRosterMonth || m.row.s.slice(0,7) === insRosterMonth
-                                              || (m.row.e && m.row.e.slice(0,7) === insRosterMonth));
-  if(insRosterOnlyUnmatched) list = list.filter(m => !m.cg || !m.period);
-  list = list.slice().sort((a,b) => b.row.s.localeCompare(a.row.s));
-
-  const cntActive = all.filter(m => !m.row.e).length; // 보험사 파일의 "현재 가입인원"과 같은 기준(해지일 없는 건)
-  const cntNoCg   = all.filter(m => !m.cg).length;
-  const cntNoPt   = all.filter(m => m.cg && !m.period).length;
-  const plan = insBuildApplyPlan();
+  const doneList = done.filter(m => !insRosterMonth || m.row.s.slice(0,7) === insRosterMonth || (m.row.e && m.row.e.slice(0,7) === insRosterMonth))
+                       .sort((a,b) => (a.state==='void') - (b.state==='void') || b.row.s.localeCompare(a.row.s)); // 정정건은 맨 아래
+  const today = todayStr();
   const info = cfg.insRoster || {};
-
-  const howBadge = {
-    manual: ['직접연결','var(--teal)'], auto: ['자동','var(--green)'],
-    birth: ['생년월일 일치','var(--amber)'], name: ['이름만 일치','var(--amber)'],
-  };
   const badge = (txt, color) => `<span class="badge" style="background:${color}22;color:${color};border:1px solid ${color}44;font-size:10px">${txt}</span>`;
+  const howBadge = { manual:['직접지정','var(--teal)'], auto:['자동','var(--green)'], birth:['생년월일 일치','var(--amber)'], name:['이름만 일치','var(--amber)'] };
+  const stateBadge = r => (r.e && r.e === r.s) ? badge('당일해지(정정) · 반영 제외','var(--gray)')
+    : !r.e ? badge('가입중','var(--green)') : r.e > today ? badge('해지예정 '+r.e.slice(5),'var(--amber)') : badge('해지','var(--gray)');
+  const head = r => `<span style="font-family:var(--mono);color:var(--gray)">${r.s} ~ ${r.e||'　　　　　'}</span>
+      <span style="font-weight:700">${insEsc(r.n)}</span>
+      <span style="font-size:11px;color:var(--gray)">${insEsc(r.b)}${r.g?' · '+insEsc(r.g):''}</span> ${stateBadge(r)}`;
+
+  const checkHtml = check.map(m => {
+    const r = m.row;
+    const why = m.state === 'nocg'
+      ? `<span style="color:#dc2626;font-weight:700">간병인 못 찾음</span>${m.candidates.length>1?` <span style="font-size:10px;color:var(--gray)">(생년월일/이름 같은 사람 ${m.candidates.length}명)</span>`:''}`
+      : `<b>${insEsc(m.cg.name)}</b> ${badge((howBadge[m.how]||['',''])[0], (howBadge[m.how]||['','var(--gray)'])[1])} · <span style="color:#dc2626;font-weight:700">가입일(${m.date})에 담당한 환자 없음</span>`;
+    const periods = m.cg ? getAssignPeriods(m.cg) : [];
+    return `<div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">${head(r)}</div>
+        <div style="font-size:12px;margin-top:3px">→ ${why}</div>
+        ${m.cg ? `<div style="font-size:11px;color:var(--gray);margin-top:2px">담당 이력: ${periods.length ? periods.map(p => insEsc(insPeriodPatient(m.cg,p).name||'?')+' '+p.startDate.slice(5)+'~'+(p.endDate?p.endDate.slice(5):'진행중')).join(' / ') : '없음'}</div>` : ''}
+      </div>
+      <button class="btn btn-sm btn-teal" style="font-size:11px;padding:3px 10px" onclick="openInsRosterFix('${insKeyArg(r)}')">✏ 수정</button>
+    </div>`;
+  }).join('');
+
+  const doneHtml = doneList.map(m => {
+    const r = m.row;
+    const hb = howBadge[m.how];
+    return `<div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;${m.state==='void'?'opacity:.55':''}">
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">${head(r)}</div>
+        ${m.cg ? `<div style="font-size:12px;margin-top:3px">→ <b>${insEsc(m.cg.name)}</b> ${hb?badge(hb[0],hb[1]):''}
+          ${m.period ? ` · 👤 <b>${insEsc(m.patientName||'(환자 정보 없음)')}</b>${m.hospital?' · '+insEsc(m.hospital):''} <span style="color:var(--gray-lt)">(담당 ${m.period.startDate}~${m.period.endDate||'진행중'})</span>` : ''}
+          ${m.fixed && m.date !== r.s ? ` <span style="font-size:10px;color:var(--teal)">가입일 ${m.date}로 수정됨</span>` : ''}</div>` : ''}
+        ${(() => { const ch = insRowChain(tgts, m); return ch.length ? `<div style="font-size:11px;margin-top:2px;color:var(--teal)">🔗 해지 없이 이어진 근무건: ${ch.map(T => `<b>${insEsc(T.patientName||'(환자 정보 없음)')}</b> <span style="color:var(--gray-lt)">(${T.period.startDate}~${T.period.endDate||'진행중'})</span>`).join(' → ')}</div>` : ''; })()}
+      </div>
+      ${m.state==='ok' ? `<button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="openInsRosterFix('${insKeyArg(r)}')">수정</button>` : ''}
+    </div>`;
+  }).join('');
 
   el.innerHTML = `
-    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;font-size:12px">
-      <span style="color:var(--gray)">📄 ${insEsc(info.fileName||'전문인내역')} · ${insEsc(info.uploadedAt||'')} 업로드</span>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;font-size:12px">
+      <span style="color:var(--gray)">📄 ${insEsc(info.fileName||'전문인내역')} · ${insEsc(info.uploadedAt||'')} 업로드 · 전체 ${all.length}건 · 현재 가입 ${all.filter(m=>!m.row.e).length}명</span>
       <span style="margin-left:auto;display:flex;gap:5px;flex-wrap:wrap">
-        <button class="btn btn-sm" style="font-size:11px" onclick="openInsRosterUpload()">📤 새 파일 업로드</button>
-        <button class="btn btn-sm" style="font-size:11px" onclick="downloadInsRosterXLSX()">⬇ 엑셀 다운로드</button>
-        <button class="btn btn-sm ${plan.length?'btn-teal':''}" style="font-size:11px" onclick="previewInsRosterApply()">🔄 현황에 반영${plan.length?' ('+plan.length+')':''}</button>
+        <button class="btn btn-sm btn-teal" style="font-size:11px" onclick="openInsRosterUpload()">📤 새 파일 업로드</button>
+        <button class="btn btn-sm" style="font-size:11px" onclick="rerunInsReconcile()" title="간병인 주민번호·배정을 고친 뒤 다시 맞출 때">🔄 다시 맞추기</button>
+        <button class="btn btn-sm" style="font-size:11px" onclick="downloadInsRosterXLSX()">⬇ 엑셀</button>
         <button class="btn btn-sm btn-red" style="font-size:11px" onclick="clearInsRoster()">비우기</button>
       </span>
     </div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;font-size:12px">
-      ${badge('전체 '+all.length+'건','var(--gray)')}
-      ${badge('현재 가입중 '+cntActive+'명','var(--green)')}
-      ${badge('간병인 미매칭 '+cntNoCg,'#dc2626')}
-      ${badge('해당시점 환자 없음 '+cntNoPt,'var(--amber)')}
+    <div style="border:1px solid ${check.length?'#dc262655':'var(--border)'};border-radius:var(--rsm);padding:8px 12px;margin-bottom:14px;background:${check.length?'#dc262608':'transparent'}">
+      <div style="font-size:13px;font-weight:700;color:${check.length?'#dc2626':'var(--gray)'}">⚠ 확인 필요 ${check.length}건</div>
+      <div style="font-size:11px;color:var(--gray);margin:2px 0 4px">간병인을 못 찾았거나 가입일에 담당한 환자가 없는 건이에요. 현황(가입전·가입·만료)에는 반영되지 않고, [수정]으로 간병인·가입일·환자를 맞추면 아래 매칭 완료로 옮겨져 바로 반영돼요.</div>
+      ${check.length ? checkHtml : '<div style="font-size:12px;color:var(--gray-lt);padding:4px 0">모두 매칭됐어요 👍</div>'}
     </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-      <select onchange="insRosterMonth=this.value;renderInsurance()" style="width:auto;font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--black)">
-        <option value="">가입·해지월 전체</option>
-        ${months.map(m => `<option value="${m}" ${m===insRosterMonth?'selected':''}>${m.slice(0,4)}년 ${parseInt(m.slice(5))}월</option>`).join('')}
-      </select>
-      <label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer">
-        <input type="checkbox" ${insRosterOnlyUnmatched?'checked':''} onchange="insRosterOnlyUnmatched=this.checked;renderInsurance()" style="width:15px;height:15px;accent-color:var(--teal)">
-        <span style="color:var(--gray)">매칭 안 된 건만</span>
-      </label>
-      <span style="font-size:11px;color:var(--gray)">${list.length}건 표시</span>
-    </div>
-    ${!list.length ? '<div class="empty" style="padding:.75rem 0"><p style="font-size:12px">해당하는 내역이 없어요</p></div>' :
-    list.map(m => {
-      const r = m.row;
-      const sameDay = r.e && r.e === r.s;
-      const stateBadge = sameDay ? badge('당일해지(정정)','var(--gray)')
-        : !r.e ? badge('가입중','var(--green)')
-        : r.e > today ? badge('해지예정 '+r.e.slice(5),'var(--amber)')
-        : badge('해지','var(--gray)');
-      const hb = m.cg ? howBadge[m.how] : null;
-      const cgLine = m.cg
-        ? `<b style="color:var(--black)">${insEsc(m.cg.name)}</b> ${hb?badge(hb[0],hb[1]):''}`
-        : `<span style="color:#dc2626;font-weight:700">간병인 미매칭</span>${m.candidates.length>1?` <span style="font-size:10px;color:var(--gray)">(후보 ${m.candidates.length}명)</span>`:''}`;
-      const ptLine = !m.cg ? '' : m.period
-        ? `👤 <b style="color:var(--black)">${insEsc(m.patientName||'(환자 정보 없음)')}</b>${m.hospital?' · '+insEsc(m.hospital):''} <span style="color:var(--gray-lt)">(담당 ${m.period.startDate}~${m.period.endDate||'진행중'})</span>`
-        : `<span style="color:var(--amber)">⚠ 이 기간에 담당한 환자를 못 찾았어요</span>`;
-      return `<div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
-        <div style="flex:1;min-width:180px">
-          <div style="font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <span style="font-family:var(--mono);color:var(--gray)">${r.s} ~ ${r.e||'　　　　　'}</span>
-            <span style="font-weight:700">${insEsc(r.n)}</span>
-            <span style="font-size:11px;color:var(--gray)">${insEsc(r.b)}${r.g?' · '+insEsc(r.g):''}</span>
-            ${stateBadge}
-          </div>
-          <div style="font-size:12px;margin-top:3px">→ ${cgLine}</div>
-          ${ptLine ? `<div style="font-size:12px;margin-top:2px">${ptLine}</div>` : ''}
-        </div>
-        <button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="openInsRosterLink('${insKeyArg(r)}')">🔗 ${m.cg?'연결변경':'연결'}</button>
-      </div>`;
-    }).join('')}`;
+    <div style="border:1px solid var(--border);border-radius:var(--rsm);padding:8px 12px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div style="font-size:13px;font-weight:700;color:var(--teal)">✅ 매칭 완료 · 현황 반영됨 ${done.filter(m=>m.state==='ok').length}건</div>
+        <select onchange="insRosterMonth=this.value;renderInsurance()" style="width:auto;margin-left:auto;font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--black)">
+          <option value="">가입·해지월 전체</option>
+          ${months.map(mo => `<option value="${mo}" ${mo===insRosterMonth?'selected':''}>${mo.slice(0,4)}년 ${parseInt(mo.slice(5))}월</option>`).join('')}
+        </select>
+      </div>
+      ${doneList.length ? doneHtml : '<div style="font-size:12px;color:var(--gray-lt);padding:6px 0">해당하는 내역이 없어요</div>'}
+    </div>`;
 }
 
-// 자동 연결이 안 되거나 잘못된 건: 간병인을 직접 지정 → 같은 사람(생년월일+보험사 이름)은 이후 자동 연결
-function openInsRosterLink(rowKey) {
-  rowKey = decodeURIComponent(rowKey);
+// 확인 필요 / 매칭 건 수정: 간병인 · 가입일 · 담당 환자(근무건)
+function openInsRosterFix(rowKeyArg) {
+  const rowKey = decodeURIComponent(rowKeyArg);
   const r = insRosterRows().find(x => insRowKey(x) === rowKey);
   if(!r) return;
   const m = insMatchRosterRow(r);
+  const fix = insGetFix(r) || {};
   const names = insRowNames(r.n);
   const rank = c => (insCgBirth6(c) === r.b ? 0 : 2) + (names.includes(insNormName(c.name)) ? 0 : 1);
   const opts = caregivers.slice().sort((a,b) => rank(a)-rank(b) || String(a.name).localeCompare(String(b.name)));
-  const aliasKey = insAliasKey(r);
-  const hasAlias = !!(cfg.insAlias && cfg.insAlias[aliasKey]);
-  document.getElementById('cg-modal-title').textContent = r.n + ' — 간병인 연결';
+  document.getElementById('cg-modal-title').textContent = r.n + ' — 전문인내역 수정';
   document.getElementById('cg-form-body').innerHTML = `
     <div style="font-size:12px;background:var(--surface2);padding:8px 10px;border-radius:var(--rsm);margin-bottom:1rem;line-height:1.7">
       보험사 등록: <b>${insEsc(r.n)}</b> · ${insEsc(r.b)}${r.g?' · '+insEsc(r.g):''}<br>
       보험기간: ${r.s} ~ ${r.e||'(가입중)'}
-      <div style="font-size:11px;color:var(--gray);margin-top:4px">여기서 연결하면 같은 사람(생년월일+이름이 같은 다른 가입/해지 건)도 앞으로 모두 이 간병인으로 자동 연결돼요.</div>
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">간병인을 지정하면 같은 사람(생년월일+이름이 같은 다른 가입·해지 건)도 앞으로 이 간병인으로 연결돼요.</div>
     </div>
     <div class="field">
-      <label>간병인 <span style="font-size:10px;font-weight:400;color:var(--gray)">(생년월일·이름이 같은 사람이 위에 먼저 나와요)</span></label>
-      <select id="ins-link-cg" style="width:100%">
+      <label>간병인 <span style="font-size:10px;font-weight:400;color:var(--gray)">(★ = 생년월일 같음)</span></label>
+      <select id="ins-fix-cg" style="width:100%" onchange="insFixRefreshPeriods('${insKeyArg(r)}')">
+        <option value="">— 선택 —</option>
         ${opts.map(c => {
           const b6 = insCgBirth6(c);
-          const mark = b6 === r.b ? '★ ' : '';
-          return `<option value="${insEsc(c.id)}" ${m.cg && String(m.cg.id)===String(c.id)?'selected':''}>${mark}${insEsc(c.name)} (${b6||'주민번호 없음'} · ${insEsc(c.workStatus||'')})</option>`;
+          return `<option value="${insEsc(c.id)}" ${m.cg && String(m.cg.id)===String(c.id)?'selected':''}>${b6===r.b?'★ ':''}${insEsc(c.name)} (${b6||'주민번호 없음'} · ${insEsc(c.workStatus||'')})</option>`;
         }).join('')}
       </select>
     </div>
+    <div class="field">
+      <label>보험 가입일 <span style="font-size:10px;font-weight:400;color:var(--gray)">(실제 가입일이 다르면 수정)</span></label>
+      <input type="date" id="ins-fix-date" value="${insEsc(m.date)}" onchange="insFixRefreshPeriods('${insKeyArg(r)}')">
+    </div>
+    <div class="field">
+      <label>담당 환자 (근무건)</label>
+      <select id="ins-fix-period" style="width:100%"></select>
+      <div id="ins-fix-hint" style="font-size:11px;color:var(--gray);margin-top:4px"></div>
+    </div>
     <div style="display:flex;gap:8px;margin-top:1rem;flex-wrap:wrap">
-      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveInsRosterLink('${insKeyArg(r)}')">연결 저장</button>
-      ${hasAlias ? `<button class="btn" onclick="clearInsRosterLink('${insKeyArg(r)}')">직접연결 해제</button>` : ''}
-      <button class="btn" onclick="closeOverlay('cg-overlay')">취소</button>
+      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="saveInsRosterFix('${insKeyArg(r)}')">저장하고 매칭</button>
+      ${fix.cg || fix.d || fix.p ? `<button class="btn" onclick="clearInsRosterFix('${insKeyArg(r)}')">수정 취소(원래대로)</button>` : ''}
+      <button class="btn" onclick="closeOverlay('cg-overlay')">닫기</button>
     </div>`;
   document.getElementById('cg-overlay').classList.add('open');
+  insFixRefreshPeriods(rowKeyArg, fix.p || '');
 }
 
-function saveInsRosterLink(rowKey) {
-  rowKey = decodeURIComponent(rowKey);
+function insFixRefreshPeriods(rowKeyArg, preselect) {
+  const sel = document.getElementById('ins-fix-period');
+  const hint = document.getElementById('ins-fix-hint');
+  if(!sel) return;
+  const cgId = document.getElementById('ins-fix-cg')?.value || '';
+  const date = document.getElementById('ins-fix-date')?.value || '';
+  const cg = cgId ? caregivers.find(c => String(c.id) === String(cgId)) : null;
+  if(!cg) { sel.innerHTML = '<option value="">간병인을 먼저 선택하세요</option>'; if(hint) hint.textContent = ''; return; }
+  const periods = getAssignPeriods(cg).slice().reverse();
+  const auto = date ? insPickPeriod(cg, date) : null;
+  const cur = preselect !== undefined ? preselect : sel.value;
+  sel.innerHTML = `<option value="">가입일 기준 자동 ${auto ? '→ ' + insEsc(insPeriodPatient(cg, auto).name || '?') + ' (' + auto.startDate + '~' + (auto.endDate||'진행중') + ')' : '→ 해당 환자 없음'}</option>` +
+    periods.map(p => `<option value="${insEsc(insPeriodKey(p))}" ${insPeriodKey(p)===cur?'selected':''}>${insEsc(insPeriodPatient(cg, p).name || '(환자 정보 없음)')} · ${p.startDate}~${p.endDate||'진행중'}</option>`).join('');
+  if(hint) hint.textContent = !periods.length ? '이 간병인은 담당 이력이 없어요 — 환자 관리에서 배정 이력을 먼저 확인해주세요'
+    : auto ? '' : '가입일이 담당기간과 안 맞아요. 가입일을 고치거나 환자를 직접 고르세요';
+}
+
+function saveInsRosterFix(rowKeyArg) {
+  const rowKey = decodeURIComponent(rowKeyArg);
   const r = insRosterRows().find(x => insRowKey(x) === rowKey);
-  const sel = document.getElementById('ins-link-cg');
-  if(!r || !sel || !sel.value) return;
+  if(!r) return;
+  const cgId = document.getElementById('ins-fix-cg')?.value || '';
+  const d = document.getElementById('ins-fix-date')?.value || '';
+  const p = document.getElementById('ins-fix-period')?.value || '';
+  if(!cgId) { toast('간병인을 선택해주세요', true); return; }
+  const prevM = insMatchRosterRow(r); // 수정 전 연결된 간병인도 같이 다시 맞춰야 함(연결 해제 정리)
+  const onlyIds = new Set([String(cgId)]);
+  if(prevM.cg) onlyIds.add(String(prevM.cg.id));
+  if(!cfg.insRowFix || typeof cfg.insRowFix !== 'object') cfg.insRowFix = {};
   if(!cfg.insAlias || typeof cfg.insAlias !== 'object') cfg.insAlias = {};
-  cfg.insAlias[insAliasKey(r)] = String(sel.value);
-  markCfgEdited(); save(); closeOverlay('cg-overlay'); renderInsurance();
-  toast('✅ 간병인 연결 저장됐어요');
+  const f = { cg: String(cgId) };
+  if(d && d !== r.s) f.d = d;
+  if(p) f.p = p;
+  cfg.insRowFix[insFixKey(r)] = f;
+  cfg.insAlias[insAliasKey(r)] = String(cgId); // 같은 사람의 다른 행도 이 간병인으로
+  markCfgEdited();
+  insReconcile({ only: onlyIds }); // 이 행과 관련된 간병인만 (나머지 전체 정리는 [다시 맞추기] 미리보기로)
+  save(); closeOverlay('cg-overlay'); renderInsurance();
+  const m = insMatchRosterRow(r);
+  toast(m.state === 'ok' ? `✅ ${m.cg.name} → ${m.patientName||'환자'} 매칭, 현황에 반영했어요` : '⚠ 저장했지만 아직 담당 환자와 안 맞아요 (확인 필요에 남아있어요)', m.state !== 'ok');
 }
 
-function clearInsRosterLink(rowKey) {
-  rowKey = decodeURIComponent(rowKey);
+function clearInsRosterFix(rowKeyArg) {
+  const rowKey = decodeURIComponent(rowKeyArg);
   const r = insRosterRows().find(x => insRowKey(x) === rowKey);
-  if(!r || !cfg.insAlias) return;
-  delete cfg.insAlias[insAliasKey(r)];
-  markCfgEdited(); save(); closeOverlay('cg-overlay'); renderInsurance();
-  toast('직접연결을 해제했어요 (자동매칭으로 돌아감)');
+  if(!r) return;
+  const prevM = insMatchRosterRow(r);
+  if(cfg.insRowFix) delete cfg.insRowFix[insFixKey(r)];
+  if(cfg.insAlias) delete cfg.insAlias[insAliasKey(r)];
+  markCfgEdited();
+  const onlyIds = new Set();
+  if(prevM.cg) onlyIds.add(String(prevM.cg.id));
+  const nowM = insMatchRosterRow(r);
+  if(nowM.cg) onlyIds.add(String(nowM.cg.id));
+  insReconcile({ only: onlyIds });
+  save(); closeOverlay('cg-overlay'); renderInsurance();
+  toast('수정을 취소하고 자동 매칭으로 되돌렸어요');
 }
 
 function clearInsRoster() {
-  if(!confirm('업로드된 전문인내역을 비울까요?\n(간병인 보험 현황/이력에 이미 반영된 내용과 직접 연결 정보는 그대로 남아요)')) return;
+  if(!confirm('업로드된 전문인내역을 비울까요?\n(배상보험 현황에 이미 반영된 내용과 수정·연결 정보는 그대로 남아요)')) return;
   cfg.insRoster = { uploadedAt:'', fileName:'', rows:[] };
   markCfgEdited(); save(); renderInsurance();
   toast('전문인내역을 비웠어요');
@@ -13271,126 +13721,32 @@ function downloadInsRosterXLSX() {
   const rows = insRosterRows().map(insMatchRosterRow)
     .filter(m => !insRosterMonth || m.row.s.slice(0,7) === insRosterMonth || (m.row.e && m.row.e.slice(0,7) === insRosterMonth));
   if(!rows.length) { toast('내보낼 내역이 없어요', true); return; }
-  const howTxt = { manual:'직접연결', auto:'자동', birth:'생년월일 일치', name:'이름만 일치' };
-  const aoa = [['가입일','해지일','이름(보험사)','생년월일','성별','간병인','연결방법','해당시점 환자','병원','담당기간']];
+  const tgts = insBuildTargets();
+  const stTxt = { ok:'매칭 완료', void:'당일해지(정정)', nocg:'확인 필요(간병인 없음)', noperiod:'확인 필요(담당 환자 없음)' };
+  const aoa = [['가입일','해지일','이름(보험사)','생년월일','성별','간병인','해당시점 환자','병원','담당기간','상태','이어진 근무건(연속 재배정)']];
   rows.forEach(m => aoa.push([
-    m.row.s, m.row.e||'', m.row.n, m.row.b, m.row.g,
-    m.cg ? m.cg.name : '(미매칭)', m.cg ? (howTxt[m.how]||'') : '',
-    m.period ? (m.patientName||'') : '', m.period ? (m.hospital||'') : '',
-    m.period ? `${m.period.startDate}~${m.period.endDate||'진행중'}` : '',
+    m.date, m.row.e||'', m.row.n, m.row.b, m.row.g,
+    m.cg ? m.cg.name : '', m.period ? (m.patientName||'') : '', m.period ? (m.hospital||'') : '',
+    m.period ? `${m.period.startDate}~${m.period.endDate||'진행중'}` : '', stTxt[m.state] || '',
+    insRowChain(tgts, m).map(T => `${T.patientName||'?'}(${T.period.startDate}~${T.period.endDate||'진행중'})`).join(' → '),
   ]));
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:11},{wch:11},{wch:18},{wch:9},{wch:5},{wch:10},{wch:12},{wch:10},{wch:18},{wch:24}];
+  ws['!cols'] = [{wch:11},{wch:11},{wch:18},{wch:9},{wch:5},{wch:10},{wch:10},{wch:18},{wch:24},{wch:22},{wch:40}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '배상보험 현황');
   XLSX.writeFile(wb, `배상보험_현황_${insRosterMonth || todayStr()}.xlsx`);
 }
 
-// 등록내역 → 간병인 보험 데이터 반영 계획.
-// 같은 간병인·같은 근무건에 여러 행(재가입/정정)이 있으면 하나로 합침(가입일=가장 이른 날, 해지일=가장 늦은 날,
-// 아직 해지 안 된 행이 하나라도 있으면 해지일 없음). 가입일=해지일인 "당일해지(정정)" 행은 반영 대상 제외.
-// 라이브 근무건이면 현재 보험 칸(insuranceActive/StartDate/Expiry/Terminated), 과거 근무건이면 insuranceHistory에 기록.
-function insBuildApplyPlan() {
-  const groups = new Map();
-  insRosterRows().forEach(r => {
-    if(r.e && r.e === r.s) return;
-    const m = insMatchRosterRow(r);
-    if(!m.cg || !m.period) return;
-    const k = m.cg.id + '|' + m.period.patientId + '|' + m.period.startDate;
-    const g = groups.get(k);
-    if(!g) { groups.set(k, { cg:m.cg, period:m.period, s:r.s, e:r.e||'', open:!r.e, patientName:m.patientName }); return; }
-    if(r.s < g.s) g.s = r.s;
-    if(!r.e) g.open = true; else if(r.e > g.e) g.e = r.e;
+// 과거 보험 이력 표시 순서: 가입일(없으면 만료일) 최신순, 날짜 없는 건은 맨 아래
+function insSortedHistory(c) {
+  const d = h => h.startDate || h.expiry || '';
+  return (c.insuranceHistory || []).slice().sort((a,b) => {
+    const da = d(a), db = d(b);
+    if(!da && !db) return 0;
+    if(!da) return 1;
+    if(!db) return -1;
+    return db.localeCompare(da);
   });
-  const plan = [];
-  groups.forEach(g => {
-    const e = g.open ? '' : g.e;
-    const term = !!e;
-    const cg = g.cg, p = g.period;
-    const isCur = String(cg.patientId||'') === String(p.patientId) && (cg.startDate||'') === p.startDate;
-    if(isCur) {
-      if(cg.insuranceActive && (cg.insuranceStartDate||'') === g.s && (cg.insuranceExpiry||'') === e && !!cg.insuranceTerminated === term) return;
-      plan.push({ type:'current', cg, period:p, s:g.s, e, term, patientName:g.patientName,
-        before: cg.insuranceActive ? `${cg.insuranceStartDate||'?'}~${cg.insuranceExpiry||''}` : '가입전' });
-    } else {
-      const hist = cg.insuranceHistory || [];
-      const sNum = insDayNum(g.s);
-      const h = hist.find(x => String(x.patientId) === String(p.patientId) && x.periodStart === p.startDate)
-             || hist.find(x => String(x.patientId) === String(p.patientId) && !x.periodStart
-                           && (!x.startDate || Math.abs((insDayNum(x.startDate) ?? 9e9) - sNum) <= 31));
-      if(h && h.active && (h.startDate||'') === g.s && (h.expiry||'') === e && !!h.terminated === term) return;
-      plan.push({ type: h ? 'hist-upd' : 'hist-new', cg, period:p, s:g.s, e, term, patientName:g.patientName, histId: h ? h.id : null,
-        before: h ? (h.active ? `${h.startDate||'?'}~${h.expiry||''}` : '미가입') : '없음' });
-    }
-  });
-  plan.sort((a,b) => b.s.localeCompare(a.s));
-  return plan;
-}
-
-function previewInsRosterApply() {
-  const plan = insBuildApplyPlan();
-  if(!plan.length) { toast('반영할 변경사항이 없어요 (이미 현황과 같아요)'); return; }
-  _insApplyPlan = plan;
-  const typeTxt = { current:'현재 건', 'hist-upd':'과거이력 수정', 'hist-new':'과거이력 추가' };
-  document.getElementById('cg-modal-title').textContent = '배상보험 현황에 반영 — ' + plan.length + '건';
-  document.getElementById('cg-form-body').innerHTML = `
-    <div style="font-size:12px;color:var(--gray);margin-bottom:.75rem;line-height:1.6">
-      전문인내역 기준으로 아래 간병인들의 배상보험 가입일/해지일을 채워요.<br>
-      해지일이 있는 건은 <b>만료처리 완료</b>로, 해지일이 없는 건은 <b>가입중</b>으로 기록돼요.
-    </div>
-    <div style="max-height:50vh;overflow:auto;border:1px solid var(--border);border-radius:var(--rsm);padding:0 10px">
-      ${plan.map(x => `<div style="padding:7px 0;border-bottom:1px solid var(--border);font-size:12px">
-        <b>${insEsc(x.cg.name)}</b> → ${insEsc(x.patientName||'(환자 정보 없음)')}
-        <span class="badge" style="font-size:10px;margin-left:4px">${typeTxt[x.type]}</span>
-        <div style="color:var(--gray);font-size:11px;margin-top:2px">
-          ${insEsc(x.before)} ⟶ <b style="color:var(--black)">${x.s} ~ ${x.e||'(가입중)'}</b>${x.term?' · 만료처리':''}
-        </div>
-      </div>`).join('')}
-    </div>
-    <div style="display:flex;gap:8px;margin-top:1rem">
-      <button class="btn btn-teal" style="flex:1;justify-content:center" onclick="applyInsRoster()">반영하기</button>
-      <button class="btn" onclick="closeOverlay('cg-overlay')">취소</button>
-    </div>`;
-  document.getElementById('cg-overlay').classList.add('open');
-}
-
-function applyInsRoster() {
-  const plan = _insApplyPlan || insBuildApplyPlan();
-  _insApplyPlan = null;
-  const defMemo = cfg.insuranceMemo || 'KB2025개인간병인배상책임보험(3천)/2025-3561946-1';
-  let n = 0;
-  plan.forEach(x => {
-    const cg = caregivers.find(c => String(c.id) === String(x.cg.id));
-    if(!cg) return;
-    if(x.type === 'current') {
-      // 미리보기 이후 다른 기기에서 배정이 바뀌었으면 건너뜀 (엉뚱한 근무건에 쓰지 않도록)
-      if(String(cg.patientId||'') !== String(x.period.patientId) || (cg.startDate||'') !== x.period.startDate) return;
-      cg.insuranceActive = true;
-      cg.insuranceStartDate = x.s;
-      cg.insuranceExpiry = x.e;
-      cg.insuranceTerminated = x.term;
-      if(!cg.insuranceMemo) cg.insuranceMemo = defMemo;
-      cg.insurancePatientId = String(cg.patientId);
-    } else {
-      if(!cg.insuranceHistory) cg.insuranceHistory = [];
-      let h = x.histId ? cg.insuranceHistory.find(y => String(y.id) === String(x.histId)) : null;
-      if(!h) {
-        h = { id: genId(), patientId: String(x.period.patientId), patientName: x.patientName || '', memo: defMemo, archivedAt: todayStr() };
-        cg.insuranceHistory.unshift(h);
-      }
-      h.active = true;
-      h.startDate = x.s;
-      h.expiry = x.e;
-      h.terminated = x.term;
-      h.periodStart = x.period.startDate; // 어느 근무건 기록인지 표시 (다음 반영 때 같은 건을 정확히 찾도록)
-      if(!h.patientName && x.patientName) h.patientName = x.patientName;
-      if(!h.memo) h.memo = defMemo;
-    }
-    markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (2분)
-    n++;
-  });
-  save(); closeOverlay('cg-overlay'); renderInsurance();
-  toast(`✅ 배상보험 현황에 ${n}건 반영했어요`);
 }
 
 function toggleInsHistory(cgId) {
@@ -13419,7 +13775,8 @@ function editInsurance(cgId) {
     <div style="font-size:12px;background:var(--surface2);padding:8px 10px;border-radius:var(--rsm);margin-bottom:1rem;line-height:1.6">
       👤 담당 환자: <b>${curPt ? curPt.name : '(현재 매칭된 환자 없음)'}</b>
       <div style="font-size:11px;color:var(--gray);margin-top:2px">이 값은 <b>환자 관리</b>에서 실제 매칭된 환자와 자동으로 연동돼서, 여기서 직접 입력/수정할 수 없어요.
-      담당 환자가 바뀌면 지금 이 보험 기록은 자동으로 '과거 이력'에 보관되고, 새 근무건은 '가입전'부터 다시 시작해요.</div>
+      담당 환자가 바뀌면 지금 이 보험 기록은 자동으로 '과거 이력'에 보관돼요. 해지(만료처리) 안 한 채 연이어 재배정되면 같은 보험이 새 근무건으로 이어지고, 해지했으면 '가입전'부터 다시 시작해요.</div>
+      ${cg.insuranceCarried ? `<div style="font-size:11px;color:var(--teal);margin-top:4px">🔗 이 보험은 이전 근무건에서 해지 없이 이어진 보험이에요 (가입일 ${cg.insuranceStartDate||'?'})</div>` : ''}
     </div>
     <div class="field">
       <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:13px;font-weight:600;letter-spacing:0;cursor:pointer">
@@ -13450,8 +13807,22 @@ function terminateInsurance(cgId, checked) {
   const cg = caregivers.find(c=>String(c.id)===cgId);
   if(!cg) return;
   cg.insuranceTerminated = checked;
+  markCgEdited(cgId); // Firebase 덮어쓰기 방지 (다른 기기 낡은 값이 체크를 되돌리지 않게)
   save(); renderInsurance();
   toast(checked ? '✅ 보험 만료 처리됐어요. 리마인드 알람이 중단됩니다.' : '만료 처리가 해제됐어요');
+}
+
+// 종료된(담당 환자 없는) 간병인의 직전 근무건 보험을 해지 완료 처리 — 더 이상 다음 근무건으로 이어지지 않음
+function terminateInsuranceHistory(cgId, histId, checked) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg || !cg.insuranceHistory) return;
+  const h = cg.insuranceHistory.find(x=>String(x.id)===String(histId));
+  if(!h) return;
+  h.terminated = !!checked;
+  if(checked && !h.expiry && h.coverTo) h.expiry = insAddDays(h.coverTo, 1); // 해지일 = 서비스 마감 +1일
+  markCgEdited(cgId); // Firebase 덮어쓰기 방지
+  save(); renderInsurance();
+  toast(checked ? `✅ ${h.patientName||''} 건 보험 해지 완료 처리됐어요` : '해지 완료가 해제됐어요');
 }
 
 function saveInsurance(cgId) {
@@ -14232,30 +14603,70 @@ function checkUpcomingArrivals() {
   }
 }
 
-function checkInsuranceExpiry() {
+// 배상보험 알림 (1시간마다 + 앱 시작 3초 후)
+//  ① 가입전: 근무 시작일이 됐는데 아직 보험 가입 안 된 간병인 → 가입 신고 안내 (시작일로부터 14일까지만 — 예전 데이터 알림 폭탄 방지)
+//  ② 가입: 서비스 마감일이 다가오거나(설정의 "해지 사전 알림 일수") 지났는데 아직 만료처리 안 된 간병인 →
+//     보험 해지는 "서비스 마감일 + 1일"로 신고하라고 안내 (마감 후 7일까지 계속 알림)
+//     마감일이 없는(예전 방식으로 만료일만 입력한) 건은 기존처럼 보험 만료일 기준으로 알림
+function insuranceAlertItems() {
   const days = parseInt(cfg.insuranceDays ?? 3);
-  if(!days) return;
-  const today = new Date(); today.setHours(0,0,0,0);
-  const expiring = caregivers.filter(c => {
-    if(!c.insuranceExpiry || !c.insuranceActive) return false;
-    if(c.insuranceTerminated) return false;  // 만료처리 완료된 건 알람 제외
-    const exp = parseLocalDate(c.insuranceExpiry);
-    const diff = Math.ceil((exp - today) / (1000*60*60*24));
-    // 만료 전(0~days일 이내)만 알람 — 이미 지난 것(diff < 0)은 제외
-    return diff >= 0 && diff <= days;
+  const tNum = insDayNum(todayStr());
+  const ptName = c => { const p = c.patientId ? patients.find(x => String(x.id) === String(c.patientId)) : null; return p ? p.name : ''; };
+  const join = [], end = [];
+  caregivers.forEach(c => {
+    if(!isInsEligible(c)) return;
+    // ① 가입 필요
+    if(!c.insuranceActive && c.patientId && c.startDate && (c.workStatus === '대기중' || c.workStatus === '근무중')) {
+      const d = tNum - insDayNum(c.startDate);
+      if(d >= 0 && d <= 14) join.push({ c, pt: ptName(c), d });
+    }
+    // ② 해지 신고
+    if(days && c.insuranceActive && !c.insuranceTerminated) {
+      const base = c.endDate || c.insuranceExpiry || '';
+      if(base) {
+        const diff = insDayNum(base) - tNum;
+        if(diff <= days && diff >= -7) end.push({ c, pt: ptName(c), base, diff, byEnd: !!c.endDate });
+      }
+    }
+    // ③ 근무 종료 후(담당 환자 없음) 직전 근무건 보험이 해지 안 된 채 남아있는 경우 — 마지막 근무건 마감일 기준 해지 안내
+    //    (연이어 재배정되면 새 근무건으로 이어지므로 이 알림도 자동으로 사라짐)
+    if(days && !c.patientId) {
+      const src = insFindCarrySource(c);
+      const base = src ? (src.coverTo || c.endDate || '') : '';
+      if(base) {
+        const diff = insDayNum(base) - tNum;
+        if(diff <= days && diff >= -7) end.push({ c, pt: src.patientName || '', base, diff, byEnd: true, afterEnd: true });
+      }
+    }
   });
-  if(!expiring.length) return;
-  const names = expiring.map(c=>{
-    const exp = new Date(c.insuranceExpiry);
-    const diff = Math.ceil((exp - today)/(1000*60*60*24));
-    return `${c.name} (${diff===0?'오늘 만료':diff+'일 후 만료'})`;
-  }).join(', ');
+  return { join, end };
+}
+
+function checkInsuranceExpiry() {
+  const { join, end } = insuranceAlertItems();
+  if(!join.length && !end.length) return;
+  const parts = [];
+  if(join.length) {
+    parts.push('🟢 배상보험 가입 필요 (근무 시작)\n' + join.map(x =>
+      `• ${x.c.name}${x.pt?' ('+x.pt+')':''} — 시작일 ${x.c.startDate}${x.d?' ('+x.d+'일 지남)':' (오늘)'}`).join('\n')
+      + '\n→ 보험사에 가입 신고 후, 전문인내역을 올리거나 배상보험 현황의 [수정]에서 가입 처리해주세요');
+  }
+  if(end.length) {
+    parts.push('🛡 배상보험 해지 신고\n' + end.map(x => {
+      const when = x.diff > 0 ? `D-${x.diff}` : x.diff === 0 ? '오늘' : `${-x.diff}일 지남`;
+      return x.byEnd
+        ? `• ${x.c.name}${x.pt?' ('+x.pt+')':''} — 서비스 마감 ${x.base} (${when}) → 해지일 ${insAddDays(x.base, 1)}로 신고`
+        : `• ${x.c.name}${x.pt?' ('+x.pt+')':''} — 보험 만료 ${x.base} (${when})`;
+    }).join('\n') + '\n※ 보험 해지는 서비스 마감일 +1일로 신고해주세요. 신고 후 [만료처리]/[해지완료] 체크하면 알림이 멈춰요'
+      + '\n※ 연이어 다른 환자로 재배정할 예정이면 해지하지 말고 그대로 두세요 — 새 근무건으로 보험이 자동으로 이어져요');
+  }
   const popup = document.getElementById('remind-popup');
-  document.getElementById('remind-popup-body').innerHTML = `🛡 배상보험 해지 알림!\n${names}\n마감일에 맞춰 해지 처리해주세요!`;
-  popup.style.display='block';
+  document.getElementById('remind-popup-body').innerHTML = insEsc(parts.join('\n\n'));
+  popup.style.display = 'block';
   if(cfg.sound !== false) playBeep('#insurance');
-  if(Notification.permission==='granted'){
-    new Notification('배상보험 해지 알림',{body:`${names} — 보험 만료 임박`});
+  if(typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    const t = [join.length ? `가입 필요 ${join.length}명` : '', end.length ? `해지 신고 ${end.length}명` : ''].filter(Boolean).join(' · ');
+    new Notification('배상보험 알림', { body: t + ' — 앱에서 확인해주세요' });
   }
 }
 
