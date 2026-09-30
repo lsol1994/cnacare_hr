@@ -2285,7 +2285,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_30_05';
+const APP_BUILD = '26_09_30_06';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -11540,17 +11540,30 @@ function hpCollectWorks() {
   const out = [];
   caregivers.forEach(cg => {
     const seen = new Set();
+    let liveStartNoPt = ''; // 라이브 근무건의 환자 연결이 끊긴 경우(중도종료·매칭해제 등) 시작일로 이력과 중복 판단
     if(cg.startDate) {
-      const pt = cg.patientId ? patients.find(p => String(p.id) === String(cg.patientId)) : null;
+      // 중도종료·매칭해제로 cg.patientId가 비워져도 startDate/endDate는 남아있으므로
+      // earlyEndPatientId로 원래 환자를 찾음 (없으면 같은 시작일의 이력으로 보충) — 과거 이력과 이중 집계 방지
+      let livePtId = String(cg.patientId || cg.earlyEndPatientId || '');
+      if(!livePtId) {
+        const hMatch = (cg.assignHistory||[]).find(h => h.patientId && h.startDate === cg.startDate);
+        if(hMatch) livePtId = String(hMatch.patientId);
+        else liveStartNoPt = cg.startDate;
+      }
+      const pt = livePtId ? patients.find(p => String(p.id) === livePtId) : null;
+      const hRef = livePtId ? (cg.assignHistory||[]).find(h => String(h.patientId) === livePtId && h.startDate === cg.startDate) : null;
       out.push({ cg, live: true, calcObj: cg,
-        patientId: String(cg.patientId||''), ptName: pt ? (pt.name||'') : '', hospital: pt ? (pt.hospital||'') : '',
+        patientId: livePtId,
+        ptName: pt ? (pt.name||'') : (hRef ? (hRef.patientName||'') : ''),
+        hospital: pt ? (pt.hospital||'') : (hRef ? (hRef.hospital||'') : ''),
         pay: cg.pay, startDate: cg.startDate, startTime: cg.startTime||'', endDate: cg.endDate||'', endTime: cg.endTime||'' });
-      seen.add(String(cg.patientId||'') + '|' + cg.startDate);
+      seen.add(livePtId + '|' + cg.startDate);
     }
     (cg.assignHistory||[]).forEach(h => {
       if(!h.patientId || !h.startDate) return;
       const key = String(h.patientId) + '|' + h.startDate;
       if(seen.has(key)) return;
+      if(liveStartNoPt && h.startDate === liveStartNoPt) return;
       seen.add(key);
       // 같은 환자와 아직 매칭이 이어지는 중이면 이 이력은 낡은 스냅샷 (캘린더 이력복구와 같은 기준)
       const stillLiveSamePatient = !!cg.patientId && String(cg.patientId) === String(h.patientId) && cg.workStatus !== '종료';
