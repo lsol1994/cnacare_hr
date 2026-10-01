@@ -1281,6 +1281,19 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   </div>
 </div>
 
+<!-- (26_10_01_01) 근무이력 중복·불일치 정리 -->
+<div class="overlay" id="hist-cleanup-overlay">
+  <div class="modal" style="max-width:820px">
+    <div class="modal-hd">
+      <div class="modal-title" style="color:var(--red)">🧬 근무이력 중복·불일치 정리</div>
+      <button class="btn btn-icon" onclick="closeOverlay('hist-cleanup-overlay')">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="hist-cleanup-body" style="max-height:65vh;overflow-y:auto"></div>
+  </div>
+</div>
+
 
 <!-- ══ MEMO ══ -->
 <div class="page" id="page-memo">
@@ -1648,6 +1661,10 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       <button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)"
         onclick="confirmMaintenanceTool('🚫 시작 전 취소 환자 캘린더 정리\n\n간병인이 서비스 시작 전에 취소되어 실제로 근무한 적 없는 환자 중, 이 기능 도입 전 데이터라 아직 캘린더에 잘못된 시작/마감 카드로 표시되고 있는 건을 찾아서 보여줍니다. 목록 확인 후 일괄 처리할 수 있어요.', openStartCancelFixTool)">
         🚫 시작 전 취소 환자 캘린더 정리
+      </button>
+      <button class="btn btn-sm" style="border-color:var(--red);color:var(--red)"
+        onclick="confirmMaintenanceTool('🧬 근무이력 중복·불일치 정리\n\n간병인 근무이력에서 ① 환자 삭제 후 재등록으로 같은 근무가 두 번 기록된 건 ② 현재 배정과 시작·마감 일시가 어긋난 이력 ③ 시작 전 취소로 남은 0시간 이력 ④ 날짜가 비어있는 이력을 찾아서 보여줍니다. 목록에서 체크된 항목만 처리돼요.', openHistCleanupTool)">
+        🧬 근무이력 중복·불일치 정리
       </button>
     </div>
   </div>
@@ -2287,7 +2304,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_09_30_10';
+const APP_BUILD = '26_10_01_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -2883,6 +2900,9 @@ function attachFirebaseListener() {
           // 원격/다른 기기에 옛 값이 남아있어도 다시 합쳐 넣지 않음
           const localHistory = local.assignHistory || [];
           const dcHistory    = dc.assignHistory    || [];
+          // (26_10_01_01) 레코드에 저장된 이력 삭제기록(histTombstones)은 양쪽을 합쳐 보존 — 기기 간 동기화용
+          const mergedTombs = mergeHistTombstones(local.histTombstones, dc.histTombstones);
+          if(mergedTombs.length) winner.histTombstones = mergedTombs;
           if(localHistory.length || dcHistory.length) {
             const histKey = h => String(h.patientId) + '|' + (h.startDate||'');
             const deletedHistKeys = getDeletedHistKeys(dc.id);
@@ -2891,6 +2911,7 @@ function attachFirebaseListener() {
             [...localHistory, ...dcHistory].forEach(h => {
               const k = histKey(h);
               if(deletedHistKeys.has(k)) return; // 사용자가 지운 항목 — 복원 안 함
+              if(isHistTombstoned(h, mergedTombs)) return; // (26_10_01_01) 다른 기기에서 지운 항목 — 복원 안 함
               if(!seen.has(k)) { seen.add(k); combined.push(h); }
             });
             combined.sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
@@ -4332,7 +4353,10 @@ function savePatientEdit(id) {
         pay: c.pay, endDate: c.endDate, endTime: c.endTime,
         startDate: c.startDate, startTime: c.startTime, duration: c.duration
       });
-      if(_beforeSnap.get(c.id) !== _after) markCgEdited(c.id); // Firebase 덮어쓰기 방지 (2분) — 실제 변경 시에만
+      if(_beforeSnap.get(c.id) !== _after) {
+        markCgEdited(c.id); // Firebase 덮어쓰기 방지 (2분) — 실제 변경 시에만
+        syncLiveToAssignHistory(c); // (26_10_01_01) 같은 근무건 이력이 이미 있으면 같이 갱신
+      }
       autoFillAttendance(String(c.id));
     });
     refreshCalendarIfOpen();
@@ -5572,6 +5596,7 @@ function saveCg() {
       }
     }
     markCgEdited(editCgId); // Firebase 덮어쓰기 방지 (10초)
+    { const _ec = caregivers.find(x=>String(x.id)===String(editCgId)); if(_ec) syncLiveToAssignHistory(_ec); } // (26_10_01_01) 날짜·시간 수정이 이미 저장된 같은 근무건 이력에도 반영되도록
   } else {
     cg._ts = Date.now(); // 동기화 충돌 해결(최신 우선)을 위한 저장 시각
     caregivers.unshift(cg);
@@ -6286,6 +6311,7 @@ function saveQuickEditCgEndTime(cgId) {
   cg.endDate = newEndDate;
   cg.endTime = newEndTime;
   markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
+  syncLiveToAssignHistory(cg); // (26_10_01_01) 이미 저장된 같은 근무건 이력도 같이 갱신
 
   // 연결된 환자도 같이 맞춰줌 (표시 일관성 유지) — 단, 이 간병인이 그 환자의 유일한 활성
   // 매칭일 때만. 이미 다른 간병인이 새로 매칭돼 있는데 이 간병인의 patientId가 아직 안
@@ -6323,6 +6349,7 @@ function resyncAllCgEndTimesManual() {
       cg.endDate = pt.endDate;
       cg.endTime = pt.endTime || '';
       markCgEdited(cg.id);
+      syncLiveToAssignHistory(cg); // (26_10_01_01) 같은 근무건 이력도 같이 갱신
       autoFillAttendance(String(cg.id));
       fixed++;
     }
@@ -6344,6 +6371,7 @@ function deleteAssignHistoryEntry(cgId, patientId, startDate) {
   if(!confirm('이 근무 이력을 삭제할까요?')) return;
   cg.assignHistory = cg.assignHistory.filter(h => !(String(h.patientId)===String(patientId) && h.startDate===startDate));
   addDeletedHistKey(cgId, patientId, startDate); // 동기화 병합 시 되살아나는 것 방지
+  addHistTombstone(cg, patientId, startDate); // (26_10_01_01) 다른 기기에서도 되살아나지 않도록 레코드에 삭제기록
   markCgEdited(cgId); // Firebase 덮어쓰기 방지 (2분)
   save();
   openCgDetail(cgId);
@@ -6440,11 +6468,16 @@ function saveToAssignHistory(cg, overridePatientId) {
     settleHolidayPremium = settleAmount > 0 ? Math.min(settleAmount, holidayFinalPartPremium(cg).amount) : 0;
   }
 
+  // (26_10_01_01) 환자 삭제 후 재등록된 경우, 삭제된 옛 환자ID로 남은 같은 근무건 이력을 정리
+  // — 안 그러면 같은 근무가 옛ID/새ID 두 건으로 이중 집계됨 (최진애·서명숙, 김옥란·정정숙 건)
+  pruneReRegisteredOrphanHist(cg, pt);
+
   // 같은 환자 + 시작일이 이미 있으면 업데이트
   const existing = cg.assignHistory.find(h =>
     String(h.patientId)===String(ptId) && h.startDate===(cg.startDate||'')
   );
   if(existing) {
+    if(cg.startTime) existing.startTime = cg.startTime; // (26_10_01_01) 시작시간 수정도 이력에 반영 (예전엔 누락돼 이력/현재가 어긋났음)
     if(cg.endDate) existing.endDate = cg.endDate;
     if(cg.endTime) existing.endTime = cg.endTime;
     if(!existing.diagnosis && pt.diagnosis) existing.diagnosis = pt.diagnosis; // 예전 이력에 병증이 비어있으면 지금이라도 채워둠
@@ -6469,8 +6502,111 @@ function saveToAssignHistory(cg, overridePatientId) {
     settled:     false,       // 정산 여부 — 캘린더에서 "정산 완료 처리"하면 true로 바뀜
     settleAmount,              // 기록 시점 기준 미정산 금액 (캘린더가 라이브 값 유실 시 이걸로 복구)
     settleHolidayPremium,      // 위 금액 중 명절할증분
-    recordedAt:  new Date().toLocaleDateString('ko-KR')
+    recordedAt:  new Date().toLocaleDateString('ko-KR'),
+    _histTs:     Date.now()    // (26_10_01_01) 생성 시각 — 같은 키의 옛 삭제기록(histTombstones)보다 나중에 생긴 이력은 병합 때 지워지지 않게
   });
+}
+
+// ─── (26_10_01_01) 근무이력 삭제 기록(tombstone) — 간병인 레코드에 저장해서 모든 기기에 동기화 ───
+// 기존 deletedHistKeys는 기기별 localStorage에만 있어서, 아직 옛 이력을 가진 다른 기기가 병합하면
+// 지운 이력이 되살아날 수 있었음. 여기 기록은 레코드와 함께 Firebase로 올라가고, mergeCg()에서
+// 양쪽 기록을 합쳐서 "삭제 시각 이전에 생긴 같은 키 이력"만 걸러냄 (이후 새로 생긴 같은 키 이력은 보존).
+function addHistTombstone(cg, patientId, startDate) {
+  if(!cg) return;
+  if(!Array.isArray(cg.histTombstones)) cg.histTombstones = [];
+  const key = _histKeyFor(patientId, startDate);
+  const now = Date.now();
+  const ex = cg.histTombstones.find(t => t && t.key === key);
+  if(ex) ex.at = Math.max(ex.at||0, now); else cg.histTombstones.push({ key: key, at: now });
+}
+function mergeHistTombstones(a, b) {
+  const map = new Map();
+  [...(Array.isArray(a)?a:[]), ...(Array.isArray(b)?b:[])].forEach(t => {
+    if(!t || !t.key) return;
+    map.set(t.key, Math.max(map.get(t.key)||0, Number(t.at)||0));
+  });
+  return [...map.entries()].map(([key, at]) => ({ key, at }));
+}
+// 이력 항목 h가 삭제기록에 의해 지워져야 하는지 (삭제 이후 새로 생긴 이력은 _histTs가 더 커서 통과)
+function isHistTombstoned(h, tombs) {
+  if(!h || !tombs || !tombs.length) return false;
+  const k = _histKeyFor(h.patientId, h.startDate);
+  const t = tombs.find(x => x.key === k);
+  return !!t && (Number(h._histTs)||0) < (Number(t.at)||0);
+}
+
+// 이름 비교용 정규화 (공백 제거)
+function _normPtName(s) { return String(s||'').replace(/\s/g, ''); }
+
+// ─── (26_10_01_01) 재등록 고아 이력 판별 ───
+// 고아 = 이력의 patientId가 현재 환자 목록에 없음(환자 삭제됨). 그런데 같은 간병인의 다른 근무건
+// (라이브 배정 또는 다른 이력) 중 "이름이 같은 현재 환자"와 시작일(+시작시간)이 같거나 기간이 겹치면
+// → 환자를 지우고 다시 등록하면서 생긴 같은 근무의 중복 기록으로 판단.
+// patients가 아직 비어있으면(로딩 전) 모든 이력이 고아로 보일 수 있으므로 절대 판정하지 않음.
+function findReRegisteredOrphans(cg) {
+  if(!cg || !Array.isArray(cg.assignHistory) || !cg.assignHistory.length) return [];
+  if(!patients || !patients.length) return [];
+  const ptById = new Map(patients.map(p => [String(p.id), p]));
+  const ts = (d, t) => d ? new Date(d + 'T' + String(t||'00:00').padStart(5,'0') + ':00').getTime() : NaN;
+  // 비교 대상: 현재 존재하는 환자에 연결된 근무건들 (라이브 + 이력)
+  const others = [];
+  const livePid = String(cg.patientId || cg.earlyEndPatientId || '');
+  if(livePid && ptById.has(livePid) && cg.startDate) {
+    others.push({ pid: livePid, name: ptById.get(livePid).name, startDate: cg.startDate, startTime: cg.startTime||'', endDate: cg.endDate||'', endTime: cg.endTime||'' });
+  }
+  cg.assignHistory.forEach(h => {
+    if(h && h.patientId && ptById.has(String(h.patientId)) && h.startDate) {
+      others.push({ pid: String(h.patientId), name: ptById.get(String(h.patientId)).name, startDate: h.startDate, startTime: h.startTime||'', endDate: h.endDate||'', endTime: h.endTime||'' });
+    }
+  });
+  const out = [];
+  cg.assignHistory.forEach(h => {
+    if(!h || !h.patientId || !h.startDate) return;
+    if(ptById.has(String(h.patientId))) return; // 현재 존재하는 환자 → 고아 아님
+    const nm = _normPtName(h.patientName);
+    if(!nm) return;
+    const hs = ts(h.startDate, h.startTime), he = h.endDate ? ts(h.endDate, h.endTime) : Infinity;
+    const match = others.find(o => {
+      if(_normPtName(o.name) !== nm) return false;
+      if(o.startDate === h.startDate && (!o.startTime || !h.startTime || o.startTime === h.startTime)) return true;
+      const os = ts(o.startDate, o.startTime), oe = o.endDate ? ts(o.endDate, o.endTime) : Infinity;
+      return os < he && hs < oe; // 기간 겹침
+    });
+    if(match) out.push({ h: h, match: match });
+  });
+  return out;
+}
+
+// saveToAssignHistory()에서 호출 — 지금 기록하려는 환자(pt)와 이름이 같은 재등록 고아 이력만 정리
+function pruneReRegisteredOrphanHist(cg, pt) {
+  if(!pt) return 0;
+  const nm = _normPtName(pt.name);
+  const targets = findReRegisteredOrphans(cg).filter(o => _normPtName(o.h.patientName) === nm);
+  if(!targets.length) return 0;
+  const set = new Set(targets.map(o => o.h));
+  cg.assignHistory = cg.assignHistory.filter(h => !set.has(h));
+  targets.forEach(o => addHistTombstone(cg, o.h.patientId, o.h.startDate));
+  markCgEdited(cg.id);
+  return targets.length;
+}
+
+// ─── (26_10_01_01) 라이브 배정 값 → 같은 근무건 이력에 반영 ───
+// 마감일 직접수정·환자정보 수정·간병인 수정 등으로 라이브 값만 바뀌고 이미 저장된 이력은 옛 값으로
+// 남아서, 캘린더가 이력 기준 급여카드를 한 번 더 만들거나(이중 표시) 근무이력이 틀리게 보이던 문제 방지.
+// 같은 환자+시작일 이력이 "이미 있을 때만" 갱신하고, 새 이력은 만들지 않음.
+function syncLiveToAssignHistory(cg) {
+  if(!cg || !cg.startDate || !Array.isArray(cg.assignHistory)) return false;
+  const ptId = String(cg.patientId || cg.earlyEndPatientId || '');
+  if(!ptId) return false;
+  const h = cg.assignHistory.find(x => String(x.patientId)===ptId && x.startDate===cg.startDate);
+  if(!h) return false;
+  const differs = (cg.startTime && h.startTime !== cg.startTime)
+    || (cg.endDate && h.endDate !== cg.endDate)
+    || (cg.endTime && h.endTime !== cg.endTime);
+  if(!differs) return false;
+  saveToAssignHistory(cg, ptId);
+  markCgEdited(cg.id);
+  return true;
 }
 
 // ─── 간병인 1명의 "모든 담당 기간" 조회 (현재 라이브 배정 + 과거 이력 통합) ───
@@ -8439,7 +8575,7 @@ const MANUAL_SECTIONS = [
 <li>공휴일 목록을 "YYYY-MM-DD 공휴일명" 형식으로 한 줄씩 입력해 두면, 급여지급일이 주말·공휴일과 겹칠 때 다음 월요일로 자동 조정됩니다. 연도가 바뀌면 이 목록을 갱신해 주세요.</li>
 </ul>
 <div class="manual-sub-title">유지보수 도구</div>
-<p class="manual-p">데이터 정합성을 점검·정리하는 도구 모음입니다. 모든 버튼은 누르는 즉시 실행되지 않고 먼저 설명 팝업이 뜬 뒤 확인해야 실제로 실행됩니다(단, "중복 간병인 전체 일괄 정리"는 확인 없이 바로 처리되므로 신중히 사용하세요). 주요 도구: 구인공고 날짜 정리 · 중도종료 데이터 복구 · 간병일지 자동생성 · 간병인 마감일시 환자와 재동기화 · 중복 알림 정리 · 중복 간병인 정리/전체 일괄정리 · 기존 재모집→연장 데이터 변환 · 매칭 간병인 없는 환자 진단 · 시작 전 취소 환자 캘린더 정리.</p>
+<p class="manual-p">데이터 정합성을 점검·정리하는 도구 모음입니다. 모든 버튼은 누르는 즉시 실행되지 않고 먼저 설명 팝업이 뜬 뒤 확인해야 실제로 실행됩니다(단, "중복 간병인 전체 일괄 정리"는 확인 없이 바로 처리되므로 신중히 사용하세요). 주요 도구: 구인공고 날짜 정리 · 중도종료 데이터 복구 · 간병일지 자동생성 · 간병인 마감일시 환자와 재동기화 · 중복 알림 정리 · 중복 간병인 정리/전체 일괄정리 · 기존 재모집→연장 데이터 변환 · 매칭 간병인 없는 환자 진단 · 시작 전 취소 환자 캘린더 정리 · 근무이력 중복·불일치 정리.</p>
 <div class="manual-sub-title">JSON 백업 / 복원</div>
 <p class="manual-p">"JSON 백업"으로 앱 전체 데이터를 파일로 내려받아 안전하게 보관할 수 있고, "JSON 불러오기"로 백업 파일을 다시 복원할 수 있습니다. "전체 초기화"는 모든 데이터를 지우는 되돌릴 수 없는 작업이므로 각별히 주의해야 합니다.</p>
 <div class="manual-sub-title">파일 업로드 / 엑셀 다운로드</div>
@@ -9660,6 +9796,141 @@ function applyStartCancelFix() {
   refreshCalendarIfOpen();
   closeOverlay('start-cancel-fix-overlay');
   toast(`✅ ${candidates.length}명 정리됐어요.`);
+}
+
+// ─── (26_10_01_01) 근무이력 중복·불일치 정리 ───
+// 유형
+//  orphan   : 환자 삭제 후 재등록 → 같은 근무가 옛 환자ID/새 환자ID로 두 번 기록 (옛ID 이력 삭제)
+//  mismatch : 현재 배정(라이브)과 같은 근무건 이력의 시작시간·마감일시가 다름 (이력을 라이브 값으로 갱신)
+//  zero     : 시작=마감인 0시간 이력 (시작 전 취소 잔존) (삭제)
+//  nodate   : 시작일이 비어있는 이력 (삭제)
+// 처리는 항상 "적용 시점에 다시 찾은 결과" 중 체크된 항목만 함 (목록을 띄운 사이 다른 기기 변경 반영)
+function _hcEsc(s) { return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _hcDt(d, t) { return (d || '?') + (t ? ' ' + t : ''); }
+
+function findHistCleanupItems() {
+  const items = [];
+  if(!patients || !patients.length) return items; // 환자 데이터 로딩 전엔 판정 금지
+  const ptById = new Map(patients.map(p => [String(p.id), p]));
+  caregivers.forEach(cg => {
+    if(!cg || !Array.isArray(cg.assignHistory) || !cg.assignHistory.length) return;
+    const used = new Set();
+    // ① 재등록 중복
+    findReRegisteredOrphans(cg).forEach(o => {
+      used.add(o.h);
+      items.push({ id: cg.id + '|orphan|' + _histKeyFor(o.h.patientId, o.h.startDate), type: 'orphan', cg: cg, h: o.h,
+        note: '현재 환자 ' + o.match.name + ' [' + o.match.pid + '] ' + _hcDt(o.match.startDate, o.match.startTime) + ' ~ ' + _hcDt(o.match.endDate, o.match.endTime) + ' 와 같은 근무' });
+    });
+    // ② 현재 배정과 불일치
+    const livePid = String(cg.patientId || cg.earlyEndPatientId || '');
+    if(livePid && cg.startDate && ptById.has(livePid)) {
+      const h = cg.assignHistory.find(x => x && !used.has(x) && String(x.patientId)===livePid && x.startDate===cg.startDate);
+      if(h) {
+        const diffs = [];
+        if(cg.startTime && h.startTime !== cg.startTime) diffs.push('시작시간');
+        if(cg.endDate && h.endDate !== cg.endDate) diffs.push('마감일');
+        if(cg.endTime && h.endTime !== cg.endTime) diffs.push('마감시간');
+        if(diffs.length) {
+          used.add(h);
+          items.push({ id: cg.id + '|mismatch|' + _histKeyFor(h.patientId, h.startDate), type: 'mismatch', cg: cg, h: h,
+            note: diffs.join('·') + ' 다름 → 현재값 ' + _hcDt(cg.startDate, cg.startTime) + ' ~ ' + _hcDt(cg.endDate, cg.endTime) + ' 로 맞춤' });
+        }
+      }
+    }
+    // ③ 0시간 / ④ 날짜 없음
+    cg.assignHistory.forEach(h => {
+      if(!h || used.has(h)) return;
+      if(!h.startDate) {
+        items.push({ id: cg.id + '|nodate|' + _histKeyFor(h.patientId, h.startDate) + '|' + (h.status||''), type: 'nodate', cg: cg, h: h, note: '시작일 없음' });
+        return;
+      }
+      if(h.endDate && h.startDate === h.endDate && (h.startTime||'') === (h.endTime||'')) {
+        // 라이브 배정 자체가 이 근무건이면(아직 진행 중) 건드리지 않음
+        const isLive = livePid && String(h.patientId)===livePid && cg.startDate===h.startDate;
+        if(isLive) return;
+        // 시작 전 취소·현장 취소 처리는 의도적으로 시작=마감 이력을 남기는 정상 기록이라 기본은 보존(체크 해제).
+        // 환자 자체가 삭제된 건만 기본 체크.
+        const ptAlive = ptById.has(String(h.patientId));
+        items.push({ id: cg.id + '|zero|' + _histKeyFor(h.patientId, h.startDate), type: 'zero', cg: cg, h: h, defChecked: !ptAlive,
+          note: ptAlive ? '시작=마감 — 시작 전 취소/현장 취소 기록일 수 있어 기본 보존' : '시작=마감 — 삭제된 환자의 취소 잔존 기록' });
+      }
+    });
+  });
+  return items;
+}
+
+function openHistCleanupTool() {
+  const items = findHistCleanupItems();
+  const bodyEl = document.getElementById('hist-cleanup-body');
+  if(!patients || !patients.length) {
+    bodyEl.innerHTML = '<div class="empty" style="padding:2rem 0"><p>환자 데이터가 아직 불러와지지 않았어요. 잠시 후 다시 시도해주세요.</p></div>';
+    document.getElementById('hist-cleanup-overlay').classList.add('open');
+    return;
+  }
+  if(!items.length) {
+    bodyEl.innerHTML = '<div class="empty" style="padding:2rem 0"><p>정리할 항목이 없어요 ✅</p></div>';
+    document.getElementById('hist-cleanup-overlay').classList.add('open');
+    return;
+  }
+  const meta = {
+    orphan:   { t: '① 재등록 중복 (옛 환자ID 이력 삭제)', c: 'var(--red)',   def: true },
+    mismatch: { t: '② 현재 배정과 불일치 (이력을 현재값으로 갱신)', c: 'var(--amber)', def: true },
+    zero:     { t: '③ 0시간 이력 (취소 기록 — 삭제된 환자 것만 기본 체크)', c: 'var(--blue)',  def: true },
+    nodate:   { t: '④ 날짜 없는 이력 (삭제)', c: 'var(--gray)',  def: true },
+  };
+  let html = '<p style="font-size:12px;color:var(--gray);margin-bottom:.875rem;line-height:1.6">'
+    + '근무이력 정리 대상 <b>' + items.length + '건</b>을 찾았어요. 체크된 항목만 처리돼요.<br>'
+    + '삭제한 이력은 다른 기기와 동기화될 때도 되살아나지 않아요. 정산완료 표시된 이력은 <b style="color:var(--red)">정산완료</b>로 표시했으니 확인 후 처리하세요.'
+    + '</p>'
+    + '<button class="btn btn-teal" style="width:100%;justify-content:center;margin-bottom:1rem" onclick="applyHistCleanup()">🧬 체크된 항목 처리</button>';
+  ['orphan','mismatch','zero','nodate'].forEach(type => {
+    const list = items.filter(i => i.type === type);
+    if(!list.length) return;
+    const m = meta[type];
+    html += '<div style="font-size:12px;font-weight:700;color:' + m.c + ';padding:8px 0 4px;border-bottom:2px solid ' + m.c + ';margin:6px 0 8px">' + m.t + ' · ' + list.length + '건</div>';
+    list.forEach(it => {
+      const h = it.h;
+      html += '<label style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-left:3px solid ' + m.c + ';background:var(--surface2);border-radius:0 var(--rsm) var(--rsm) 0;margin-bottom:6px;cursor:pointer">'
+        + '<input type="checkbox" class="hc-chk" data-id="' + _hcEsc(it.id) + '"' + ((it.defChecked !== undefined ? it.defChecked : m.def) ? ' checked' : '') + ' style="margin-top:3px;width:15px;height:15px;accent-color:var(--teal);flex-shrink:0">'
+        + '<div style="flex:1;min-width:0">'
+        + '<div style="font-size:13px;font-weight:700">' + _hcEsc(it.cg.name) + ' <span style="font-weight:400;color:var(--gray)">→ ' + _hcEsc(h.patientName || '(이름없음)') + ' [' + _hcEsc(h.patientId) + ']</span>'
+        + (h.settled === true ? ' <span class="badge b-red" style="font-size:10px">정산완료</span>' : '') + '</div>'
+        + '<div style="font-size:12px;margin-top:2px">이력: ' + _hcEsc(_hcDt(h.startDate, h.startTime)) + ' ~ ' + _hcEsc(_hcDt(h.endDate, h.endTime)) + (h.status ? ' · ' + _hcEsc(h.status) : '') + '</div>'
+        + '<div style="font-size:11px;color:' + m.c + ';margin-top:2px">' + _hcEsc(it.note) + '</div>'
+        + '</div></label>';
+    });
+  });
+  bodyEl.innerHTML = html;
+  document.getElementById('hist-cleanup-overlay').classList.add('open');
+}
+
+function applyHistCleanup() {
+  const checked = new Set([...document.querySelectorAll('#hist-cleanup-body .hc-chk')].filter(el => el.checked).map(el => el.getAttribute('data-id')));
+  if(!checked.size) { toast('선택된 항목이 없어요', true); return; }
+  const items = findHistCleanupItems().filter(it => checked.has(it.id)); // 적용 시점에 다시 찾은 결과 기준
+  if(!items.length) { toast('처리할 항목이 없어요 (이미 정리됨)'); closeOverlay('hist-cleanup-overlay'); return; }
+  const touched = new Set();
+  let del = 0, upd = 0;
+  // 갱신 먼저 (삭제로 배열이 바뀌기 전에)
+  items.filter(it => it.type === 'mismatch').forEach(it => {
+    const pid = String(it.cg.patientId || it.cg.earlyEndPatientId || '');
+    if(!pid) return;
+    saveToAssignHistory(it.cg, pid);
+    touched.add(it.cg); upd++;
+  });
+  items.filter(it => it.type !== 'mismatch').forEach(it => {
+    const cg = it.cg;
+    if(!Array.isArray(cg.assignHistory) || cg.assignHistory.indexOf(it.h) < 0) return;
+    cg.assignHistory = cg.assignHistory.filter(h => h !== it.h);
+    addHistTombstone(cg, it.h.patientId, it.h.startDate);
+    touched.add(cg); del++;
+  });
+  touched.forEach(cg => markCgEdited(cg.id));
+  save();
+  renderCaregivers();
+  refreshCalendarIfOpen();
+  closeOverlay('hist-cleanup-overlay');
+  toast(`✅ 근무이력 정리 완료 — 삭제 ${del}건 · 갱신 ${upd}건 (간병인 ${touched.size}명)`);
 }
 
 function formatPhone(p) {
