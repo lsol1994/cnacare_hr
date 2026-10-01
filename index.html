@@ -2304,7 +2304,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_01_02';
+const APP_BUILD = '26_10_01_03';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3945,22 +3945,20 @@ function openPatient(id) {
   // 정상적으로 연결된(현재 매칭 중인) 간병인 우선 조회
   const cg = caregivers.find(c=>String(c.patientId)===String(p.id));
   // 종료된 환자인데 위에서 못 찾은 경우: 연결이 끊긴 마지막 담당 간병인을 대신 찾음
-  // 1순위: 중도종료로 cg.earlyEndPatientId에 보존된 경우
-  // 2순위: 과거 담당 이력(assignHistory)에 이 환자 기록이 남아있는 경우 (재배정으로 다른 환자에게 넘어간 경우 등)
-  //        여러 명이 걸리면 그중 가장 최근에 마감된 사람을 선택
+  // (26_10_01_03) 예전엔 earlyEndPatientId(중도종료·시작 전 취소)가 있으면 무조건 1순위로 골라서,
+  // 시작 전 취소된 간병인(0일 근무)이 실제로 근무 후 정상 종료돼 이력에만 남은 간병인을 가려버렸음
+  // (서명숙 환자: 시작 전 취소 이영애(1)만 보이고 실제 근무한 최진애가 안 보이던 문제).
+  // 이제 중도종료·이력 후보를 전부 모아서 "실제 근무한 건 우선 → 가장 늦게 마감된 건"으로 고름.
+  const ptCgHist = getPatientCgHistory(p.id);
   let lastCg = null;
-  let lastCgSource = null; // 'earlyEnd' = 중도종료로 끊김 / 'history' = 재배정 등으로 넘어가 이력에만 남음
-  if(!cg && p.status==='종료') {
-    lastCg = caregivers.find(c=>String(c.earlyEndPatientId)===String(p.id));
-    if(lastCg) lastCgSource = 'earlyEnd';
-    if(!lastCg) {
-      const candidates = caregivers
-        .filter(c=>(c.assignHistory||[]).some(h=>String(h.patientId)===String(p.id)))
-        .map(c=>({ cg:c, entry:c.assignHistory.find(h=>String(h.patientId)===String(p.id)) }));
-      candidates.sort((a,b)=>(b.entry.endDate||'').localeCompare(a.entry.endDate||''));
-      if(candidates.length) { lastCg = candidates[0].cg; lastCgSource = 'history'; }
-    }
+  let lastCgSource = null; // 'earlyEnd' = 중도종료로 끊김 / 'history' = 재배정 등으로 넘어가 이력에만 남음 / 'cancelled' = 시작 전 취소
+  if(!cg && p.status==='종료' && ptCgHist.length) {
+    const pick = ptCgHist.find(x=>!x.cancelled) || ptCgHist[0];
+    lastCg = pick.cg;
+    lastCgSource = pick.cancelled ? 'cancelled' : pick.source;
   }
+  // 담당 이력 목록(2건 이상일 때만 표시) — 현재 매칭 간병인은 위 카드에 이미 나오므로 제외
+  const ptCgHistOthers = ptCgHist.filter(x => !(cg && String(x.cg.id)===String(cg.id) && x.startDate===cg.startDate));
   const pLogs=logs.filter(l=>String(l.patientId)===String(p.id));
   document.getElementById('pt-modal-body').innerHTML=`
     <div class="g2" style="margin-bottom:.875rem">
@@ -3995,7 +3993,7 @@ function openPatient(id) {
       </button>
     </div>` : lastCg ? `
     <div class="hr"></div>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:8px">🔗 마지막 담당 간병인 <span style="font-weight:400;text-transform:none">${lastCgSource==='earlyEnd' ? '(중도종료됨)' : '(이후 다른 환자로 이동, 과거 이력)'}</span></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:8px">🔗 마지막 담당 간병인 <span style="font-weight:400;text-transform:none">${lastCgSource==='earlyEnd' ? '(중도종료됨)' : lastCgSource==='cancelled' ? '(시작 전 취소)' : '(이후 다른 환자로 이동, 과거 이력)'}</span></div>
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--rsm);padding:10px 14px;display:flex;align-items:center;gap:12px">
       <div style="width:36px;height:36px;border-radius:50%;background:var(--gray-lt);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:700;flex-shrink:0">${lastCg.name[0]}</div>
       <div style="flex:1">
@@ -4009,6 +4007,16 @@ function openPatient(id) {
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:6px">🔗 매칭 간병인</div>
     <div style="font-size:12px;color:var(--gray-lt);padding:6px 0">아직 매칭된 간병인이 없어요</div>`}
+    ${ptCgHist.length >= 2 && ptCgHistOthers.length ? `
+    <div style="font-size:11px;font-weight:700;color:var(--gray);margin:10px 0 4px">📜 담당 이력 (${ptCgHist.length}건)</div>
+    <div style="font-size:12px;background:var(--surface2);border-radius:var(--rsm);padding:6px 10px">
+      ${ptCgHist.map(x=>`
+        <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);${x.cancelled?'color:var(--gray-lt)':''}">
+          <span style="font-weight:700;min-width:64px;cursor:pointer;text-decoration:underline" onclick="closeOverlay('pt-overlay');showPage('caregiver');setTimeout(()=>openCgDetail('${x.cg.id}'),100)">${x.cg.name}</span>
+          <span style="font-family:var(--mono);font-size:11px;flex:1">${x.startDate||'—'} ${x.startTime||''} ~ ${x.endDate||'진행중'} ${x.endDate?(x.endTime||''):''}</span>
+          ${x.cancelled ? '<span class="badge" style="font-size:10px">시작 전 취소</span>' : (x.source==='earlyEnd' ? '<span class="badge b-amber" style="font-size:10px">중도종료</span>' : '')}
+        </div>`).join('')}
+    </div>` : ''}
     ${p.status==='매칭완료' && p.recruitInfo ? `
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--amber);margin-bottom:8px">${p.recruitInfo.reason==='맞교체(예약)'?'🔀 맞교체 예정':(p.recruitInfo.reason==='교체(시차)'?'⏱️ 교체(시차) 예정':'🔜 연장 후 예약 교체 진행중')}</div>
@@ -6655,6 +6663,27 @@ function getPeriodsForPatient(patientId) {
     });
   });
   return out.sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||''));
+}
+
+// (26_10_01_03) 환자 상세 "마지막 담당 간병인"/"담당 이력"용 — 이 환자를 맡았던 모든 근무건을
+// 최신 마감순으로 반환. getPeriodsForPatient(라이브+이력)에 더해, 이력 저장이 누락된 중도종료 건은
+// earlyEndPatientId의 라이브 값으로 보충. cancelled = 시작=마감(0시간) → 시작 전 취소/현장 취소 건.
+function getPatientCgHistory(patientId) {
+  const pid = String(patientId);
+  const list = getPeriodsForPatient(pid).map(x => ({
+    cg: x.cg, startDate: x.startDate, startTime: x.startTime, endDate: x.endDate, endTime: x.endTime,
+    source: (String(x.cg.earlyEndPatientId||'')===pid && x.cg.startDate===x.startDate) ? 'earlyEnd' : (x.live ? 'live' : 'history')
+  }));
+  caregivers.forEach(c => {
+    if(String(c.earlyEndPatientId||'')!==pid || !c.startDate) return;
+    if(list.some(x => String(x.cg.id)===String(c.id) && x.startDate===c.startDate)) return;
+    list.push({ cg: c, startDate: c.startDate, startTime: c.startTime||'', endDate: c.endDate||'', endTime: c.endTime||'', source: 'earlyEnd' });
+  });
+  list.forEach(x => {
+    x.cancelled = !!(x.endDate && x.startDate===x.endDate && (x.startTime||'')===(x.endTime||''));
+  });
+  const endKey = x => x.endDate ? x.endDate + ' ' + (x.endTime||'') : '9999-99-99'; // 마감 미정 = 진행중 → 가장 최신
+  return list.sort((a,b) => endKey(b).localeCompare(endKey(a)) || (b.startDate||'').localeCompare(a.startDate||''));
 }
 
 // 전체 간병인의 전체 담당 기간 (라이브+이력 통합) — "전체 다운로드"/"전체 자동생성"용
