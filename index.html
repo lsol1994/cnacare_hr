@@ -2216,6 +2216,30 @@ function addDeletedPtId(id) {
 }
 function clearDeletedPtIds() { localStorage.removeItem('cnc_deletedPtIds'); }
 
+// (26_10_01_05) 삭제 표시(cnc_deletedCgIds/cnc_deletedPtIds)가 무기한 남아 서버에 살아있는 레코드를
+// 이 기기에서만 영영 숨기던 문제 방지. 삭제 후 24시간이 지났는데도 Firebase에 그대로 있으면
+// = 삭제가 서버에 반영되지 못했거나 다른 기기가 되살린 것 → 이 기기에서도 숨김을 풀고 경고만 띄움.
+// (원근·이복순이 한 PC에서만 안 보여 윤광현·양정희 매칭 간병인이 비어 보이던 건)
+const DELETED_STALE_MS = 24 * 60 * 60 * 1000;
+function releaseStaleDeletedIds(storageKey, fbList) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    if(!raw || Array.isArray(raw) || typeof raw !== 'object') return [];
+    const fbById = new Map((fbList||[]).filter(Boolean).map(x => [String(x.id), x]));
+    const now = Date.now();
+    const released = [];
+    Object.keys(raw).forEach(id => {
+      const t = Number(raw[id]) || 0;
+      if(fbById.has(id) && now - t > DELETED_STALE_MS) {
+        delete raw[id];
+        released.push(fbById.get(id));
+      }
+    });
+    if(released.length) localStorage.setItem(storageKey, JSON.stringify(raw));
+    return released;
+  } catch(e) { return []; }
+}
+
 // 삭제된 ID - 블랙리스트/업무일지/알림용 (patients/caregivers와 동일한 원리를 컬렉션 인자화해서 재사용)
 // localStorage 키: cnc_deletedIds_<collection>
 function getDeletedIds(collection) {
@@ -2304,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_01_04';
+const APP_BUILD = '26_10_01_05';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -2769,6 +2793,13 @@ function attachFirebaseListener() {
     }
 
     if(fbPatients.length > 0) {
+      // (26_10_01_05) 24시간 지나도 서버에 남아있는 삭제 표시는 해제 (간병인과 동일)
+      const releasedPts = releaseStaleDeletedIds('cnc_deletedPtIds', fbPatients);
+      if(releasedPts.length) {
+        const nm = releasedPts.map(p => p.name || p.id).join(', ');
+        console.warn('[삭제 미반영] 서버에 남아있어 다시 표시하는 환자:', nm);
+        setTimeout(() => toast('⚠️ 삭제가 서버에 반영되지 않은 환자를 다시 표시했어요: ' + nm + ' — 필요하면 다시 삭제하세요', true), 1800);
+      }
       // 삭제 보호: Firebase에서 실제로 사라진 것 확인 후에만 해제
       const deletedPtIds = getDeletedPtIds();
       const filteredFbPt = deletedPtIds.size > 0
@@ -2810,6 +2841,13 @@ function attachFirebaseListener() {
       localStorage.setItem('cnc_patients', JSON.stringify(patients));
     }
     if(fbCaregivers.length > 0) {
+      // (26_10_01_05) 24시간 지나도 서버에 남아있는 삭제 표시는 해제 (이 기기에서만 숨겨지는 것 방지)
+      const releasedCgs = releaseStaleDeletedIds('cnc_deletedCgIds', fbCaregivers);
+      if(releasedCgs.length) {
+        const nm = releasedCgs.map(c => c.name || c.id).join(', ');
+        console.warn('[삭제 미반영] 서버에 남아있어 다시 표시하는 간병인:', nm);
+        setTimeout(() => toast('⚠️ 삭제가 서버에 반영되지 않은 간병인을 다시 표시했어요: ' + nm + ' — 필요하면 다시 삭제하세요', true), 1500);
+      }
       // 삭제 보호: Firebase에서 실제로 사라진 것 확인 후에만 해제
       const deletedIds = getDeletedCgIds();
       const filteredFb = deletedIds.size > 0
@@ -6759,11 +6797,17 @@ function mergeAllDuplicateCg() {
   if(!dupGroups.length) { toast('중복된 간병인이 없어요'); return; }
 
   let totalDeleted = 0;
+  const skippedOnsite = []; // (26_10_01_05) 현장취소 지급 기록이 있는 레코드가 삭제 대상이면 그룹째 건너뜀
+  let mergedGroups = 0;
   dupGroups.forEach(([name, list]) => {
     // 간병 시작일이 가장 늦은(최신) 레코드를 유지 → 그 레코드의 매칭 환자가 "현재 매칭 환자"가 됨
     const sorted = [...list].sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
     const keepCg   = sorted[0];
     const deleteCgs = sorted.slice(1);
+    // 현장취소 지급 기록(onsiteCancelDate)은 그 레코드에만 있고 병합 시 옮겨지지 않음 →
+    // 지우면 캘린더의 현장취소 지급 카드가 사라지므로 자동 정리에서 제외 (문정옥 8/5 건)
+    if(deleteCgs.some(cg => cg.onsiteCancelDate)) { skippedOnsite.push(name); return; }
+    mergedGroups++;
     if(!keepCg.assignHistory) keepCg.assignHistory = [];
 
     deleteCgs.forEach(cg => {
@@ -6788,6 +6832,9 @@ function mergeAllDuplicateCg() {
     markCgEdited(keepCg.id); // Firebase 덮어쓰기 방지 (2분) — 병합된 assignHistory가 다른 기기로 확실히 전파되도록
   });
 
+  const skipMsg = skippedOnsite.length ? ` (현장취소 지급 기록이 있어 제외: ${skippedOnsite.join(', ')})` : '';
+  if(!totalDeleted) { toast('정리할 수 있는 중복이 없어요' + skipMsg); return; }
+
   // 삭제 실행
   const deletedIds = getDeletedCgIds();
   caregivers = caregivers.filter(cg => !deletedIds.has(String(cg.id)));
@@ -6798,7 +6845,7 @@ function mergeAllDuplicateCg() {
   renderPatients();
   renderDashboard();
   updateSidebar();
-  toast(`✅ ${dupGroups.length}그룹 일괄 정리 완료! ${totalDeleted}개 중복 레코드가 제거됐어요`);
+  toast(`✅ ${mergedGroups}그룹 일괄 정리 완료! ${totalDeleted}개 중복 레코드가 제거됐어요` + skipMsg);
 }
 
 function openDuplicateCgManager() {
@@ -6853,6 +6900,7 @@ function openDuplicateCgManager() {
                 <span style="font-size:12px;font-weight:700;color:${statusColor[cg.workStatus]||'var(--gray)'}">${cg.workStatus||'—'}</span>
                 <span style="font-size:11px;color:var(--gray)">${cg.phone||''}</span>
                 ${cg.ssn?`<span style="font-size:11px;color:var(--gray)">🪪 ${cg.ssn}</span>`:''}
+                ${cg.onsiteCancelDate?`<span class="badge b-amber" style="font-size:10px">🚫 현장취소 지급 ${cg.onsiteCancelDate} — 삭제 불가</span>`:''}
               </div>
               <div style="font-size:11px;color:var(--gray);margin-top:3px;line-height:1.6">
                 📅 ${cg.startDate||'—'} ~ ${cg.endDate||'—'}<br>
@@ -6881,6 +6929,13 @@ function mergeDuplicateCg(name) {
   if(!keepCg) return;
 
   const deleteCgs = group.filter(cg=>String(cg.id)!==keepId);
+
+  // (26_10_01_05) 현장취소 지급 기록은 병합 시 옮겨지지 않으므로, 그 레코드는 삭제 대상이 될 수 없음
+  const onsiteDel = deleteCgs.filter(cg => cg.onsiteCancelDate);
+  if(onsiteDel.length) {
+    alert(`🚫 삭제할 수 없어요\n\n${onsiteDel.map(cg => cg.name + ' (' + cg.onsiteCancelDate + ' 현장취소 지급 ' + Number(cg.onsiteCancelAmount||15000).toLocaleString() + '원)').join('\n')}\n\n현장취소 지급 기록은 이 레코드에만 있어서, 삭제하면 캘린더의 지급 기록이 사라져요.\n이 레코드를 "유지"로 선택하거나, 이름을 구분해서 남겨두세요.`);
+    return;
+  }
 
   if(!keepCg.assignHistory) keepCg.assignHistory = [];
 
