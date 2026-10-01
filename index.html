@@ -2304,7 +2304,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_01_01';
+const APP_BUILD = '26_10_01_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -4336,7 +4336,10 @@ function savePatientEdit(id) {
         }
       }
       if(newEndDate) {
-        matched.forEach(c=>{
+        // (26_10_01_02) 이미 종료된 간병인은 제외 — 정상 종료돼도 patientId가 남아있어서, 예전엔 환자 정보만
+        // 고쳐도 끝난 근무건의 시작·마감이 환자 일정으로 덮어써졌음(박옥순·김이리나·한정환 등 현재값 오염 원인).
+        // 끝난 근무건의 날짜 정정은 간병인 쪽(마감일 직접수정/간병인 수정)에서 해야 함.
+        matched.filter(c => c.workStatus !== '종료').forEach(c=>{
           c.endDate = newEndDate;
           c.endTime = newEndTime;
           c.startDate = p.startDate || c.startDate;
@@ -4353,10 +4356,7 @@ function savePatientEdit(id) {
         pay: c.pay, endDate: c.endDate, endTime: c.endTime,
         startDate: c.startDate, startTime: c.startTime, duration: c.duration
       });
-      if(_beforeSnap.get(c.id) !== _after) {
-        markCgEdited(c.id); // Firebase 덮어쓰기 방지 (2분) — 실제 변경 시에만
-        syncLiveToAssignHistory(c); // (26_10_01_01) 같은 근무건 이력이 이미 있으면 같이 갱신
-      }
+      if(_beforeSnap.get(c.id) !== _after) markCgEdited(c.id); // Firebase 덮어쓰기 방지 (2분) — 실제 변경 시에만
       autoFillAttendance(String(c.id));
     });
     refreshCalendarIfOpen();
@@ -5564,10 +5564,12 @@ function saveCg() {
     }
   }
 
+  let _cgDtChanged = false; // (26_10_01_02) 이번 수정에서 날짜·시간을 실제로 바꿨는지
   if(editCgId){
     const idx=caregivers.findIndex(x=>String(x.id)===String(editCgId));
     if(idx>-1) {
       const before = caregivers[idx]; // 병합 전 원래 상태 (전환 감지용)
+      _cgDtChanged = ['startDate','startTime','endDate','endTime'].some(k => (cg[k]!==undefined) && String(cg[k]||'') !== String(before[k]||'')); // (26_10_01_02)
       const wasActiveMatch  = before.patientId && before.workStatus !== '종료';
       const becomingEnded   = cg.workStatus === '종료' && before.workStatus !== '종료';
 
@@ -5596,7 +5598,9 @@ function saveCg() {
       }
     }
     markCgEdited(editCgId); // Firebase 덮어쓰기 방지 (10초)
-    { const _ec = caregivers.find(x=>String(x.id)===String(editCgId)); if(_ec) syncLiveToAssignHistory(_ec); } // (26_10_01_01) 날짜·시간 수정이 이미 저장된 같은 근무건 이력에도 반영되도록
+    // (26_10_01_01) 날짜·시간 수정이 이미 저장된 같은 근무건 이력에도 반영되도록
+    // (26_10_01_02) 단, 이번 수정에서 날짜·시간을 실제로 바꿨을 때만 — 연락처 등만 고쳤는데 오염된 현재값이 이력을 덮어쓰면 안 됨
+    if(_cgDtChanged) { const _ec = caregivers.find(x=>String(x.id)===String(editCgId)); if(_ec) syncLiveToAssignHistory(_ec); }
   } else {
     cg._ts = Date.now(); // 동기화 충돌 해결(최신 우선)을 위한 저장 시각
     caregivers.unshift(cg);
@@ -6343,13 +6347,13 @@ function resyncAllCgEndTimesManual() {
   let fixed = 0;
   caregivers.forEach(cg => {
     if(!cg.patientId) return;
+    if(cg.workStatus === '종료') return; // (26_10_01_02) 끝난 근무건은 환자 일정으로 덮어쓰지 않음 (이력이 정답)
     const pt = patients.find(p=>String(p.id)===String(cg.patientId));
     if(!pt || !pt.endDate) return;
     if(cg.endDate !== pt.endDate || cg.endTime !== (pt.endTime||'')) {
       cg.endDate = pt.endDate;
       cg.endTime = pt.endTime || '';
       markCgEdited(cg.id);
-      syncLiveToAssignHistory(cg); // (26_10_01_01) 같은 근무건 이력도 같이 갱신
       autoFillAttendance(String(cg.id));
       fixed++;
     }
@@ -9832,8 +9836,11 @@ function findHistCleanupItems() {
         if(cg.endTime && h.endTime !== cg.endTime) diffs.push('마감시간');
         if(diffs.length) {
           used.add(h);
+          // (26_10_01_02) 종료된 근무건은 종료 시점에 저장된 이력이 정답 — 현재값은 환자정보 수정 등으로
+          // 나중에 오염됐을 가능성이 높으므로 기본 방향을 "이력 → 현재값 복원"으로 둠. 근무중이면 반대.
           items.push({ id: cg.id + '|mismatch|' + _histKeyFor(h.patientId, h.startDate), type: 'mismatch', cg: cg, h: h,
-            note: diffs.join('·') + ' 다름 → 현재값 ' + _hcDt(cg.startDate, cg.startTime) + ' ~ ' + _hcDt(cg.endDate, cg.endTime) + ' 로 맞춤' });
+            dir: cg.workStatus === '종료' ? 'hist' : 'live',
+            note: diffs.join('·') + ' 다름 — 현재값 ' + _hcDt(cg.startDate, cg.startTime) + ' ~ ' + _hcDt(cg.endDate, cg.endTime) });
         }
       }
     }
@@ -9874,7 +9881,7 @@ function openHistCleanupTool() {
   }
   const meta = {
     orphan:   { t: '① 재등록 중복 (옛 환자ID 이력 삭제)', c: 'var(--red)',   def: true },
-    mismatch: { t: '② 현재 배정과 불일치 (이력을 현재값으로 갱신)', c: 'var(--amber)', def: true },
+    mismatch: { t: '② 현재 배정과 불일치 (항목별로 기준 선택)', c: 'var(--amber)', def: true },
     zero:     { t: '③ 0시간 이력 (취소 기록 — 삭제된 환자 것만 기본 체크)', c: 'var(--blue)',  def: true },
     nodate:   { t: '④ 날짜 없는 이력 (삭제)', c: 'var(--gray)',  def: true },
   };
@@ -9897,6 +9904,12 @@ function openHistCleanupTool() {
         + (h.settled === true ? ' <span class="badge b-red" style="font-size:10px">정산완료</span>' : '') + '</div>'
         + '<div style="font-size:12px;margin-top:2px">이력: ' + _hcEsc(_hcDt(h.startDate, h.startTime)) + ' ~ ' + _hcEsc(_hcDt(h.endDate, h.endTime)) + (h.status ? ' · ' + _hcEsc(h.status) : '') + '</div>'
         + '<div style="font-size:11px;color:' + m.c + ';margin-top:2px">' + _hcEsc(it.note) + '</div>'
+        + (it.type === 'mismatch'
+          ? '<select class="hc-dir" data-id="' + _hcEsc(it.id) + '" onclick="event.stopPropagation()" style="margin-top:6px;font-size:12px;padding:3px 6px">'
+            + '<option value="hist"' + (it.dir === 'hist' ? ' selected' : '') + '>이력이 맞음 → 현재값을 이력으로 복원</option>'
+            + '<option value="live"' + (it.dir === 'live' ? ' selected' : '') + '>현재값이 맞음 → 이력을 현재값으로 갱신</option>'
+            + '</select>'
+          : '')
         + '</div></label>';
     });
   });
@@ -9907,12 +9920,16 @@ function openHistCleanupTool() {
 function applyHistCleanup() {
   const checked = new Set([...document.querySelectorAll('#hist-cleanup-body .hc-chk')].filter(el => el.checked).map(el => el.getAttribute('data-id')));
   if(!checked.size) { toast('선택된 항목이 없어요', true); return; }
+  const dirs = {};
+  document.querySelectorAll('#hist-cleanup-body .hc-dir').forEach(el => { dirs[el.getAttribute('data-id')] = el.value; });
   const items = findHistCleanupItems().filter(it => checked.has(it.id)); // 적용 시점에 다시 찾은 결과 기준
   if(!items.length) { toast('처리할 항목이 없어요 (이미 정리됨)'); closeOverlay('hist-cleanup-overlay'); return; }
   const touched = new Set();
-  let del = 0, upd = 0;
+  let del = 0, upd = 0, rst = 0;
   // 갱신 먼저 (삭제로 배열이 바뀌기 전에)
   items.filter(it => it.type === 'mismatch').forEach(it => {
+    const dir = dirs[it.id] || it.dir || 'hist';
+    if(dir === 'hist') { restoreLiveFromHistory(it.cg, it.h); touched.add(it.cg); rst++; return; }
     const pid = String(it.cg.patientId || it.cg.earlyEndPatientId || '');
     if(!pid) return;
     saveToAssignHistory(it.cg, pid);
@@ -9930,7 +9947,24 @@ function applyHistCleanup() {
   renderCaregivers();
   refreshCalendarIfOpen();
   closeOverlay('hist-cleanup-overlay');
-  toast(`✅ 근무이력 정리 완료 — 삭제 ${del}건 · 갱신 ${upd}건 (간병인 ${touched.size}명)`);
+  toast(`✅ 근무이력 정리 완료 — 삭제 ${del}건 · 이력갱신 ${upd}건 · 현재값 복원 ${rst}건 (간병인 ${touched.size}명)`);
+}
+
+// (26_10_01_02) 이력(종료 시점 기록)을 기준으로 간병인 현재값(시작시간·마감일시)을 되돌림.
+// 오염된 현재값 때문에 마감일이 늘어나 있었다면 그 사이에 자동생성된 간병일지(유령 기록)만 정리.
+function restoreLiveFromHistory(cg, h) {
+  if(!cg || !h) return;
+  const oldEnd = cg.endDate || '';
+  if(h.startTime) cg.startTime = h.startTime;
+  if(h.endDate)   cg.endDate   = h.endDate;
+  if(h.endTime !== undefined && h.endTime !== null) cg.endTime = h.endTime;
+  if(h.endDate) recalcDuration(cg, h.endDate);
+  markCgEdited(cg.id);
+  if(oldEnd && h.endDate && oldEnd > h.endDate) {
+    // 유령 구간(이력 마감 ~ 오염된 마감)에 다른 근무 이력이 걸쳐 있으면 그 간병일지는 건드리지 않음
+    const overlapOther = (cg.assignHistory||[]).some(x => x !== h && x.startDate && x.startDate <= oldEnd && (x.endDate || '9999-12-31') > h.endDate);
+    if(!overlapOther) trimAttendanceGhosts(String(cg.id), oldEnd, h.endDate);
+  }
 }
 
 function formatPhone(p) {
