@@ -2304,7 +2304,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_01_03';
+const APP_BUILD = '26_10_01_04';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -9133,17 +9133,22 @@ function findCgForPatient(p) {
   // ── 종료 환자: patientId 직접 연결 우선, 기간으로 보조 매핑 ──
   if(p.status === '종료') {
 
-    // 1순위: patientId가 이 환자를 직접 가리키는 종료 간병인
-    let cg = caregivers.find(c =>
-      String(c.patientId) === String(p.id) &&
-      c.workStatus === '종료'
-    );
-    if(cg) return cg;
+    // (26_10_01_04) 1·2순위 통합: 라이브 배정 + 근무이력 + 중도종료 건을 모두 모아 환자 상세와 같은 기준
+    // ("실제 근무한 건 우선 → 가장 늦게 마감된 건")으로 고름. 예전엔 patientId/earlyEndPatientId만 순서대로 봐서
+    // 시작 전 취소된 간병인(이영애(1))이 실제 근무 후 이력에만 남은 간병인(최진애)을 가려 종료보고에 잘못 들어갔음.
+    const hist = getPatientCgHistory(p.id);
+    if(hist.length) {
+      const pick = hist.find(x => !x.cancelled) || hist[0];
+      if(pick.source === 'live') return pick.cg;
+      // 과거 이력 건이면 간병인 라이브 날짜는 이후 다른 환자 건으로 덮어써졌을 수 있으므로,
+      // 이름·연락처 등은 원본에서 읽고 날짜만 이 환자 근무건 값으로 보여주는 읽기 전용 뷰를 반환
+      return Object.assign(Object.create(pick.cg), {
+        startDate: pick.startDate, startTime: pick.startTime, endDate: pick.endDate, endTime: pick.endTime
+      });
+    }
 
-    // 2순위: earlyEndPatientId로 이 환자를 참조 (중도종료)
-    cg = caregivers.find(c =>
-      String(c.earlyEndPatientId) === String(p.id) ||
-      (c.earlyEndSnapshot && String(c.earlyEndSnapshot.patientId) === String(p.id))
+    let cg = caregivers.find(c =>
+      c.earlyEndSnapshot && String(c.earlyEndSnapshot.patientId) === String(p.id)
     );
     if(cg) return cg;
 
