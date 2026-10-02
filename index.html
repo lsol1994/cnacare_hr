@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_02_01';
+const APP_BUILD = '26_10_02_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3832,7 +3832,7 @@ function ptRowHTML(p) {
         <div style="font-size:11px;color:var(--gray);margin-top:2px">${p.createdAt} 등록</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-        ${(p.recruitInfo && !p.pendingReplacement) ? `<span class="badge b-amber" style="font-size:10px">🔄 재모집중</span>` : stBadge(p.status)}
+        ${p.reservedCgId ? `${stBadge(p.status)}<span class="badge" style="font-size:10px;background:var(--surface2);color:var(--blue);border:1px solid var(--blue)">📅 예약매칭</span>` : (p.recruitInfo && !p.pendingReplacement) ? `<span class="badge b-amber" style="font-size:10px">🔄 재모집중</span>` : stBadge(p.status)}
         ${ptDdayBadge(p)}
       </div>
     </div>
@@ -3876,7 +3876,27 @@ function ptRowHTML(p) {
       // (26_10_02_01) 간병인 카드의 "매칭 환자"처럼 환자 카드에도 현재 매칭 간병인 표시
       // 조회 기준은 환자 상세(openPatient)와 동일: patientId로 실시간 연결된 간병인
       const mcg = caregivers.find(c=>String(c.patientId)===String(p.id));
-      if(!mcg) return '';
+      if(!mcg) {
+        // (26_10_02_02) 간병인 예약 매칭: 아직 인계 전이면 예약 간병인 표시
+        const rcg = getReservedCg(p);
+        if(!p.reservedCgId) return '';
+        const na  = rcg ? rcg.nextAssign : null;
+        const curPt = rcg && rcg.patientId ? patients.find(x=>String(x.id)===String(rcg.patientId)) : null;
+        const warn = rcg ? resvConflictMsg(rcg) : '예약 간병인 정보를 찾을 수 없어요 (예약 취소 후 다시 예약해주세요)';
+        return `
+      <div style="background:var(--surface2);border:1.5px dashed var(--blue);border-radius:var(--rsm);padding:10px 14px;margin-bottom:.6rem">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--blue);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700;flex-shrink:0">${rcg?(rcg.name||'—')[0]:'?'}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:700;color:var(--blue)">📅 예약 간병인: ${rcg?(rcg.name||'—'):'—'}${na?` <span style="font-size:11px;font-weight:400;color:var(--gray)">· ${na.startDate||''} ${na.startTime||''} 시작</span>`:''}</div>
+            ${rcg?`<div style="font-size:11px;color:var(--gray);margin-top:1px">현재 ${curPt?curPt.name+' 간병중':'간병중'}${rcg.endDate?` · ${rcg.endDate} ${rcg.endTime||''} 마감 후 자동 인계`:''}</div>`:''}
+          </div>
+          ${rcg?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue);flex-shrink:0" onclick="showPage('caregiver');setTimeout(()=>openCgDetail('${rcg.id}'),100)">간병인 상세 →</button>`:''}
+          <button class="btn btn-sm" style="border-color:var(--red);color:var(--red);flex-shrink:0" onclick="cancelReservation('${p.id}')">예약 취소</button>
+        </div>
+        ${warn?`<div style="font-size:11px;color:var(--red);margin-top:6px">⚠️ ${warn}</div>`:''}
+      </div>`;
+      }
       const mcgName = mcg.name || '—';
       return `
       <div style="background:var(--green-lt);border:1px solid rgba(45,138,78,.2);border-radius:var(--rsm);padding:10px 14px;display:flex;align-items:center;gap:12px;margin-bottom:.6rem">
@@ -3896,8 +3916,9 @@ function ptRowHTML(p) {
             <input type="checkbox" ${p.recruited?'checked':''} onchange="toggleRecruited('${p.id}',this.checked)"> 구인완료
           </label>
         </div>
-        ${p.status==='매칭완료'?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="openExtendPatient('${p.id}')">📅 연장</button>`:''}
-        ${(p.status==='매칭완료' && !p.recruitInfo)?`<button class="btn btn-sm" style="border-color:var(--green);color:var(--green)" onclick="openDirectSwap('${p.id}')">🔀 맞교체</button><button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="openGapSwap('${p.id}')">⏱️ 교체(시차)</button>`:''}
+        ${(ptDisplayTab(p)==='모집중' && !p.reservedCgId && !p.pendingReplacement && !caregivers.some(c=>String(c.patientId)===String(p.id)))?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="openReserveCg('${p.id}')">📅 간병인 예약</button>`:''}
+        ${(p.status==='매칭완료' && !p.reservedCgId)?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="openExtendPatient('${p.id}')">📅 연장</button>`:''}
+        ${(p.status==='매칭완료' && !p.recruitInfo && !p.reservedCgId)?`<button class="btn btn-sm" style="border-color:var(--green);color:var(--green)" onclick="openDirectSwap('${p.id}')">🔀 맞교체</button><button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="openGapSwap('${p.id}')">⏱️ 교체(시차)</button>`:''}
         <button class="btn btn-sm" onclick="doCopy(patients.find(x=>String(x.id)==='${p.id}')?._editedPost || buildPost(patients.find(x=>String(x.id)==='${p.id}')))">
           <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>복사
         </button>
@@ -3935,7 +3956,7 @@ function ptSearchMatch(p, q, qNum) {
 // 예정 교체 간병인을 등록(pendingReplacement)하면 그 즉시 다시 매칭완료 탭으로 돌아간다.
 // 발송 페이지(renderSend)의 재모집 목록과 동일한 기준.
 function ptDisplayTab(p) {
-  if(p.status === '매칭완료' && p.recruitInfo && !p.pendingReplacement) return '모집중';
+  if(p.status === '매칭완료' && p.recruitInfo && !p.pendingReplacement && !p.reservedCgId) return '모집중';
   return p.status;
 }
 
@@ -4060,7 +4081,23 @@ function openPatient(id) {
     </div>` : `
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:6px">🔗 매칭 간병인</div>
-    <div style="font-size:12px;color:var(--gray-lt);padding:6px 0">아직 매칭된 간병인이 없어요</div>`}
+    ${(()=>{
+      const rcg = getReservedCg(p);
+      if(!rcg) return `<div style="font-size:12px;color:var(--gray-lt);padding:6px 0">아직 매칭된 간병인이 없어요</div>`;
+      const na = rcg.nextAssign;
+      const curPt = rcg.patientId ? patients.find(x=>String(x.id)===String(rcg.patientId)) : null;
+      const warn = resvConflictMsg(rcg);
+      return `<div style="background:var(--surface2);border:1.5px dashed var(--blue);border-radius:var(--rsm);padding:10px 14px">
+        <div style="font-size:14px;font-weight:700;color:var(--blue)">📅 예약 간병인: ${rcg.name||'—'} <span style="font-size:12px;font-weight:400;color:var(--gray)">${formatPhone(rcg.phone)||''}</span></div>
+        <div style="font-size:12px;color:var(--gray);margin-top:3px">예약 기간: ${na.startDate||'—'} ${na.startTime||''} → ${na.endDate||'—'} ${na.endTime||''}${na.pay?` · 일급 ${Number(na.pay).toLocaleString()}원`:''}</div>
+        <div style="font-size:12px;color:var(--gray);margin-top:2px">현재 ${curPt?curPt.name+' 간병중':'간병중'}${rcg.endDate?` · ${rcg.endDate} ${rcg.endTime||''} 마감 후 자동 인계`:''}</div>
+        ${warn?`<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ ${warn}</div>`:''}
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="closeOverlay('pt-overlay');showPage('caregiver');setTimeout(()=>openCgDetail('${rcg.id}'),100)">간병인 상세 →</button>
+          <button class="btn btn-sm" style="border-color:var(--red);color:var(--red)" onclick="cancelReservation('${p.id}')">예약 취소</button>
+        </div>
+      </div>`;
+    })()}`}
     ${ptCgHist.length >= 2 && ptCgHistOthers.length ? `
     <div style="font-size:11px;font-weight:700;color:var(--gray);margin:10px 0 4px">📜 담당 이력 (${ptCgHist.length}건)</div>
     <div style="font-size:12px;background:var(--surface2);border-radius:var(--rsm);padding:6px 10px">
@@ -4667,6 +4704,15 @@ function confirmOnsiteCancelReassign(id) {
     `${p.name} 님은 종료되지 않고 "모집중"으로 전환되어 새 간병인을 구하게 돼요.`
   );
   if(!ok) return;
+  // (26_10_02_02) 다음 환자 예약이 있으면 유지/취소를 물어봄 (중도종료와 동일한 원칙)
+  let resvKeep = null;
+  if(cg.nextAssign) {
+    resvKeep = confirm(
+      `${cg.name} 님은 다음 환자 예약이 있어요: ${cg.nextAssign.patientName||''} (${cg.nextAssign.startDate||''} ${cg.nextAssign.startTime||''} 시작)\n\n` +
+      `[확인] 예약 유지 — 바로 ${cg.nextAssign.patientName||''} 환자로 재배정 (시작일시까지 대기중)\n` +
+      `[취소] 예약 취소 — ${cg.nextAssign.patientName||''} 환자는 모집중으로 복귀`
+    );
+  }
 
   const prevCgName       = cg.name;
   const originalPatientId = cg.patientId;
@@ -4735,6 +4781,18 @@ function confirmOnsiteCancelReassign(id) {
   markCgEdited(cg.id);
   save();
   autoFillAttendance(String(cg.id));
+  let resvMsg = '';
+  if(resvKeep !== null && cg.nextAssign) {
+    const resvPtName = cg.nextAssign.patientName || '';
+    if(resvKeep) {
+      const rpt = applyReservation(cg);
+      resvMsg = rpt ? ` ${cg.name} 님은 ${rpt.name} 환자로 예약 인계됐어요.` : ' (예약 환자 상태가 바뀌어 예약은 정리됨)';
+    } else {
+      clearReservation(cg);
+      resvMsg = ` (${resvPtName} 예약 취소)`;
+    }
+    save();
+  }
   refreshCalendarIfOpen();
   document.getElementById('pt-overlay').classList.remove('open');
   renderPatients();
@@ -4742,7 +4800,7 @@ function confirmOnsiteCancelReassign(id) {
   renderDashboard();
   updateSidebar();
 
-  toast(`✅ ${cg.name} 님 도착 후 취소 처리됐어요 (15,000원 지급 예정). ${p.name} 님은 재모집으로 전환됐어요.`);
+  toast(`✅ ${cg.name} 님 도착 후 취소 처리됐어요 (15,000원 지급 예정). ${p.name} 님은 재모집으로 전환됐어요.${resvMsg}`);
 }
 
 function deletePatient(id) {
@@ -4777,6 +4835,11 @@ function deletePatient(id) {
       delete cg.earlyEndPatientId; delete cg.earlyEndSnapshot;
       markCgEdited(cg.id);
     }
+    // (26_10_02_02) 삭제되는 환자를 예약해둔 간병인이 있으면 예약만 해제
+    if(cg.nextAssign && String(cg.nextAssign.patientId)===String(id)) {
+      delete cg.nextAssign;
+      markCgEdited(cg.id);
+    }
   });
 
   patients = patients.filter(x=>String(x.id)!==String(id)); // 간병인 이력 정리가 끝난 뒤에 삭제
@@ -4790,7 +4853,7 @@ function renderSend() {
   const active   = patients.filter(p=>p.status==='모집중'&&!p.recruitInfo);
   // 재모집: 일반 재모집(모집중) + 연장 후 예약 교체(매칭완료 상태로 기존 간병인 근무 중, 다음 간병인만 별도 구인)
   // 단, 예약 교체 간병인이 이미 등록됐으면(pendingReplacement) 더 이상 구할 필요 없으므로 발송 목록에서 제외
-  const recruit  = patients.filter(p=>p.recruitInfo && !p.pendingReplacement && (p.status==='모집중'||p.status==='매칭완료'));
+  const recruit  = patients.filter(p=>p.recruitInfo && !p.pendingReplacement && !p.reservedCgId && (p.status==='모집중'||p.status==='매칭완료'));
   const el = document.getElementById('send-pt-list');
 
   function ptCard(p, isRecruit) {
@@ -4940,7 +5003,7 @@ function updateSendSelectedUI() {
 }
 
 function toggleAllSendPt() {
-  const allPts = patients.filter(p=>(p.status==='모집중'&&!p.pendingReplacement)||(p.recruitInfo&&!p.pendingReplacement&&p.status==='매칭완료'));
+  const allPts = patients.filter(p=>!p.reservedCgId && ((p.status==='모집중'&&!p.pendingReplacement)||(p.recruitInfo&&!p.pendingReplacement&&p.status==='매칭완료')));
   const allIds = allPts.map(p=>String(p.id));
   const allSelected = allIds.every(id=>selectedPtIds.has(id));
   if(allSelected) {
@@ -5892,6 +5955,16 @@ function cgRowHTML(cg) {
           </div>`;
         return '';
       })()}
+      ${cg.nextAssign ? (()=>{
+        // (26_10_02_02) 다음 환자 예약 표시 (예약 버튼은 환자 쪽에만 있음)
+        const na = cg.nextAssign;
+        const warn = resvConflictMsg(cg);
+        return `<div style="font-size:12px;color:var(--blue);background:var(--surface2);border:1.5px dashed var(--blue);border-radius:var(--rsm);padding:6px 12px;margin-bottom:.6rem">
+          📅 다음 예약: <b>${na.patientName||'—'}</b> · ${na.startDate||''} ${na.startTime||''} 시작 <span style="color:var(--gray)">(현재 간병 마감 후 자동 재배정)</span>
+          <button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue);margin-left:6px;padding:2px 8px" onclick="showPage('patients');setTimeout(()=>openPatient('${na.patientId}'),100)">환자 상세 →</button>
+          ${warn?`<div style="color:var(--red);font-size:11px;margin-top:3px">⚠️ ${warn}</div>`:''}
+        </div>`;
+      })() : ''}
       <div class="pt-foot">
         <span style="font-size:12px;color:var(--gray)">${cg.bankName} ${cg.bankAccount} (${cg.bankHolder})</span>
         <div style="display:flex;gap:6px">
@@ -5911,7 +5984,7 @@ function cgRowHTML(cg) {
           <div style="display:flex;gap:6px;align-items:center">
             <select id="reassign-pt-${cg.id}" style="flex:1;font-size:13px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface)">
               <option value="">— 환자를 선택하세요 —</option>
-              ${patients.filter(p=>p.status==='모집중' || (p.status==='매칭완료' && !caregivers.some(c=>String(c.patientId)===String(p.id)))).map(p=>`
+              ${patients.filter(p=>!p.reservedCgId && (p.status==='모집중' || (p.status==='매칭완료' && !caregivers.some(c=>String(c.patientId)===String(p.id))))).map(p=>`
                 <option value="${p.id}">${p.name} (${p.hospital||''}) · ${p.startDate||'날짜미정'} · ${p.duration||'미정'}${p.recruitInfo?' 🔄':''}${p.status==='매칭완료'?' ⚠️매칭정보꼬임':''}
                 </option>`).join('')}
             </select>
@@ -7856,6 +7929,22 @@ function confirmReassign(cgId) {
   const pt = patients.find(p=>String(p.id)===String(ptId));
   if(!pt) return;
 
+  applyReassignCore(cg, pt);
+
+  save();
+  autoFillAttendance(String(cg.id)); // 재배정된 새 일정에 맞춰 간병일지 동기화 (신규 추가분만 채움 — 당일 겹침은 위에서 이미 새로 등록됨)
+  refreshCalendarIfOpen();
+  renderCaregivers();
+  renderPatients();
+  renderDashboard();
+  updateSidebar();
+  toast(`✅ ${cg.name} → ${pt.name} 재배정 완료! 대기중으로 활성화됐어요`);
+}
+
+// (26_10_02_02) 재배정 핵심 처리 — 기존 confirmReassign 본문을 그대로 옮긴 것.
+// 수동 재배정(confirmReassign)과 "간병인 예약" 자동 인계(applyReservation)가 같은 경로를 타도록 공용화.
+// ov(예약 정보)가 없으면 기존 재배정과 100% 동일하게 동작함. save/렌더링/토스트는 호출하는 쪽에서 처리.
+function applyReassignCore(cg, pt, ov) {
   // 현재 담당 환자 이력 저장 (재배정 전)
   saveToAssignHistory(cg);
   syncInsuranceForPatientChange(cg, cg.patientId, pt.id); // 배상보험도 이전 환자 건 이력 보관 + 새 배정용 초기화
@@ -7871,10 +7960,18 @@ function confirmReassign(cgId) {
   // 간병인 재활성화
   cg.workStatus = '대기중';
   cg.patientId  = String(pt.id);
+  if(ov) {
+    // 간병인 예약: 예약할 때 정한 시작/마감일시 사용
+    cg.startDate = ov.startDate || '';
+    cg.startTime = ov.startTime || '';
+    cg.endDate   = ov.endDate   || '';
+    cg.endTime   = ov.endTime   || '';
+  } else {
   cg.startDate  = (ri ? ri.startDate : pt.startDate) || '';
   cg.startTime  = (ri ? ri.startTime : pt.startTime) || '';
   cg.endDate    = (ri ? ri.endDate   : pt.endDate)   || '';
   cg.endTime    = pt.endTime || '';
+  }
   // 환자의 마감일이 오늘보다 이전(예전 계획이 그대로 남아있는 경우 등)이면 무효화.
   // 그대로 두면 재배정 직후 자동종료 점검 로직이 "이미 마감일 지남"으로 오판해서
   // 근무 시작 전에 곧바로 다시 "종료"로 되돌려버리는 문제가 있었음.
@@ -7882,7 +7979,7 @@ function confirmReassign(cgId) {
     cg.endDate = '';
     cg.endTime = '';
   }
-  cg.pay        = pt.pay ? String(Math.max(0, Number(pt.pay)-5000)) : cg.pay;
+  cg.pay        = (ov && ov.pay) ? String(ov.pay) : (pt.pay ? String(Math.max(0, Number(pt.pay)-5000)) : cg.pay);
   cg.hospital   = pt.hospital  || cg.hospital;
   delete cg.earlyEndPatientId;
   delete cg.earlyEndSnapshot;
@@ -7925,15 +8022,178 @@ function confirmReassign(cgId) {
       markAttendEdited(newRec.id);
     }
   }
+}
 
+// ═══ (26_10_02_02) 간병인 예약 매칭 ═══
+// 다른 환자를 간병 중인 간병인을, 그 간병이 끝나는 대로 이어서 받을 다음 환자(B)에 미리 예약.
+// - 예약 정보는 간병인 레코드의 nextAssign에 저장. 현재 매칭(patientId)은 마감 전까지 그대로 둠.
+// - B 환자는 예약 즉시 매칭완료로 표시(pt.reservedCgId). 단, caregiverName은 인계 전까지 비워둠 —
+//   이름을 미리 넣으면 autoMatch()가 이름으로 간병인을 조기 연결하거나, 자동종료 직후 붙는
+//   earlyEndPatientId 때문에 다시 모집중으로 되돌려버리는 함정이 있음.
+// - 인계: 간병인의 매칭이 풀리는 순간(자동종료/중도종료·시작 전 취소에서 "예약 유지" 선택)
+//   applyReservation()이 기존 재배정과 같은 applyReassignCore()로 B에 배정 → 대기중 →
+//   시작 시각이 되면 checkAutoStart()가 근무중으로 전환.
+function resvStartDt(date, time) {
+  if(!date) return null;
+  return calcEndDt(date, time || '00:00');
+}
+function ptHasLinkedCg(ptId, exceptCgId) {
+  return caregivers.some(c => String(c.patientId)===String(ptId) && String(c.id)!==String(exceptCgId||''));
+}
+function getReservedCg(pt) {
+  if(!pt || !pt.reservedCgId) return null;
+  const cg = caregivers.find(c => String(c.id)===String(pt.reservedCgId));
+  return (cg && cg.nextAssign && String(cg.nextAssign.patientId)===String(pt.id)) ? cg : null;
+}
+// 예약 시작일시보다 현재 근무 마감이 늦으면 경고 문구 반환 (연장 등으로 어긋난 경우)
+function resvConflictMsg(cg) {
+  if(!cg || !cg.nextAssign || !cg.patientId) return '';
+  const curEnd = calcEndDt(cg.endDate, cg.endTime);
+  const nStart = resvStartDt(cg.nextAssign.startDate, cg.nextAssign.startTime);
+  if(!cg.endDate) return '현재 근무 마감일이 비어 있어 인계 시점을 알 수 없어요';
+  if(curEnd && nStart && curEnd > nStart) return `현재 근무 마감(${cg.endDate} ${cg.endTime||''})이 예약 시작보다 늦어요`;
+  return '';
+}
+
+function openReserveCg(ptId) {
+  const pt = patients.find(p=>String(p.id)===String(ptId));
+  if(!pt) return;
+  const ri = pt.recruitInfo;
+  const defStartDate = (ri ? ri.startDate : pt.startDate) || '';
+  const defStartTime = (ri ? ri.startTime : pt.startTime) || '';
+  const defEndDate   = (ri ? ri.endDate   : pt.endDate)   || '';
+  const defEndTime   = pt.endTime || pt.startTime || '';
+  const defPay       = pt.pay ? Math.max(0, Number(pt.pay)-5000) : '';
+  // 후보: 지금 다른 환자를 간병 중(근무중/대기중)이고 아직 다른 예약이 없는 간병인
+  const cands = caregivers.filter(c =>
+    (c.workStatus==='근무중' || c.workStatus==='대기중') && c.patientId &&
+    String(c.patientId)!==String(pt.id) && !c.nextAssign
+  ).sort((a,b) => (a.endDate||'9999').localeCompare(b.endDate||'9999') || (a.name||'').localeCompare(b.name||''));
+  const opt = c => {
+    const cp = patients.find(p=>String(p.id)===String(c.patientId));
+    return `<option value="${c.id}">${c.name} · ${cp?cp.name:'—'} 간병중 · ${c.endDate?c.endDate+' '+(c.endTime||'')+' 마감':'마감일 미정'}</option>`;
+  };
+  document.getElementById('pt-modal-title').textContent = pt.name + ' 간병인 예약';
+  document.getElementById('pt-modal-body').innerHTML = `
+    <div style="font-size:12px;color:var(--gray);background:var(--surface2);border-radius:var(--rsm);padding:8px 12px;margin-bottom:.875rem;line-height:1.6">
+      📅 지금 다른 환자를 간병 중인 간병인을 예약하면, 그 간병이 끝나는 대로 <b>${pt.name}</b> 환자에게 자동으로 재배정돼요.
+      예약하는 즉시 이 환자는 <b>매칭완료</b>로 표시됩니다.
+    </div>
+    <div class="field">
+      <label>예약할 간병인</label>
+      ${cands.length
+        ? `<select id="resv-cg">${'<option value="">간병인 선택</option>'+cands.map(opt).join('')}</select>`
+        : `<div style="font-size:12px;color:var(--gray-lt);padding:6px 0">예약 가능한 간병인이 없어요 (근무중·대기중이면서 다른 예약이 없는 간병인만 표시)</div>`}
+    </div>
+    <div class="g2">
+      <div class="field"><label>시작일</label><input type="date" id="resv-startDate" value="${defStartDate}"></div>
+      <div class="field"><label>시작 시간</label><input type="time" id="resv-startTime" value="${defStartTime}"></div>
+      <div class="field"><label>마감일</label><input type="date" id="resv-endDate" value="${defEndDate}"></div>
+      <div class="field"><label>마감 시간</label><input type="time" id="resv-endTime" value="${defEndTime}"></div>
+    </div>
+    <div class="field"><label>간병인 일급 (원)</label><input type="number" id="resv-pay" value="${defPay}"></div>
+    <div style="display:flex;gap:8px;margin-top:1rem">
+      <button class="btn btn-teal" style="flex:1;justify-content:center" ${cands.length?'':'disabled'} onclick="confirmReserveCg('${pt.id}')">📅 예약 확정</button>
+      <button class="btn" onclick="closeOverlay('pt-overlay')">취소</button>
+    </div>`;
+  document.getElementById('pt-overlay').classList.add('open');
+}
+
+function confirmReserveCg(ptId) {
+  const pt = patients.find(p=>String(p.id)===String(ptId));
+  if(!pt) return;
+  const cgId = document.getElementById('resv-cg')?.value || '';
+  if(!cgId) { toast('예약할 간병인을 선택해주세요', true); return; }
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg) return;
+  const startDate = document.getElementById('resv-startDate').value;
+  const startTime = document.getElementById('resv-startTime').value;
+  const endDate   = document.getElementById('resv-endDate').value;
+  const endTime   = document.getElementById('resv-endTime').value;
+  const pay       = document.getElementById('resv-pay').value;
+  if(!startDate) { toast('시작일을 입력해주세요', true); return; }
+  if(endDate && endDate < startDate) { toast('마감일이 시작일보다 빨라요', true); return; }
+  if(pt.status==='종료') { toast('종료된 환자는 예약할 수 없어요', true); return; }
+  if(ptHasLinkedCg(pt.id) || getReservedCg(pt)) { toast('이미 간병인이 매칭(예약)된 환자예요', true); return; }
+  if(cg.nextAssign) { toast(`${cg.name} 님은 이미 다른 예약이 있어요`, true); return; }
+  if(!cg.patientId || !(cg.workStatus==='근무중' || cg.workStatus==='대기중')) { toast('지금 간병 중인 간병인만 예약할 수 있어요', true); return; }
+  if(!cg.endDate) { toast(`${cg.name} 님의 현재 근무 마감일이 없어요. 마감일시를 먼저 입력해주세요`, true); return; }
+  const curEnd = calcEndDt(cg.endDate, cg.endTime);
+  const nStart = resvStartDt(startDate, startTime);
+  if(curEnd && nStart && curEnd > nStart) {
+    toast(`현재 근무 마감(${cg.endDate} ${cg.endTime||''})보다 이른 시작일시로는 예약할 수 없어요`, true); return;
+  }
+
+  cg.nextAssign = { patientId: String(pt.id), patientName: pt.name, startDate, startTime, endDate, endTime,
+                    pay: pay ? String(pay) : '', reservedAt: Date.now() };
+  pt.reservedCgId = String(cg.id);
+  pt.status    = '매칭완료';
+  pt.recruited = true;
+  markCgEdited(cg.id);
+  markPtEdited(pt.id);
   save();
-  autoFillAttendance(String(cg.id)); // 재배정된 새 일정에 맞춰 간병일지 동기화 (신규 추가분만 채움 — 당일 겹침은 위에서 이미 새로 등록됨)
-  refreshCalendarIfOpen();
-  renderCaregivers();
-  renderPatients();
-  renderDashboard();
-  updateSidebar();
-  toast(`✅ ${cg.name} → ${pt.name} 재배정 완료! 대기중으로 활성화됐어요`);
+  closeOverlay('pt-overlay');
+  renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
+  toast(`📅 ${cg.name} → ${pt.name} 예약 완료! 현재 간병이 끝나면 자동으로 재배정돼요`);
+}
+
+// 예약 해제 (화면 갱신·저장은 호출하는 쪽에서). B 환자에 다른 간병인이 없으면 모집중으로 되돌림.
+function clearReservation(cg, pt) {
+  if(cg && cg.nextAssign && !pt) pt = patients.find(p=>String(p.id)===String(cg.nextAssign.patientId)) || null;
+  if(cg && cg.nextAssign) { delete cg.nextAssign; markCgEdited(cg.id); }
+  if(pt && pt.reservedCgId && (!cg || String(pt.reservedCgId)===String(cg.id))) {
+    delete pt.reservedCgId;
+    if(pt.status==='매칭완료' && !ptHasLinkedCg(pt.id) && !pt.pendingReplacement) {
+      pt.status = '모집중';
+      pt.recruited = false;
+    }
+    markPtEdited(pt.id);
+  }
+}
+
+function cancelReservation(ptId) {
+  const pt = patients.find(p=>String(p.id)===String(ptId));
+  if(!pt) return;
+  const cg = getReservedCg(pt);
+  if(!confirm(`${cg?cg.name+' 님의 ':''}예약을 취소할까요?\n${pt.name} 환자는 모집중으로 돌아가요.`)) return;
+  clearReservation(cg, pt);
+  if(!cg) { delete pt.reservedCgId; if(pt.status==='매칭완료' && !ptHasLinkedCg(pt.id)) { pt.status='모집중'; pt.recruited=false; } markPtEdited(pt.id); }
+  save();
+  closeOverlay('pt-overlay');
+  renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
+  toast('예약을 취소했어요');
+}
+
+// 예약 인계 실행: 간병인의 현재 매칭이 풀린 상태에서만 동작. 성공하면 B 환자 반환.
+// B가 삭제·종료됐거나 그 사이 다른 간병인이 매칭됐으면 예약만 정리하고 null 반환.
+function applyReservation(cg) {
+  if(!cg || !cg.nextAssign || cg.patientId) return null;
+  const na = cg.nextAssign;
+  const pt = patients.find(p=>String(p.id)===String(na.patientId));
+  if(!pt || pt.status==='종료' || ptHasLinkedCg(pt.id, cg.id) || String(pt.reservedCgId||'')!==String(cg.id)) {
+    console.warn(`[예약 인계 취소] ${cg.name}: 예약 환자 상태가 바뀌어 예약을 정리함`);
+    clearReservation(cg, pt);
+    return null;
+  }
+  applyReassignCore(cg, pt, na);
+  delete cg.nextAssign;
+  delete pt.reservedCgId;
+  markCgEdited(cg.id);
+  markPtEdited(pt.id);
+  autoFillAttendance(String(cg.id));
+  return pt;
+}
+
+// 중도종료·시작 전 취소 화면에 "예약 유지/취소" 선택 블록 (예약이 있을 때만)
+function resvAskHTML(cg) {
+  if(!cg || !cg.nextAssign) return '';
+  const na = cg.nextAssign;
+  return `
+    <div style="margin-top:.75rem;padding:10px 12px;border:1.5px solid var(--blue);border-radius:var(--rsm);background:var(--surface2)">
+      <div style="font-size:12px;font-weight:700;color:var(--blue);margin-bottom:6px">📅 이 간병인은 다음 환자 예약이 있어요: ${na.patientName||''} (${na.startDate||''} ${na.startTime||''} 시작)</div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;cursor:pointer"><input type="radio" name="et-resv" value="keep" checked> 예약 유지 — 종료 후 바로 ${na.patientName||''} 환자로 재배정(시작일시까지 대기중)</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="radio" name="et-resv" value="cancel"> 예약 취소 — ${na.patientName||''} 환자는 모집중으로 복귀</label>
+    </div>`;
 }
 
 function openEarlyTerminate(cgId) {
@@ -7996,6 +8256,7 @@ function openEarlyTerminate(cgId) {
       ⚠️ 환자 <strong>${pt?pt.name:''}(${pt?pt.hospital||'':''})</strong>도 함께 <strong>종료</strong> 처리됩니다.
     </div>
 
+    ${resvAskHTML(cg)}
     <div style="display:flex;gap:8px;margin-top:1rem">
       <button class="btn btn-amber" style="flex:1;justify-content:center" onclick="confirmEarlyTerminate('${cgId}')">
         <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -8078,6 +8339,7 @@ function openPreStartCancel(cgId) {
       ⚠️ 환자 <strong>${pt?pt.name:''}(${pt?pt.hospital||'':''})</strong>도 함께 <strong>종료</strong> 처리됩니다.
     </div>
 
+    ${resvAskHTML(cg)}
     <div style="display:flex;gap:8px;margin-top:1rem">
       <button class="btn btn-amber" style="flex:1;justify-content:center" onclick="confirmEarlyTerminate('${cgId}')">
         <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -8251,6 +8513,21 @@ function confirmEarlyTerminate(cgId) {
   if(pt) markPtEdited(pt.id);
   save();
   autoFillAttendance(String(cg.id)); // 중도종료 마감시간에 맞춰 간병일지 동기화
+  // (26_10_02_02) 다음 환자 예약이 있으면 화면에서 고른 대로 유지(→ 바로 인계) 또는 취소.
+  // 위 간병일지 동기화가 끝난 "뒤에" 처리해야 이번에 끝난 근무건의 간병일지가 새 일정으로 오염되지 않음.
+  let resvMsg = '';
+  if(cg.nextAssign) {
+    const resvChoice = document.querySelector('input[name="et-resv"]:checked')?.value || 'keep';
+    const resvPtName = cg.nextAssign.patientName || '';
+    if(resvChoice === 'cancel') {
+      clearReservation(cg);
+      resvMsg = ` (${resvPtName} 예약 취소)`;
+    } else {
+      const rpt = applyReservation(cg);
+      resvMsg = rpt ? ` → ${rpt.name} 예약 인계 완료` : ' (예약 환자 상태가 바뀌어 예약은 정리됨)';
+    }
+    save();
+  }
   refreshCalendarIfOpen();
   closeOverlay('cg-overlay');
   renderCaregivers();
@@ -8259,9 +8536,9 @@ function confirmEarlyTerminate(cgId) {
   updateSidebar();
 
   if(termType === 'end') {
-    toast(`✅ ${cg.name} 종료 + ${pt?pt.name+' 환자도':'환자도'} 완전 종료 처리됐어요.`);
+    toast(`✅ ${cg.name} 종료 + ${pt?pt.name+' 환자도':'환자도'} 완전 종료 처리됐어요.${resvMsg}`);
   } else {
-    toast(`✅ ${cg.name} 중도 종료 처리됐어요. 새 간병인을 매칭하면 교체보고가 자동 작성돼요.`);
+    toast(`✅ ${cg.name} 중도 종료 처리됐어요. 새 간병인을 매칭하면 교체보고가 자동 작성돼요.${resvMsg}`);
   }
 }
 
@@ -8392,6 +8669,9 @@ function deleteCg(id) {
   } else {
     if(!confirm('삭제할까요?')) return;
   }
+
+  // (26_10_02_02) 다음 환자 예약이 걸려 있으면 예약 환자도 모집중으로 되돌림
+  if(cg && cg.nextAssign) clearReservation(cg);
 
   // 연결된 환자가 있으면 모집중으로 복구
   if(cg && cg.patientId) {
@@ -9257,6 +9537,15 @@ function findCgForPatient(p) {
   // 2순위: patientId 연결 (상태 무관)
   cg = caregivers.find(c => String(c.patientId) === String(p.id));
   if(cg) return cg;
+
+  // (26_10_02_02) 간병인 예약 매칭(인계 전): 예약 간병인 정보 + 예약 일정으로 읽기 전용 뷰 반환 (매칭보고용)
+  const rcg = getReservedCg(p);
+  if(rcg) {
+    const na = rcg.nextAssign;
+    return Object.assign(Object.create(rcg), {
+      startDate: na.startDate, startTime: na.startTime, endDate: na.endDate, endTime: na.endTime, pay: na.pay || rcg.pay
+    });
+  }
 
   // 3순위: caregiverName 일치 + 활성 상태
   if(p.caregiverName) {
@@ -14787,6 +15076,17 @@ function checkAutoEnd() {
     }
   });
 
+  // ①-예약 (26_10_02_02): 매칭이 풀린 간병인에게 다음 환자 예약(nextAssign)이 있으면 바로 인계.
+  // ①번에서 방금 자동종료된 간병인뿐 아니라, 다른 기기에서 먼저 종료된 경우도 여기서 함께 처리됨.
+  const reservedItems = [];
+  caregivers.forEach(cg => {
+    if(!cg.nextAssign || cg.patientId) return;
+    const rpt = applyReservation(cg);
+    if(rpt) reservedItems.push(`${cg.name} → ${rpt.name}`);
+    changed = true;
+  });
+  if(reservedItems.length) toast('📅 예약 인계 완료: ' + reservedItems.join(', '));
+
   // ② 환자 마감일 기준 자동 종료 (간병인 endDate 없는 경우)
   patients.forEach(pt => {
     if(pt.status === '종료') return;
@@ -16036,6 +16336,10 @@ function autoMatch() {
   patients.forEach(p => {
     if(p.status === '종료') return;
     if(p.status !== '매칭완료' && p.recruited !== true) return;
+    // (26_10_02_02) 간병인 예약 매칭(인계 전)은 간병인 연결 없이 매칭완료가 정상 상태라 제외.
+    // 예약 간병인 레코드 확인 없이 플래그만 보는 이유: 다른 기기에서 환자 레코드가 간병인 레코드보다
+    // 먼저 동기화되는 순간에 예약이 풀려버리지 않게 하기 위함 (꼬인 예약은 카드에 경고+예약취소로 표시됨)
+    if(p.reservedCgId) return;
     const hasCgByName = p.caregiverName &&
       caregivers.some(c => c.name === p.caregiverName.trim() && !isEarlyEnded(c));
     const hasCgById = caregivers.some(c =>
