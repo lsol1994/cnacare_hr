@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_01_05';
+const APP_BUILD = '26_10_02_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3872,6 +3872,22 @@ function ptRowHTML(p) {
       })()}
       <span style="color:var(--gray);font-size:11px">(${p.duration||'기간미정'})</span>
     </div>
+    ${(()=>{
+      // (26_10_02_01) 간병인 카드의 "매칭 환자"처럼 환자 카드에도 현재 매칭 간병인 표시
+      // 조회 기준은 환자 상세(openPatient)와 동일: patientId로 실시간 연결된 간병인
+      const mcg = caregivers.find(c=>String(c.patientId)===String(p.id));
+      if(!mcg) return '';
+      const mcgName = mcg.name || '—';
+      return `
+      <div style="background:var(--green-lt);border:1px solid rgba(45,138,78,.2);border-radius:var(--rsm);padding:10px 14px;display:flex;align-items:center;gap:12px;margin-bottom:.6rem">
+        <div style="width:32px;height:32px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700;flex-shrink:0">${mcgName[0]}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700;color:var(--green)">🔗 매칭 간병인: ${mcgName}${mcg.workStatus?` <span style="font-size:11px;font-weight:400;color:var(--gray)">· ${mcg.workStatus}</span>`:''}</div>
+          <div style="font-size:11px;color:var(--gray);margin-top:1px">${formatPhone(mcg.phone)||''}${mcg.startDate?` · ${mcg.startDate} ${mcg.startTime||''} → ${mcg.endDate||'—'} ${mcg.endTime||''}`:''}</div>
+        </div>
+        <button class="btn btn-sm" style="border-color:var(--green);color:var(--green);flex-shrink:0" onclick="showPage('caregiver');setTimeout(()=>openCgDetail('${mcg.id}'),100)">간병인 상세 →</button>
+      </div>`;
+    })()}
     <div class="pt-foot">
       <span class="pt-pay">${pay}</span>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
