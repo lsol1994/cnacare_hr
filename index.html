@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_06_01';
+const APP_BUILD = '26_10_06_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -11485,7 +11485,9 @@ function showCalDetail(dateStr) {
   // 않는 문제가 있었음)
   caregivers.forEach(function(cg) {
     (cg.assignHistory||[]).forEach(function(h) {
-      if(h.settled === true) return; // 이미 정산 완료 처리된 이력은 제외
+      // (26_10_06_02) 정산 완료 처리된 이력도 숨기지 않고 "✅ 정산 완료" 상태 카드로 계속 표시
+      // (예전엔 여기서 return 해서 지급 끝난 건이 대시보드에서 통째로 사라졌음)
+      const isSettled = h.settled === true;
       if(!h.endDate) return;
       let settleAmount = h.settleAmount;
       let isEstimate = false;
@@ -11546,24 +11548,28 @@ function showCalDetail(dateStr) {
           + '<button class="btn btn-sm" style="flex:1;justify-content:center" onclick="copyCalExpenseMsg(' + histIdx + ')">📋 복사</button>'
           + '</div></div>';
       }
+      const stColor = isSettled ? 'var(--green)' : 'var(--amber)';
+      const stBg = isSettled ? 'var(--green-lt)' : 'var(--amber-lt)';
       payEvents.push({ time: '', html:
-        '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 최종 정산 (이력에서 복구됨)</div>'
+        '<div style="padding:10px 12px;border-left:3px solid ' + stColor + ';margin-bottom:8px;background:' + stBg + ';border-radius:0 var(--rsm) var(--rsm) 0">'
+        + '<div style="font-size:11px;font-weight:700;color:' + stColor + ';margin-bottom:3px">' + (isSettled ? '✅ 최종 정산 (정산 완료)' : '💰 최종 정산 (이력에서 복구됨)') + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ' (' + (h.patientName||'') + ')</div>'
-        + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + hSp.base.toLocaleString() + '원' + (isEstimate?' <span style="font-size:11px;font-weight:700">(추정)</span>':'') + '</div>'
+        + '<div style="font-size:15px;font-weight:900;color:' + stColor + ';margin-top:4px">' + hSp.base.toLocaleString() + '원' + (isEstimate?' <span style="font-size:11px;font-weight:700">(추정)</span>':'') + '</div>'
         + calHpSplitNoteHtml(hSp.hp)
-        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">간병인의 현재 상태가 이 근무 이력과 어긋나 있어요 — 간병인 카드에서 상태를 확인해주세요</div>'
+        + (isSettled
+            ? '<div style="font-size:11px;color:var(--green);font-weight:700;margin-top:2px">지급 완료로 처리된 건이에요</div>'
+            : '<div style="font-size:11px;color:var(--gray);margin-top:2px">간병인의 현재 상태가 이 근무 이력과 어긋나 있어요 — 간병인 카드에서 상태를 확인해주세요</div>')
         + estimateNote
         + bankHtml
         + expenseHtml
-        + '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="markAssignHistorySettled(\'' + cg.id + '\',\'' + h.patientId + '\',\'' + h.startDate + '\')">✅ 정산 완료 처리</button>'
+        + (isSettled ? '' : '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="markAssignHistorySettled(\'' + cg.id + '\',\'' + h.patientId + '\',\'' + h.startDate + '\')">✅ 정산 완료 처리</button>')
         + '</div>' });
       if(hSp.hp > 0) {
         const hfhBlocks = holidayFinalPartBlocks(vcgHf);
         payEvents.push({ time: '', html: calHolidayCardHtml({
           cgId: cg.id, date: dateStr, parentLabel: '최종 정산', amount: hSp.hp, days: hfHist.days, blocks: hfhBlocks,
           whoStr: cg.name + ' (' + (h.patientName||'') + ')', bankHtml: bankHtml, unpaid: false,
-          note: '<div style="font-size:11px;color:var(--gray);margin-top:2px">이력에서 복구된 최종 정산의 명절할증분이에요</div>',
+          note: '<div style="font-size:11px;color:var(--gray);margin-top:2px">이력에서 복구된 최종 정산의 명절할증분이에요' + (isSettled ? ' · <b style="color:var(--green)">✅ 정산 완료</b>' : '') + '</div>',
           memo: buildHolidayExpenseMemo(h.patientName, h.hospital, cg.name, hfhBlocks, hfHist.days, hSp.hp, '최종 정산')
         }) });
       }
