@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_02_02';
+const APP_BUILD = '26_10_06_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -2946,11 +2946,21 @@ function attachFirebaseListener() {
             const deletedHistKeys = getDeletedHistKeys(dc.id);
             const seen = new Set();
             const combined = [];
+            // (26_10_06_01) 같은 근무건(환자+시작일)이 양쪽에 다 있으면 예전엔 무조건 로컬 사본이 이겨서,
+            // 한 기기에서 고친 이력(마감일 수정·정산완료 등)이 다른 기기로 영영 안 넘어갔음.
+            // 이제는 항목별 수정 시각(_histEditTs)이 더 최근인 쪽을 채택 (pickNewerHist 참고)
+            const localByKey = new Map(), dcByKey = new Map();
+            localHistory.forEach(h => { const k = histKey(h); if(!localByKey.has(k)) localByKey.set(k, h); });
+            dcHistory.forEach(h => { const k = histKey(h); if(!dcByKey.has(k)) dcByKey.set(k, h); });
             [...localHistory, ...dcHistory].forEach(h => {
               const k = histKey(h);
+              if(seen.has(k)) return;
+              seen.add(k);
               if(deletedHistKeys.has(k)) return; // 사용자가 지운 항목 — 복원 안 함
-              if(isHistTombstoned(h, mergedTombs)) return; // (26_10_01_01) 다른 기기에서 지운 항목 — 복원 안 함
-              if(!seen.has(k)) { seen.add(k); combined.push(h); }
+              // (26_10_01_01) 다른 기기에서 지운 항목 — 복원 안 함
+              const cands = [localByKey.get(k), dcByKey.get(k)].filter(x => x && !isHistTombstoned(x, mergedTombs));
+              if(!cands.length) return;
+              combined.push(cands.length === 2 ? pickNewerHist(cands[0], cands[1]) : cands[0]);
             });
             combined.sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
             winner.assignHistory = combined;
@@ -3087,6 +3097,9 @@ function attachFirebaseListener() {
       (arr || []).forEach(item => { if(item && item._ts == null) item._ts = Date.now(); });
     }
     [patients, caregivers, logs, attendance, reportLogs, blacklist, memos, notices].forEach(backfillMissingTs);
+
+    // (26_10_06_01) 원격 보정 패치 — 바뀐 게 있으면 아래 재전송 점검에서 자동으로 서버에 올라감
+    try { applyHistDataFixes(); } catch(e) { console.warn('원격 보정 오류:', e); }
 
     // 방금 반영된(병합 완료된) 결과 중 파이어베이스와 실제로 일치하는 것만 동기화 완료로 확정
     // (자세한 이유는 markConfirmedSynced 함수 주석 참고)
@@ -6549,11 +6562,19 @@ function saveHistoryEntryEdit(cgId, patientId, startDate) {
   if(!h) return;
   h.patientName = document.getElementById('hist-patientName').value.trim();
   h.hospital    = document.getElementById('hist-hospital').value.trim();
-  h.startDate   = document.getElementById('hist-startDate').value;
+  const _newStart = document.getElementById('hist-startDate').value;
+  // (26_10_06_01) 시작일을 바꾸면 이력 식별키(환자+시작일)가 바뀌므로, 옛 키 사본이 다른 기기에서
+  // 되살아나 두 건으로 보이지 않게 옛 키에 삭제기록을 남김
+  if(_newStart !== startDate) {
+    addDeletedHistKey(cgId, patientId, startDate);
+    addHistTombstone(cg, patientId, startDate);
+  }
+  h.startDate   = _newStart;
   h.startTime   = document.getElementById('hist-startTime').value;
   h.endDate     = document.getElementById('hist-endDate').value;
   h.endTime     = document.getElementById('hist-endTime').value;
   h.pay         = document.getElementById('hist-pay').value.trim();
+  touchHist(h); // (26_10_06_01) 다른 기기에도 이 수정이 이기도록
   markCgEdited(cgId); // Firebase 덮어쓰기 방지 (2분)
   save();
   closeOverlay('replace-overlay');
@@ -6616,6 +6637,7 @@ function saveToAssignHistory(cg, overridePatientId) {
     String(h.patientId)===String(ptId) && h.startDate===(cg.startDate||'')
   );
   if(existing) {
+    const _before = JSON.stringify([existing.startTime, existing.endDate, existing.endTime, existing.status, existing.settleAmount, existing.settleHolidayPremium]);
     if(cg.startTime) existing.startTime = cg.startTime; // (26_10_01_01) 시작시간 수정도 이력에 반영 (예전엔 누락돼 이력/현재가 어긋났음)
     if(cg.endDate) existing.endDate = cg.endDate;
     if(cg.endTime) existing.endTime = cg.endTime;
@@ -6624,6 +6646,8 @@ function saveToAssignHistory(cg, overridePatientId) {
     existing.recordedAt = new Date().toLocaleDateString('ko-KR');
     // 이미 "정산완료"로 확인된 이력은 건드리지 않고, 아직이면 최신 금액으로 갱신
     if(!existing.settled) { existing.settleAmount = settleAmount; existing.settleHolidayPremium = settleHolidayPremium; }
+    // (26_10_06_01) 실제로 값이 바뀐 경우에만 수정 시각 갱신 (변화 없는 반복 호출로 낡은 값이 "최신"이 되는 것 방지)
+    if(JSON.stringify([existing.startTime, existing.endDate, existing.endTime, existing.status, existing.settleAmount, existing.settleHolidayPremium]) !== _before) touchHist(existing);
     return;
   }
 
@@ -6642,6 +6666,7 @@ function saveToAssignHistory(cg, overridePatientId) {
     settleAmount,              // 기록 시점 기준 미정산 금액 (캘린더가 라이브 값 유실 시 이걸로 복구)
     settleHolidayPremium,      // 위 금액 중 명절할증분
     recordedAt:  new Date().toLocaleDateString('ko-KR'),
+    _histEditTs: Date.now(),   // (26_10_06_01) 항목 수정 시각 — 기기 간 병합 시 더 최근 쪽 채택
     _histTs:     Date.now()    // (26_10_01_01) 생성 시각 — 같은 키의 옛 삭제기록(histTombstones)보다 나중에 생긴 이력은 병합 때 지워지지 않게
   });
 }
@@ -6672,6 +6697,47 @@ function isHistTombstoned(h, tombs) {
   const k = _histKeyFor(h.patientId, h.startDate);
   const t = tombs.find(x => x.key === k);
   return !!t && (Number(h._histTs)||0) < (Number(t.at)||0);
+}
+
+// ─── (26_10_06_01) 근무이력 항목별 수정 시각 ───
+// 이력 항목을 고칠 때마다 _histEditTs를 찍어서, 기기 간 병합 시 "가장 최근에 고친 쪽"이 이기게 함.
+// 수정 시각이 없는 예전 이력끼리 붙으면(동률) 지금까지와 같이 로컬 사본을 유지 — 기존 데이터 동작은 그대로.
+function touchHist(h) { if(h) h._histEditTs = Date.now(); }
+function histStamp(h) { return h ? Math.max(Number(h._histEditTs)||0, Number(h._histTs)||0) : 0; }
+function pickNewerHist(local, remote) {
+  const sl = histStamp(local), sr = histStamp(remote);
+  let w = sr > sl ? remote : local;
+  // 정산완료는 한쪽에서라도 처리됐으면 유지 (되돌아가서 같은 정산 카드가 다시 뜨는 것 방지)
+  if(w.settled !== true && (local.settled === true || remote.settled === true)) w = Object.assign({}, w, { settled: true });
+  return w;
+}
+
+// ─── (26_10_06_01) 원격 보정 패치 ───
+// 이미 꼬인 이력을 배포만으로 모든 기기에서 한 번 바로잡음 (기기에서 콘솔을 열 필요 없음).
+// 각 보정은 고정 시각(at)을 수정 시각으로 찍으므로 어느 기기에서 돌아도 결과가 같고,
+// 보정 이후 사람이 직접 고친 값(더 최근 시각)은 절대 덮어쓰지 않음. 이력이 없는 기기는 건너뜀.
+const HIST_DATA_FIXES = [
+  // 신현이 — 최려자 9/14 12:30 맞교체 대근(2일). 9/16 교체 처리가 다른 간병인 기준으로 돼서
+  // 이력 마감이 환자 마감(10/24)·근무중으로 남아 매주 가짜 주급 카드가 생기던 건
+  { id: '26_10_06_shinhyuni', at: 1791277200000, cgId: '1789395841969', patientId: '1787897608464', startDate: '2026-09-14',
+    set: { endDate: '2026-09-16', endTime: '12:30', status: '종료', settleAmount: 0, settleHolidayPremium: 0 } }
+];
+function applyHistDataFixes() {
+  let changed = 0;
+  HIST_DATA_FIXES.forEach(fx => {
+    const cg = caregivers.find(c => c && String(c.id) === fx.cgId);
+    if(!cg || !Array.isArray(cg.assignHistory)) return;
+    const h = cg.assignHistory.find(x => x && String(x.patientId) === fx.patientId && x.startDate === fx.startDate);
+    if(!h) return;
+    if(histStamp(h) >= fx.at) return; // 이미 보정됐거나, 그 뒤에 사람이 직접 고친 값
+    Object.assign(h, fx.set);
+    h._histEditTs = fx.at;
+    markCgEdited(cg.id);
+    changed++;
+    console.info('[원격 보정] 근무이력 보정:', fx.id);
+  });
+  if(changed) localStorage.setItem('cnc_cg', JSON.stringify(caregivers));
+  return changed;
 }
 
 // 이름 비교용 정규화 (공백 제거)
@@ -6853,6 +6919,7 @@ function markAssignHistorySettled(cgId, patientId, startDate) {
   const h = cg.assignHistory.find(x=>String(x.patientId)===String(patientId) && x.startDate===startDate);
   if(!h) { toast('이력을 찾을 수 없어요', true); return; }
   h.settled = true;
+  touchHist(h); // (26_10_06_01)
   markCgEdited(cg.id);
   save();
   refreshCalendarIfOpen();
