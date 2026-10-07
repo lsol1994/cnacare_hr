@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_06_02';
+const APP_BUILD = '26_10_07_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -11250,6 +11250,8 @@ function showCalDetail(dateStr) {
 
   // 급여 지급일
   var paidCgIdsToday = {};
+  var livePayKeysToday = {}; // (26_10_07_01) cgId|근무시작일|지급일|라벨 — 라이브 카드로 이미 표시된 지급건
+  function livePayKey(cgId, startDate, date, label) { return String(cgId) + '|' + (startDate||'') + '|' + date + '|' + (label||''); }
   caregivers.filter(function(c){return !!c.startDate;}).forEach(function(cg) {
     var bankStr = (cg.bankName||cg.bankAccount)
       ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
@@ -11257,6 +11259,8 @@ function showCalDetail(dateStr) {
     calcPayDates(cg).forEach(function(p) {
       if(p.date !== dateStr) return;
       paidCgIdsToday[String(cg.id)] = true;
+      // (26_10_07_01) 아래 "이력 기반 정규 주급 복구" 블록이 같은 지급건을 한 번 더 만들지 않도록 기록
+      livePayKeysToday[livePayKey(cg.id, cg.startDate, p.date, p.label)] = true;
       var bgColor = p.isReserve ? '#FFF3E0' : 'var(--amber-lt)';
       var bdColor = p.isReserve ? '#E65100' : 'var(--amber)';
       var pt = resolveCalPt(cg);
@@ -11299,7 +11303,7 @@ function showCalDetail(dateStr) {
       payEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid ' + bdColor + ';margin-bottom:8px;background:' + bgColor + ';border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
-        + '<span style="font-size:11px;font-weight:700;color:' + bdColor + '">💰 ' + p.label + (p.isReserve?' [주말·공휴일 조정]':'') + '</span>'
+        + '<span style="font-size:11px;font-weight:700;color:' + bdColor + '">💰 ' + p.label + (isEndWeekPay(cg, p) ? ' (근무 마감)' : '') + (p.isReserve?' [주말·공휴일 조정]':'') + '</span>'
         + unpaidToggleHtml(cg.id, p.date, p.label, pBase.amount)
         + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
@@ -11598,6 +11602,10 @@ function showCalDetail(dateStr) {
       var virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
       calcPayDates(virtualCg).forEach(function(vp) {
         if(vp.date !== dateStr) return;
+        // (26_10_07_01) 라이브 계산으로 같은 근무건(같은 시작일)·같은 지급일·같은 주차 카드가 이미
+        // 표시됐으면 중복 생성하지 않음. 라이브 endDate가 잠깐 이력과 어긋나는 순간(동기화 중
+        // 낡은 값, 마감일 비움 등)에 "1주차 주급"과 "1주차 주급 (이력에서 복구됨)"이 같이 뜨던 문제
+        if(livePayKeysToday[livePayKey(cg.id, h.startDate, vp.date, vp.label)]) return;
         var bankStr = (cg.bankName||cg.bankAccount)
           ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
           : '';
@@ -12256,6 +12264,16 @@ function calcPayDates(cg) {
 //  - 단기 급여: 중도종료 이력 있으면 "퇴실", 없으면 환자 종료사유(pt.endReason) 또는 "환자 퇴원"
 //  - N주차 주급(정규): "N주차 주급" 그대로, 단 이번 주 안에 연장 확정이 있었으면 "_연장" 추가
 //  - 최종 정산: "마지막 완료주차 주급_퇴실" 또는 "_교체" (환자가 계속 매칭 상태면 교체로 판단)
+// (26_10_07_01) 정규 N주차 주급인데, 그 주차 지급일이 실제 근무 마감일과 같고 근무가 이미 종료된 경우
+// (예: 9/29 07:00 ~ 10/6 07:00 딱 7일 근무 후 종료) — 이 주급이 사실상 마지막 정산이라
+// 최종정산 카드가 따로 안 생기므로, 주급 카드/지출메모에 "근무 마감(퇴실/교체)"임을 표시한다.
+// 라벨(p.label) 자체는 미지급 체크 키에 쓰이므로 바꾸지 않고 표시만 덧붙임.
+function isEndWeekPay(cg, payEntry) {
+  if(!cg || !payEntry || !payEntry.week) return false;
+  if(cg.workStatus !== '종료' || !cg.endDate) return false;
+  return (payEntry.payDate || payEntry.date) === cg.endDate;
+}
+
 function buildExpenseMemo(cg, pt, payEntry) {
   if(!cg || !pt || !payEntry) return '';
   const ptName   = pt.name || '';
@@ -12311,6 +12329,10 @@ function buildExpenseMemo(cg, pt, payEntry) {
     // 같은 간병인이 원래 사용기간을 넘어 연장된 부분(원래 마감일 이후)에 해당하는 주급만 "_연장" 추가
     if(pt._originalEndDate && rangeEnd > pt._originalEndDate) {
       reasonLabel += '_연장';
+    }
+    // (26_10_07_01) 이 주급이 근무 마감일에 딱 맞춰 끝나는 마지막 지급이면 최종정산과 같은 규칙으로 표시
+    if(isEndWeekPay(cg, payEntry)) {
+      reasonLabel += (pt.status !== '종료') ? '_교체' : '_퇴실';
     }
   }
 
@@ -12380,6 +12402,10 @@ function buildExpenseMemoFromHistory(cg, h, payEntry) {
     rangeEndTime = (h.endDate && rangeEnd === h.endDate) ? (h.endTime || h.startTime) : h.startTime;
     totalDays  = 7;
     reasonLabel = payEntry.label;
+    // (26_10_07_01) 이력은 이미 끝난 근무건 — 마감일에 딱 맞는 마지막 주급이면 퇴실/교체 표시
+    if(payEntry.week && h.endDate && rangeEnd === h.endDate) {
+      reasonLabel += (pt && pt.status !== '종료') ? '_교체' : '_퇴실';
+    }
   }
 
   const startStr = fmtMD(rangeStart, rangeStartTime);
