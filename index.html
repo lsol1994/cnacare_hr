@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_07_03';
+const APP_BUILD = '26_10_07_04';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -4374,6 +4374,10 @@ function savePatientEdit(id) {
   p.pay       = document.getElementById('ep-pay').value;
   p.request   = document.getElementById('ep-request').value.trim();
 
+  // (26_10_07_04) 수정 전 종료일시 — 종료된 환자의 종료일시를 고치면 마지막 담당 간병인 근무건도 같이 바꾸기 위해
+  const _oldPtEndDate = p.endDate || '';
+  const _oldPtEndTime = p.endTime || '';
+
   // 종료일/시간 독립 입력 처리
   const newEndDate = document.getElementById('ep-endDate')?.value || '';
   const newEndTime = document.getElementById('ep-endTime')?.value || '';
@@ -4481,6 +4485,12 @@ function savePatientEdit(id) {
   // 수정본 스마트 업데이트
   if(p._editedPost) {
     p._editedPost = smartUpdatePost(p._editedPost, p);
+  }
+  // (26_10_07_04) 종료된 환자의 종료일시를 고친 경우 → 마지막 담당 간병인의 종료일시도 같이 변경
+  // (간병인이 이미 다른 환자로 재배정돼 과거이력에만 남아있어도 그 이력을 고침)
+  if(p.status === '종료' && p.endDate && (p.endDate !== _oldPtEndDate || _endT(p.endTime) !== _endT(_oldPtEndTime))) {
+    const _syncedCg = syncPtEndToFinalCg(p, _oldPtEndDate, _oldPtEndTime, true);
+    if(_syncedCg) { refreshCalendarIfOpen(); toast(`✅ 환자 정보 수정 + ${_syncedCg.name} 님 종료일시도 같이 변경됐어요`); }
   }
   refreshDateSensitiveReportLogs(p); // 이미 저장된 매칭/종료보고가 있으면 방금 수정한 날짜로 다시 최신화
   markPtEdited(id); // Firebase 덮어쓰기 방지 (10초)
@@ -4592,31 +4602,38 @@ function confirmEndPatient(id) {
   const p = patients.find(x=>String(x.id)===String(id));
   if(!p) { toast('환자를 찾을 수 없어요', true); return; }
 
+  // (26_10_07_04) 바뀌기 전 종료일시 — 이미 종료된 환자의 종료일시를 다시 고치는 경우,
+  // 이걸로 "마지막 담당 간병인" 근무건(재배정돼 과거이력에만 남은 경우 포함)을 찾아 같이 바꿈
+  const wasEnded   = p.status === '종료';
+  const oldEndDate = p.endDate || '';
+  const oldEndTime = p.endTime || '';
+  // 종료시간을 비우면 입실시간 (간병 24시간 단위 관례) — 환자·간병인 모두 같은 값으로 저장
+  const finalEndTime = endTime || p.startTime || '';
+
   // 상태 변경
   p.status    = '종료';
   p.recruited = true;
   p.endDate   = endDate;
-  p.endTime   = endTime;
+  p.endTime   = finalEndTime;
   if(endReason) p.endReason = endReason;
 
   // 실제 종료일로 duration 재계산 (예: 7일 예정 → 실제 4일 종료 → 4일로 변경)
   recalcDuration(p, endDate);
 
-  // 연결된 간병인도 종료 (실제 종료일로 업데이트)
-  const cg = caregivers.find(c=>String(c.patientId)===String(id));
-  if(cg && cg.workStatus !== '종료') {
+  // 연결된 간병인도 종료 (환자와 같은 종료일시로)
+  // (26_10_07_04) 근무중인 간병인을 우선 — 예전엔 patientId가 남아있는 "이미 끝난 앞 간병인"이
+  // 먼저 잡히면 실제 근무중인 간병인은 종료되지 않거나 다른 간병인 종료시간이 바뀌는 문제가 있었음
+  const cg = caregivers.find(c=>String(c.patientId)===String(id) && c.workStatus !== '종료');
+  let syncedCg = null;
+  if(cg) {
     cg.workStatus = '종료';
     cg.endDate = endDate;
-    cg.endTime = endTime || cg.endTime || '';
+    cg.endTime = finalEndTime; // 환자 종료시간과 항상 동일 (예전엔 시간이 비면 간병인의 예전 마감시간이 남았음)
     recalcDuration(cg, endDate); // 간병인 duration도 재계산
-    saveToAssignHistory(cg); // 근무 이력 저장
-  } else if(cg) {
-    if(endDate && cg.endDate !== endDate) {
-      cg.endDate = endDate;
-      cg.endTime = endTime || cg.endTime || '';
-      recalcDuration(cg, endDate);
-    }
-    saveToAssignHistory(cg);
+    saveToAssignHistory(cg); // 근무 이력 저장 (workStatus 확정 후)
+  } else {
+    // 근무중 간병인이 없으면(이미 종료된 환자를 다시 종료 처리 등) 마지막 담당 근무건을 찾아 같은 종료일시로
+    syncedCg = syncPtEndToFinalCg(p, oldEndDate, oldEndTime, wasEnded);
   }
 
   // 종료보고 자동 생성 (실제 종료일 기준)
@@ -4647,7 +4664,8 @@ function confirmEndPatient(id) {
   renderDashboard();
   updateSidebar();
 
-  toast(`✅ ${p.name} 종료 처리됐어요 (${endDate}${endTime ? ' ' + endTime : ''})`);
+  if(syncedCg) renderCaregivers();
+  toast(`✅ ${p.name} 종료 처리됐어요 (${endDate}${finalEndTime ? ' ' + finalEndTime : ''})` + (syncedCg ? ` · ${syncedCg.name} 님 근무이력도 같은 시각으로 변경` : ''));
 }
 
 // 도착 후 취소(현장 취소): 환자·간병인 모두 서비스 시작시각에 종료 처리하고,
@@ -5703,11 +5721,16 @@ function saveCg() {
   }
 
   let _cgDtChanged = false; // (26_10_01_02) 이번 수정에서 날짜·시간을 실제로 바꿨는지
+  // (26_10_07_04) 이미 종료된 근무건을 종료 상태 그대로 수정하는 경우인지 + 그 근무건이 환자의 "마지막 담당"이면 그 환자
+  let _endedEdit = false, _endedEditFinalPt = null;
   if(editCgId){
     const idx=caregivers.findIndex(x=>String(x.id)===String(editCgId));
     if(idx>-1) {
       const before = caregivers[idx]; // 병합 전 원래 상태 (전환 감지용)
       _cgDtChanged = ['startDate','startTime','endDate','endTime'].some(k => (cg[k]!==undefined) && String(cg[k]||'') !== String(before[k]||'')); // (26_10_01_02)
+      _endedEdit = before.workStatus === '종료' && cg.workStatus === '종료';
+      // 고치기 전에 판별해야 함 (고친 뒤엔 환자 종료일시와 비교할 수 없음)
+      if(_endedEdit) _endedEditFinalPt = ptIfFinalWorkPeriod(before.id, before.patientId || before.earlyEndPatientId, before.startDate);
       const wasActiveMatch  = before.patientId && before.workStatus !== '종료';
       const becomingEnded   = cg.workStatus === '종료' && before.workStatus !== '종료';
 
@@ -5729,6 +5752,8 @@ function saveCg() {
           pt.caregiverName = '';
           markPtEdited(pt.id);
         }
+        // (26_10_07_04) 드롭다운으로 종료해도 환자 종료일시 = 간병인 마감일시 (예전엔 환자는 종료인데 종료일시가 안 맞았음)
+        if(pt && pt.status === '종료' && cgObj.endDate) setPtEndFromCg(pt, cgObj.endDate, cgObj.endTime || '');
         syncInsuranceForPatientChange(cgObj, before.patientId, '', pt ? pt.name : ''); // 배상보험도 이번 근무건 이력으로 보관
         cgObj.patientId = '';
         cg.patientId = ''; // 폼에서 읽은 원본 변수도 같이 비워야, 아래쪽 "환자 연결" 블록이 이 patientId로 재매칭하지 않음
@@ -5739,6 +5764,11 @@ function saveCg() {
     // (26_10_01_01) 날짜·시간 수정이 이미 저장된 같은 근무건 이력에도 반영되도록
     // (26_10_01_02) 단, 이번 수정에서 날짜·시간을 실제로 바꿨을 때만 — 연락처 등만 고쳤는데 오염된 현재값이 이력을 덮어쓰면 안 됨
     if(_cgDtChanged) { const _ec = caregivers.find(x=>String(x.id)===String(editCgId)); if(_ec) syncLiveToAssignHistory(_ec); }
+    // (26_10_07_04) 종료된 근무건의 마감을 고쳤고 그 근무건이 환자의 마지막 담당이면 → 환자 종료일시도 같은 값으로
+    if(_endedEdit && _cgDtChanged && _endedEditFinalPt) {
+      const _ec = caregivers.find(x=>String(x.id)===String(editCgId));
+      if(_ec && _ec.endDate) setPtEndFromCg(_endedEditFinalPt, _ec.endDate, _ec.endTime || '');
+    }
   } else {
     cg._ts = Date.now(); // 동기화 충돌 해결(최신 우선)을 위한 저장 시각
     caregivers.unshift(cg);
@@ -5748,7 +5778,12 @@ function saveCg() {
   // 환자 연결 및 상태 업데이트
   let pt = null;
   let isReplace = false;
-  if(cg.patientId) {
+  // (26_10_07_04) 종료된 간병인을 종료 상태 그대로 수정하는 경우, 이미 종료된 환자와 다시 매칭하지 않음
+  // — 예전엔 환자 종료처리로 끝난 간병인(patientId가 남아있음)을 수정 폼으로 저장만 해도
+  //   그 환자가 "매칭완료"로 되살아났음 (환자 종료일시 연계는 위에서 별도로 처리)
+  const _skipRelink = _endedEdit && !!cg.patientId &&
+    (patients.find(x=>String(x.id)===String(cg.patientId))||{}).status === '종료';
+  if(cg.patientId && !_skipRelink) {
     pt = patients.find(x=>String(x.id)===String(cg.patientId));
     if(pt) {
       // 아래에서 pt.status가 '매칭완료'로 덮어써지기 전에, "종료됐던 환자에게 새로
@@ -6460,6 +6495,13 @@ function saveQuickEditCgEndTime(cgId) {
   const newEndTime = document.getElementById('qe-endTime').value || cg.startTime || ''; // 비우면 입실시간 (26_09_30_05)
   if(!newEndDate) { toast('마감일을 입력해주세요', true); return; }
 
+  // (26_10_07_04) 이미 끝난 근무건이면: 그 환자의 "마지막 담당" 근무건일 때만 환자 종료일시를 같이 변경
+  // (고치기 전에 판별 — 맞교체로 먼저 빠진 앞 간병인의 마감을 고쳐도 환자 종료일시는 건드리지 않음.
+  //  중도종료돼 patientId가 비고 earlyEndPatientId만 남은 경우도 포함)
+  const _endedFinalPt = cg.workStatus === '종료'
+    ? ptIfFinalWorkPeriod(cg.id, cg.patientId || cg.earlyEndPatientId, cg.startDate)
+    : null;
+
   cg.endDate = newEndDate;
   cg.endTime = newEndTime;
   markCgEdited(cg.id); // Firebase 덮어쓰기 방지 (10초)
@@ -6472,10 +6514,13 @@ function saveQuickEditCgEndTime(cgId) {
   const otherActiveCg = cg.patientId
     ? caregivers.find(c => String(c.patientId) === String(cg.patientId) && c.workStatus !== '종료' && String(c.id) !== String(cg.id))
     : null;
-  const pt = (cg.patientId && !otherActiveCg) ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
+  const pt = cg.workStatus === '종료'
+    ? _endedFinalPt
+    : ((cg.patientId && !otherActiveCg) ? patients.find(p=>String(p.id)===String(cg.patientId)) : null);
   if(pt) {
     pt.endDate = newEndDate;
     pt.endTime = newEndTime;
+    recalcDuration(pt, newEndDate);
     refreshDateSensitiveReportLogs(pt); // 이미 저장된 매칭/종료보고가 있으면 방금 수정한 날짜로 다시 최신화
     markPtEdited(pt.id);
   }
@@ -6560,6 +6605,12 @@ function saveHistoryEntryEdit(cgId, patientId, startDate) {
   if(!cg || !cg.assignHistory) return;
   const h = cg.assignHistory.find(x => String(x.patientId)===String(patientId) && x.startDate===startDate);
   if(!h) return;
+  // (26_10_07_04) 이 이력이 그 환자의 "마지막 담당" 근무건이면, 종료일시를 고칠 때 환자 종료일시도 같이 변경
+  // — 고치기 전에 판별해야 함 (고친 뒤엔 환자 종료일시와 비교할 수 없음)
+  const _finalPt = ptIfFinalWorkPeriod(cgId, patientId, startDate);
+  // 지금 라이브 배정이 이 이력과 같은 근무건이면 라이브 값도 같이 고쳐야 함 — 안 그러면 다음 이력 갱신 때 라이브 값으로 되돌아감
+  const _liveSame = cg.startDate === startDate &&
+    (String(cg.patientId||'') === String(patientId) || (!cg.patientId && String(cg.earlyEndPatientId||'') === String(patientId)));
   h.patientName = document.getElementById('hist-patientName').value.trim();
   h.hospital    = document.getElementById('hist-hospital').value.trim();
   const _newStart = document.getElementById('hist-startDate').value;
@@ -6576,10 +6627,21 @@ function saveHistoryEntryEdit(cgId, patientId, startDate) {
   h.pay         = document.getElementById('hist-pay').value.trim();
   touchHist(h); // (26_10_06_01) 다른 기기에도 이 수정이 이기도록
   markCgEdited(cgId); // Firebase 덮어쓰기 방지 (2분)
+  // (26_10_07_04) 라이브 배정이 같은 근무건이면 종료일시를 라이브에도 반영
+  if(_liveSame && h.endDate && (cg.endDate !== h.endDate || _endT(cg.endTime) !== _endT(h.endTime))) {
+    cg.endDate = h.endDate;
+    cg.endTime = h.endTime || '';
+    recalcDuration(cg, h.endDate);
+  }
+  // (26_10_07_04) 마지막 담당 근무건이면 환자 종료일시도 같은 값으로
+  const _ptSynced = (_finalPt && h.endDate) ? setPtEndFromCg(_finalPt, h.endDate, h.endTime || '') : false;
   save();
+  autoFillAttendance(String(cgId));
+  refreshCalendarIfOpen();
+  if(_ptSynced) { renderPatients(); renderDashboard(); }
   closeOverlay('replace-overlay');
   openCgDetail(cgId);
-  toast('✅ 근무 이력이 수정됐어요');
+  toast('✅ 근무 이력이 수정됐어요' + (_ptSynced ? ` · ${_finalPt.name} 님 종료일시도 같이 변경` : ''));
 }
 
 // ─── 간병인 근무 이력 ───
@@ -6811,6 +6873,114 @@ function syncLiveToAssignHistory(cg) {
   if(!differs) return false;
   saveToAssignHistory(cg, ptId);
   markCgEdited(cg.id);
+  return true;
+}
+
+// ─── (26_10_07_04) 환자 종료일시 ↔ 마지막 담당 간병인 종료일시 일치 ───
+// 환자 쪽에서 종료하든 간병인 쪽에서 종료하든, "그 환자를 마지막으로 담당한 간병인 근무건"의
+// 종료일시는 환자 종료일시와 항상 같아야 함. 간병인이 이미 다른 환자로 재배정돼서 그 근무건이
+// 과거이력(assignHistory)에만 남아있는 경우에도, 어느 한쪽 종료일시를 고치면 다른 쪽이 같이 바뀌게 함.
+function _endT(t) { return String(t||'').slice(0,5); }
+// 환자 pt를 담당했던 모든 근무건 (라이브 배정 + 과거이력, 간병인별 같은 시작일은 1건으로)
+function _ptWorkPeriods(pt) {
+  const ptId = String(pt.id);
+  const out = [];
+  caregivers.forEach(cg => {
+    const seen = new Set();
+    const liveMine = cg.startDate && (String(cg.patientId||'') === ptId || (!cg.patientId && String(cg.earlyEndPatientId||'') === ptId));
+    if(liveMine) {
+      out.push({ cg, startDate: cg.startDate, startTime: cg.startTime||'', endDate: cg.endDate||'', endTime: cg.endTime||'', live: true });
+      seen.add(cg.startDate);
+    }
+    (cg.assignHistory||[]).forEach(h => {
+      if(!h || String(h.patientId) !== ptId || !h.startDate || seen.has(h.startDate)) return;
+      seen.add(h.startDate);
+      out.push({ cg, startDate: h.startDate, startTime: h.startTime||'', endDate: h.endDate||'', endTime: h.endTime||'', live: false });
+    });
+  });
+  return out;
+}
+// 환자 종료일시(refEndDate/refEndTime)를 같이 쓰는 "마지막 담당" 근무건 1건을 찾음.
+// ① 종료일시가 정확히 같은 근무건 ② (allowFallback일 때) 없으면 가장 늦게 시작한 근무건.
+// 시작 전 취소(시작=마감, 0일 근무)는 다른 후보가 있으면 제외 — 그 건의 마감을 늘리면 급여가 생겨버림.
+function findPtFinalPeriod(pt, refEndDate, refEndTime, allowFallback) {
+  if(!pt) return null;
+  const all = _ptWorkPeriods(pt);
+  if(!all.length) return null;
+  const isZero = x => x.startDate === x.endDate && _endT(x.startTime) === _endT(x.endTime);
+  const pickLatest = arr => {
+    const nz = arr.filter(x => !isZero(x));
+    const pool = nz.length ? nz : arr;
+    return pool.slice().sort((a,b) => (b.startDate + _endT(b.startTime)).localeCompare(a.startDate + _endT(a.startTime)))[0] || null;
+  };
+  if(refEndDate) {
+    const exact = all.filter(x => x.endDate === refEndDate && _endT(x.endTime) === _endT(refEndTime));
+    if(exact.length) return pickLatest(exact);
+  }
+  return allowFallback ? pickLatest(all) : null;
+}
+// 근무건 per의 종료일시를 newEndDate/newEndTime으로 맞춤 (라이브 + 과거이력 둘 다). 바뀌었으면 true
+function applyEndToWorkPeriod(pt, per, newEndDate, newEndTime) {
+  if(!per || !newEndDate) return false;
+  if(per.startDate && newEndDate < per.startDate) return false; // 시작보다 이른 종료는 적용 안 함
+  const cg = per.cg, ptId = String(pt.id);
+  let changed = false;
+  if(per.live) {
+    if(cg.endDate !== newEndDate || _endT(cg.endTime) !== _endT(newEndTime)) {
+      cg.endDate = newEndDate;
+      cg.endTime = newEndTime || '';
+      recalcDuration(cg, newEndDate);
+      changed = true;
+    }
+    const _hb = JSON.stringify(cg.assignHistory||[]);
+    saveToAssignHistory(cg, ptId); // 같은 근무건 이력도 같이 갱신 (미정산 금액 포함)
+    if(JSON.stringify(cg.assignHistory||[]) !== _hb) changed = true;
+  } else {
+    const h = (cg.assignHistory||[]).find(x => String(x.patientId) === ptId && x.startDate === per.startDate);
+    if(h && (h.endDate !== newEndDate || _endT(h.endTime) !== _endT(newEndTime))) {
+      // 미정산 금액도 바뀐 근무시간만큼 보정 (이미 지급된 금액은 그대로이므로 총액 차이만 반영)
+      if(!h.settled && typeof h.settleAmount === 'number') {
+        const vOld = { pay: h.pay, startDate: h.startDate, startTime: h.startTime, endDate: h.endDate, endTime: h.endTime };
+        const vNew = { pay: h.pay, startDate: h.startDate, startTime: h.startTime, endDate: newEndDate, endTime: newEndTime || '' };
+        h.settleAmount = Math.max(0, h.settleAmount + calcTotalPayAmount(vNew) - calcTotalPayAmount(vOld));
+      }
+      h.endDate = newEndDate;
+      h.endTime = newEndTime || '';
+      touchHist(h);
+      changed = true;
+    }
+  }
+  if(changed) {
+    markCgEdited(cg.id);
+    autoFillAttendance(String(cg.id));
+  }
+  return changed;
+}
+// 환자 종료일시가 바뀌었을 때 → 마지막 담당 간병인 근무건도 같이 변경
+// (oldEndDate/oldEndTime: 바뀌기 전 환자 종료일시 — 이걸로 "마지막 담당" 근무건을 찾음)
+function syncPtEndToFinalCg(pt, oldEndDate, oldEndTime, allowFallback) {
+  if(!pt || pt.status !== '종료' || !pt.endDate) return null;
+  const per = findPtFinalPeriod(pt, oldEndDate, oldEndTime, allowFallback);
+  if(!per) return null;
+  return applyEndToWorkPeriod(pt, per, pt.endDate, pt.endTime || '') ? per.cg : null;
+}
+// 간병인 근무건(cgId + 환자 + 시작일)이 그 환자의 "마지막 담당" 근무건이면 환자를 돌려줌 (종료된 환자만).
+// 반드시 근무건 종료일시를 고치기 "전에" 호출해야 함 (고친 뒤엔 환자와 일치 여부로 판별할 수 없음)
+function ptIfFinalWorkPeriod(cgId, ptId, startDate) {
+  if(!ptId || !startDate) return null;
+  const pt = patients.find(p => String(p.id) === String(ptId));
+  if(!pt || pt.status !== '종료' || !pt.endDate) return null;
+  const per = findPtFinalPeriod(pt, pt.endDate, pt.endTime || '', true);
+  return (per && String(per.cg.id) === String(cgId) && per.startDate === startDate) ? pt : null;
+}
+function setPtEndFromCg(pt, newEndDate, newEndTime) {
+  if(!pt || !newEndDate) return false;
+  if(pt.endDate === newEndDate && _endT(pt.endTime) === _endT(newEndTime)) return false;
+  pt.endDate = newEndDate;
+  pt.endTime = newEndTime || '';
+  recalcDuration(pt, newEndDate);
+  refreshDateSensitiveReportLogs(pt); // 종료보고도 바뀐 날짜로 최신화
+  markPtEdited(pt.id);
   return true;
 }
 
