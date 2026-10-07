@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_07_05';
+const APP_BUILD = '26_10_07_06';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -11036,7 +11036,7 @@ function hpBlocksDateLabel(blocks) {
 // 명절할증 지출내용(지출결의서용) — 기존 지출내용 형식에 맞춤
 function buildHolidayExpenseMemo(ptName, hospital, cgName, blocks, days, amount, parentLabel) {
   const dl = hpBlocksDateLabel(blocks);
-  return (ptName||'') + '_' + (hospital||'') + ' 간병인(' + (cgName||'') + ') 명절할증 입금\n'
+  return (ptName||'') + '_' + (hospital||'') + ' 간병인(' + (cgName||'') + ') 명절할증 지급\n'
     + (dl ? dl + ' ' : '') + '총 ' + (days||0) + '일 ' + Number(amount||0).toLocaleString() + '원(' + (parentLabel||'') + ' 명절할증)';
 }
 function calExpenseBlockHtml(msg) {
