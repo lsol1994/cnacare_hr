@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_07_01';
+const APP_BUILD = '26_10_07_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -15077,6 +15077,13 @@ function calcEndDt(endDate, endTime) {
 }
 
 function checkAutoEnd() {
+  // (26_10_07_02) Firebase 첫 데이터 수신 전이면 스킵 — checkAutoStart()와 동일한 가드.
+  // 앱 시작 2초 뒤 setTimeout으로 무조건 실행되던 탓에, PC를 켜자마자 서버 데이터를 받기도 전에
+  // 어제 상태 그대로인 localStorage(낡은 데이터)로 자동 종료 처리를 돌리고 _ts를 "지금"으로 찍어버렸음.
+  // 그러면 다른 기기(실장님)가 이미 처리·수정해둔 최신 값보다 이 낡은 값의 _ts가 더 커져서
+  // "가장 나중에 저장된 것이 이긴다" 규칙에 따라 서버의 최신 데이터를 덮어써버림.
+  // 서버 데이터를 받은 직후에는 attachFirebaseListener()가 checkAutoEnd()를 직접 호출하므로 누락 없음.
+  if(!_fbReady) return;
   const now = new Date();
   let changed = false;
   const endedItems = []; // 종료된 항목 {pt, cg}
