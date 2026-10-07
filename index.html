@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_07_02';
+const APP_BUILD = '26_10_07_03';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -16614,7 +16614,12 @@ function normalizeTimes() {
 }
 
 try {
-  autoMatch();
+  // (26_10_07_02) 시작 직후(서버 데이터 받기 전)에는 autoMatch()를 돌리지 않음.
+  // autoMatch()는 이름 기준 자동 연결 시 markCgEdited()로 저장시각을 "지금"으로 찍는데,
+  // 이 시점의 데이터는 어제 꺼둔 그대로인 낡은 localStorage라 다른 기기의 최신 수정을
+  // 덮어쓰는 원인이 될 수 있음. 서버 데이터를 받은 직후 attachFirebaseListener()가
+  // autoMatch()를 다시 호출하므로 매칭 누락은 없음.
+  if(_fbReady) autoMatch();
   updateSidebar();
   renderDashboard();
   renderRooms();
