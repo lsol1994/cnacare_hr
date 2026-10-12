@@ -11093,6 +11093,7 @@ let _hrExpRegLoadedAt = 0;
 let _hrExpRegLoading = null;
 let _hrExpFinDb = null;
 let _hrExpModalPayload = null;
+let _hrExpLastId = 0;         // 마지막으로 만든 지출결의서 id (같은 ms 중복 방지)
 
 // 재무관리 지출결의서와 같은 표준 은행 목록 (금융결제원 코드)
 const HR_EXP_BANKS = [
@@ -11164,11 +11165,21 @@ function hrExpBankResolve(raw){
 }
 
 // 제목 — 띄어쓰기 없이 '(환자:이름)'으로 통일
-function hrExpTitle(kind, ptName) {
+//   단기 급여: 간병비 지급(환자:이름)
+//   N주차 주급(진행 중·마감 퇴실): 간병비 지급(환자:이름)_N주차 주급
+//   마감 교체: 간병비 지급(환자:이름)_N주차 주급(교체)
+//   현장취소: 간병비 지급(환자:이름)_도착후취소
+//   명절할증: [명절추가지급]간병비 지급(환자:이름) / 선지급: 간병비 지급(환자:이름)_선지급
+// 주차·교체 여부는 지출내용 2줄째 괄호(예: '3주차 주급_교체')에서 읽음 — 복사 문구와 같은 계산 결과를 그대로 씀
+function hrExpTitle(kind, ptName, memo) {
   var base = '간병비 지급(환자:' + (ptName||'').trim() + ')';
   if(kind === 'holiday') return '[명절추가지급]' + base;
   if(kind === 'advance') return base + '_선지급';
-  return base;
+  if(kind === 'onsite')  return base + '_도착후취소';
+  var line2 = String(memo||'').split('\n')[1] || '';
+  var wk = /(\d+)주차 주급/.exec(line2);
+  if(!wk) return base; // 단기 급여 등
+  return base + '_' + wk[1] + '주차 주급' + (/_교체/.test(line2) ? '(교체)' : '');
 }
 // 지출내용 첫 줄 아래 '총 N일'에서 간병일수 추출 (주급·단기·최종정산 메모 형식)
 function hrExpDaysFromMemo(memo) {
@@ -11191,7 +11202,7 @@ function hrExpMake(o) {
     hrKey: String(o.key), kind: o.kind, label: o.label || '',
     cgId: String(cg.id), cgName: cg.name || '', ptName: (o.ptName||'').trim(),
     date: o.date, amount: amount, careDays: careDays, expectedRev: expectedRev,
-    title: hrExpTitle(o.kind, o.ptName),
+    title: hrExpTitle(o.kind, o.ptName, o.memo),
     desc: o.memo || '',
     bankRaw: cg.bankName || '', account: cg.bankAccount || '', holder: cg.bankHolder || ''
   };
@@ -11313,6 +11324,38 @@ function hrExpClose() {
   var el = document.getElementById('hrexp-mo');
   if(el) el.remove();
 }
+// 지출결의서 문서 만들기 (재무관리 saveExp와 같은 필드) — ov: 확인창에서 고친 값
+function hrExpBuildDoc(p, ov) {
+  ov = ov || {};
+  var pick = function(k, d){ return (ov[k] !== undefined) ? ov[k] : d; };
+  return {
+    draftDate: todayStr(), payDate: pick('payDate', p.payDate || p.date), title: pick('title', p.title), payee: pick('payee', p.cgName),
+    bizno: '', acct: HR_EXP_ACCT, amount: Number(pick('amount', p.amount))||0, method: '계좌이체',
+    bank: pick('bank', ''), bankCode: pick('bankCode', ''), account: pick('account', p.account),
+    desc: pick('desc', p.desc), status: '대기',
+    note: 'HR 대시보드 등록' + (p.holder && p.holder !== p.cgName ? ' · 예금주 ' + p.holder : '') + (p.unpaidOrigDate ? ' · 미지급(원래 지급일 ' + p.unpaidOrigDate + ')' : ''),
+    careDays: Number(pick('careDays', p.careDays))||0, expectedRev: Number(pick('expectedRev', p.expectedRev))||0, client: HR_EXP_CLIENT,
+    src: 'hr', hrKey: p.hrKey, hrKind: p.kind, hrCgId: p.cgId, hrRegAt: new Date().toISOString()
+  };
+}
+function hrExpDocMissing(obj) { return !obj.payDate || !obj.title || !obj.payee || !obj.amount || !obj.desc; }
+// 저장: 같은 hrKey가 이미 있으면 저장하지 않음 → 'dup' / 저장 → 'ok'
+async function hrExpWrite(fdb, obj) {
+  var dup = await fdb.collection(HR_EXP_COL).where('hrKey', '==', obj.hrKey).limit(1).get();
+  if(!dup.empty) {
+    var dx = dup.docs[0].data();
+    _hrExpReg[obj.hrKey] = { id: dx.id, status: dx.status || '' };
+    return 'dup';
+  }
+  // 재무관리 id는 숫자 — 재무관리 화면의 새 id(최대값+1)와 겹치지 않게 시간 기반 숫자 사용.
+  // 전체 등록처럼 같은 1ms 안에 여러 건을 만들어도 겹치지 않도록 직전 id보다 항상 크게 (겹치면 덮어써짐)
+  var id = Math.max(Date.now() * 100 + Math.floor(Math.random() * 100), _hrExpLastId + 1);
+  _hrExpLastId = id;
+  obj.id = id;
+  await fdb.doc(HR_EXP_COL + '/' + String(id)).set(obj);
+  _hrExpReg[obj.hrKey] = { id: id, status: '대기' };
+  return 'ok';
+}
 async function hrExpSubmit() {
   var p = _hrExpModalPayload; if(!p) return;
   var v = function(id){ var e = document.getElementById(id); return e ? String(e.value||'').trim() : ''; };
@@ -11326,41 +11369,75 @@ async function hrExpSubmit() {
     var be = document.getElementById('hrexp-bank');
     bankName = be ? be.value : ''; bankCode = be ? (be.dataset.code||'') : '';
   }
-  var amount = Number(v('hrexp-amount'))||0;
-  var obj = {
-    draftDate: todayStr(), payDate: v('hrexp-paydate'), title: v('hrexp-title'), payee: v('hrexp-payee'),
-    bizno: '', acct: HR_EXP_ACCT, amount: amount, method: '계좌이체',
-    bank: bankName, bankCode: bankCode, account: v('hrexp-account'),
-    desc: v('hrexp-desc'), status: '대기',
-    note: 'HR 대시보드 등록' + (p.holder && p.holder !== p.cgName ? ' · 예금주 ' + p.holder : '') + (p.unpaidOrigDate ? ' · 미지급(원래 지급일 ' + p.unpaidOrigDate + ')' : ''),
-    careDays: Number(v('hrexp-days'))||0, expectedRev: Number(v('hrexp-rev'))||0, client: HR_EXP_CLIENT,
-    src: 'hr', hrKey: p.hrKey, hrKind: p.kind, hrCgId: p.cgId, hrRegAt: new Date().toISOString()
-  };
-  if(!obj.payDate || !obj.title || !obj.payee || !amount || !obj.desc) { toast('지급일자·제목·수취인·금액·지출내용은 필수예요', true); return; }
+  var obj = hrExpBuildDoc(p, {
+    payDate: v('hrexp-paydate'), title: v('hrexp-title'), payee: v('hrexp-payee'), amount: v('hrexp-amount'),
+    bank: bankName, bankCode: bankCode, account: v('hrexp-account'), desc: v('hrexp-desc'),
+    careDays: v('hrexp-days'), expectedRev: v('hrexp-rev')
+  });
+  if(hrExpDocMissing(obj)) { toast('지급일자·제목·수취인·금액·지출내용은 필수예요', true); return; }
   var btn = document.getElementById('hrexp-save');
   if(btn) { btn.disabled = true; btn.textContent = '등록 중...'; }
   try {
     var fdb = await hrExpFinDb();
-    var dup = await fdb.collection(HR_EXP_COL).where('hrKey', '==', p.hrKey).limit(1).get();
-    if(!dup.empty) {
-      var dx = dup.docs[0].data();
-      _hrExpReg[p.hrKey] = { id: dx.id, status: dx.status || '' };
-      hrExpClose(); refreshCalendarIfOpen();
-      toast('이미 재무관리에 등록된 건이라 다시 등록하지 않았어요');
-      return;
-    }
-    // 재무관리 id는 숫자 — 재무관리 화면의 새 id(최대값+1)와 겹치지 않게 시간 기반 숫자 사용
-    var id = Date.now() * 10 + Math.floor(Math.random() * 10);
-    obj.id = id;
-    await fdb.doc(HR_EXP_COL + '/' + String(id)).set(obj);
-    _hrExpReg[p.hrKey] = { id: id, status: '대기' };
+    var r = await hrExpWrite(fdb, obj);
     hrExpClose(); refreshCalendarIfOpen();
-    toast('✅ 재무관리 지출결의서에 등록했어요 (' + obj.title + ')');
+    toast(r === 'dup' ? '이미 재무관리에 등록된 건이라 다시 등록하지 않았어요' : '✅ 재무관리 지출결의서에 등록했어요 (' + obj.title + ')');
   } catch(e) {
     console.error('지출결의서 등록 실패:', e);
     if(btn) { btn.disabled = false; btn.textContent = '✓ 재무관리에 등록'; }
     toast('등록 실패: ' + (e && e.message ? e.message : e), true);
   }
+}
+// 보고 있는 날짜의 미등록 카드 목록 (은행이 애매한 건은 확인창에서 골라야 해서 제외)
+function hrExpBulkTargets() {
+  var all = Object.keys(_hrExpSink).map(function(k){ return _hrExpSink[k]; }).filter(function(p){ return p && !_hrExpReg[p.hrKey]; });
+  var ok = [], needBank = [], bad = [];
+  all.forEach(function(p) {
+    var br = hrExpBankResolve(p.bankRaw);
+    if(p.bankRaw && !br.match && br.cands.length > 1) { needBank.push(p); return; }
+    var bank = br.match ? { bank: br.match.name, bankCode: br.match.code } : { bank: p.bankRaw || '', bankCode: '' };
+    var obj = hrExpBuildDoc(p, bank);
+    if(hrExpDocMissing(obj)) { bad.push(p); return; }
+    ok.push(obj);
+  });
+  return { ok: ok, needBank: needBank, bad: bad };
+}
+// 💰 급여 지급 섹션 위에 붙는 '전체 등록' 버튼
+function hrExpBulkBarHtml() {
+  var t = hrExpBulkTargets();
+  var n = t.ok.length + t.needBank.length + t.bad.length;
+  if(!n) return '';
+  return '<button class="btn btn-sm" id="hrexp-bulk-btn" style="width:100%;justify-content:center;margin:8px 0 2px;color:var(--teal);border-color:var(--teal);font-weight:800" onclick="hrExpBulk()">📤 이 날짜 미등록 ' + n + '건 지출결의서 전체 등록</button>';
+}
+async function hrExpBulk() {
+  var t = hrExpBulkTargets();
+  if(!t.ok.length) {
+    toast(t.needBank.length || t.bad.length ? '은행 선택 또는 정보 확인이 필요한 건만 남았어요 — 카드별 등록 버튼으로 등록해주세요' : '등록할 건이 없어요', true);
+    return;
+  }
+  var sum = t.ok.reduce(function(a, o){ return a + (Number(o.amount)||0); }, 0);
+  var msg = '재무관리 지출결의서에 ' + t.ok.length + '건 (합계 ' + sum.toLocaleString() + '원)을 대기 상태로 등록할까요?\n\n'
+    + t.ok.map(function(o){ return '· ' + o.title + ' / ' + o.payee + ' ' + Number(o.amount).toLocaleString() + '원'; }).join('\n');
+  if(t.needBank.length) msg += '\n\n※ 은행 선택이 필요한 ' + t.needBank.length + '건은 제외 (카드에서 따로 등록): ' + t.needBank.map(function(p){ return p.cgName + '(' + p.bankRaw + ')'; }).join(', ');
+  if(t.bad.length) msg += '\n\n※ 환자·지출내용 정보가 부족한 ' + t.bad.length + '건은 제외 (카드에서 따로 등록)';
+  if(!confirm(msg)) return;
+  var btn = document.getElementById('hrexp-bulk-btn');
+  if(btn) { btn.disabled = true; btn.textContent = '등록 중...'; }
+  var done = 0, dup = 0, fail = 0;
+  try {
+    var fdb = await hrExpFinDb();
+    for(var i = 0; i < t.ok.length; i++) {
+      try { var r = await hrExpWrite(fdb, t.ok[i]); if(r === 'dup') dup++; else done++; }
+      catch(e) { console.error('지출결의서 일괄 등록 실패:', t.ok[i].title, e); fail++; }
+    }
+  } catch(e) {
+    console.error('재무관리 연결 실패:', e);
+    toast('재무관리 연결 실패: ' + (e && e.message ? e.message : e), true);
+    if(btn) { btn.disabled = false; btn.textContent = '📤 다시 시도'; }
+    return;
+  }
+  refreshCalendarIfOpen();
+  toast('✅ ' + done + '건 등록' + (dup ? ', ' + dup + '건 이미 있음' : '') + (fail ? ', ' + fail + '건 실패' : '') + (t.needBank.length ? ' · 은행 선택 필요 ' + t.needBank.length + '건 남음' : ''), fail > 0);
 }
 // 미지급 알림 카드용: 원래 지급일 화면을 화면 변경 없이 계산해서 그 카드의 등록 데이터를 가져옴
 function hrExpCollectForDate(dateStr) {
@@ -12211,7 +12288,8 @@ function showCalDetail(dateStr, collectOnly) {
       + events.map(function(e){ return e.html; }).join('');
   }
 
-  var sectionsHtml = sectionHtml('⚠️ 미지급 알림', unpaidReminderEvents)
+  var sectionsHtml = (collectOnly ? '' : hrExpBulkBarHtml()) // (26_10_12_01) 이 날짜 미등록 지급건 전체 등록
+    + sectionHtml('⚠️ 미지급 알림', unpaidReminderEvents)
     + sectionHtml('▶ 간병 시작', startEvents)
     + sectionHtml('■ 간병 마감', endEvents)
     + sectionHtml('🔀 교체', swapEvents)
