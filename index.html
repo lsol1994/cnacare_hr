@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_12_01';
+const APP_BUILD = '26_10_12_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -11821,6 +11821,7 @@ function showCalDetail(dateStr, collectOnly) {
 
   // 급여 지급일
   var paidCgIdsToday = {};
+  var onsiteCgIdsToday = {}; // (26_10_12_02) 현장취소 처리된 간병인 — 최종정산 중복 방지는 이것만 본다
   var livePayKeysToday = {}; // (26_10_07_01) cgId|근무시작일|지급일|라벨 — 라이브 카드로 이미 표시된 지급건
   function livePayKey(cgId, startDate, date, label) { return String(cgId) + '|' + (startDate||'') + '|' + date + '|' + (label||''); }
   caregivers.filter(function(c){return !!c.startDate;}).forEach(function(cg) {
@@ -11929,6 +11930,7 @@ function showCalDetail(dateStr, collectOnly) {
   caregivers.forEach(function(cg) {
     if(!cg.onsiteCancelDate || cg.onsiteCancelDate !== dateStr) return;
     paidCgIdsToday[String(cg.id)] = true; // 최종정산 로직이 이 간병인을 중복 처리하지 않도록 표시
+    onsiteCgIdsToday[String(cg.id)] = true;
     var pt = resolveCalPt(cg);
     var histFallback = !pt ? findOwnAssignHistoryByDates(cg) : null;
     var ptStr = pt ? ' (' + pt.name + ')' : (histFallback ? ' (' + (histFallback.patientName||'') + ')' : '');
@@ -11990,7 +11992,11 @@ function showCalDetail(dateStr, collectOnly) {
     var adjusted = adjustPayDateToMonday(rawEndDate);
     var adjustedStr = toLocalDateStr(adjusted);
     if(adjustedStr !== dateStr) return;
-    if(paidCgIdsToday[String(cg.id)]) return; // 이미 정규 급여 지급일로 잡혀있으면 중복 추가 안 함
+    // (26_10_12_02) 예전엔 같은 날 정규 주급 카드가 있으면 최종정산을 통째로 건너뛰었는데,
+    // 주급 지급일이 주말·공휴일 조정으로 퇴실일과 같은 날로 밀리면(예: 1주차 10/9(공휴일)→10/12, 퇴실 10/12)
+    // 마지막 주차 정산이 사라지는 문제가 있었음. 금액 중복은 아래 settleAmount(총급여 - 정규주급 합계)로
+    // 이미 막히므로, 여기선 현장취소 건만 제외한다.
+    if(onsiteCgIdsToday[String(cg.id)]) return;
     if(!cg.pay) return;
     var wasAdjusted = adjustedStr !== cg.endDate;
     var totalOwed  = calcTotalPayAmount(cg);
