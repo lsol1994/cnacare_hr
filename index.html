@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_12_02';
+const APP_BUILD = '26_10_14_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -6235,6 +6235,7 @@ function openCgDetail(id) {
         <button style="border:none;background:none;color:var(--red);cursor:pointer;font-size:13px" onclick="deleteAdvance('${cg.id}','${a.id}')" title="삭제">✕</button>
       </div>
     `).join('') : ''}
+    ${offDaySectionHtml(cg)}
     ${cg.feedback?`<div style="font-size:12px;color:var(--gray);background:var(--surface2);border-radius:var(--rsm);padding:8px 10px;margin-bottom:.875rem">💬 보호자 피드백: ${cg.feedback}</div>`:''}
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:8px">🔗 매칭 환자${(pt && pt.recruitHistory && pt.recruitHistory.length) ? ` <span style="font-weight:400;text-transform:none;color:var(--amber)">(교체됨 · 이전 담당: ${pt.recruitHistory[pt.recruitHistory.length-1].prevCg||'—'})</span>` : ''}</div>
@@ -6390,6 +6391,87 @@ function deleteAdvance(cgId, advId) {
   if(!cg || !cg.advances) return;
   if(!confirm('이 선지급 내역을 삭제할까요?')) return;
   cg.advances = cg.advances.filter(a=>String(a.id)!==String(advId));
+  save();
+  openCgDetail(cgId);
+  refreshCalendarIfOpen();
+  toast('삭제됐어요');
+}
+
+// ─── (26_10_14_01) 휴무일(무급) 관리 ───
+// 환자·간병인 합의로 간병기간 중 쉬는 날을 등록하면 그 날 1일치 일급이 주급/단기급여/최종정산에서 빠짐
+function offDaySectionHtml(cg) {
+  const id = String(cg.id).replace(/'/g, "\\'");
+  const cur = offDayBlocks(cg); // 현재 근무건에 적용되는 휴무일
+  const curSet = {}; cur.forEach(b => { curSet[b.id || b.date] = true; });
+  const list = (Array.isArray(cg.offDays) ? cg.offDays : []).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const pay = Number(cg.pay) || 0;
+  return `<div class="hr"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#5E35B1">🛌 휴무일 (무급)</div>
+      <button class="btn btn-sm" style="border-color:#5E35B1;color:#5E35B1" onclick="toggleOffDayForm('${id}')">+ 휴무일 등록</button>
+    </div>
+    <div id="cg-offday-form-${cg.id}" style="display:none;background:#EDE7F6;border-radius:var(--rsm);padding:10px 12px;margin-bottom:8px">
+      <div style="font-size:11px;color:var(--gray);margin-bottom:8px">환자·간병인 합의로 쉬는 날을 등록하면 그 날(입실시간 ${cg.startTime||'08:00'}부터 24시간) 1일치 일급${pay?' '+pay.toLocaleString()+'원':''}이 급여에서 빠져요. 이틀이면 두 번 등록하세요.</div>
+      <div class="g2" style="margin-bottom:8px">
+        <div class="field" style="margin-bottom:0"><label style="font-size:10px">휴무일</label><input type="date" id="off-date-${cg.id}" value="${todayStr()}"></div>
+        <div class="field" style="margin-bottom:0"><label style="font-size:10px">메모 (선택)</label><input type="text" id="off-memo-${cg.id}" placeholder="예: 보호자 합의 휴무"></div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm" style="border-color:#5E35B1;color:#5E35B1;flex:1;justify-content:center" onclick="saveOffDay('${id}')">저장</button>
+        <button class="btn btn-sm" onclick="toggleOffDayForm('${id}')">취소</button>
+      </div>
+    </div>
+    ${list.map(o => {
+      const applied = curSet[o.id || o.date];
+      return `<div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface2);border-radius:var(--rsm);padding:7px 12px;margin-bottom:5px;font-size:12px">
+        <span><b>${o.date}</b>${o.memo?' · '+o.memo:''} ${applied?(pay?`<span style="color:#5E35B1">· −${pay.toLocaleString()}원</span>`:''):'<span style="color:var(--gray)">· 지난 근무건</span>'}</span>
+        <button style="border:none;background:none;color:var(--red);cursor:pointer;font-size:13px" onclick="deleteOffDay('${id}','${String(o.id).replace(/'/g, "\\'")}')" title="삭제">✕</button>
+      </div>`;
+    }).join('')}`;
+}
+function toggleOffDayForm(cgId) {
+  const form = document.getElementById('cg-offday-form-' + cgId);
+  if(!form) return;
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+// 휴무일 변경 후 같은 근무건 이력의 미정산 금액도 갱신 (이력이 이미 있을 때만)
+function refreshHistAfterOffDayChange(cg) {
+  const ptId = String(cg.patientId || cg.earlyEndPatientId || '');
+  if(!ptId || !cg.startDate || !Array.isArray(cg.assignHistory)) return;
+  if(cg.assignHistory.some(h => String(h.patientId)===ptId && h.startDate===cg.startDate)) saveToAssignHistory(cg, ptId);
+}
+function saveOffDay(cgId) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg) return;
+  const dateEl = document.getElementById('off-date-' + cgId);
+  const memoEl = document.getElementById('off-memo-' + cgId);
+  const date = dateEl ? dateEl.value : '';
+  if(!date) { toast('휴무일을 입력해주세요', true); return; }
+  if(!cg.startDate) { toast('근무 시작일이 없는 간병인이에요', true); return; }
+  if(date < cg.startDate) { toast('근무 시작일(' + cg.startDate + ') 이전 날짜는 등록할 수 없어요', true); return; }
+  if(cg.endDate) {
+    const counted = countedWorkDays(cg) || 0;
+    const idx = Math.round((parseLocalDate(date) - parseLocalDate(cg.startDate)) / 86400000);
+    if(idx >= counted) { toast('근무 기간(' + cg.startDate + ' ~ ' + cg.endDate + ' ' + (cg.endTime||'') + ') 안의 날짜만 등록할 수 있어요', true); return; }
+  }
+  if(!Array.isArray(cg.offDays)) cg.offDays = [];
+  if(cg.offDays.some(o => o && o.date === date)) { toast('이미 등록된 휴무일이에요', true); return; }
+  cg.offDays.push({ id: genId(), date, memo: memoEl ? memoEl.value.trim() : '', addedAt: new Date().toISOString() });
+  markCgEdited(cg.id); // 다른 기기 동기화로 덮어써지지 않게
+  refreshHistAfterOffDayChange(cg);
+  save();
+  openCgDetail(cgId);
+  refreshCalendarIfOpen();
+  const pay = Number(cg.pay) || 0;
+  toast('✅ ' + date + ' 휴무 등록 — 급여에서 ' + (pay ? pay.toLocaleString() + '원' : '1일치') + ' 빠져요');
+}
+function deleteOffDay(cgId, offId) {
+  const cg = caregivers.find(c=>String(c.id)===String(cgId));
+  if(!cg || !Array.isArray(cg.offDays)) return;
+  if(!confirm('이 휴무일을 삭제할까요?\n삭제하면 그 날 급여가 다시 포함돼요.')) return;
+  cg.offDays = cg.offDays.filter(o => String(o.id) !== String(offId));
+  markCgEdited(cg.id);
+  refreshHistAfterOffDayChange(cg);
   save();
   openCgDetail(cgId);
   refreshCalendarIfOpen();
@@ -6940,8 +7022,8 @@ function applyEndToWorkPeriod(pt, per, newEndDate, newEndTime) {
     if(h && (h.endDate !== newEndDate || _endT(h.endTime) !== _endT(newEndTime))) {
       // 미정산 금액도 바뀐 근무시간만큼 보정 (이미 지급된 금액은 그대로이므로 총액 차이만 반영)
       if(!h.settled && typeof h.settleAmount === 'number') {
-        const vOld = { pay: h.pay, startDate: h.startDate, startTime: h.startTime, endDate: h.endDate, endTime: h.endTime };
-        const vNew = { pay: h.pay, startDate: h.startDate, startTime: h.startTime, endDate: newEndDate, endTime: newEndTime || '' };
+        const vOld = { pay: h.pay, startDate: h.startDate, startTime: h.startTime, endDate: h.endDate, endTime: h.endTime, offDays: cg.offDays };
+        const vNew = { pay: h.pay, startDate: h.startDate, startTime: h.startTime, endDate: newEndDate, endTime: newEndTime || '', offDays: cg.offDays };
         h.settleAmount = Math.max(0, h.settleAmount + calcTotalPayAmount(vNew) - calcTotalPayAmount(vOld));
       }
       h.endDate = newEndDate;
@@ -9410,6 +9492,7 @@ const QNA_ITEMS_RAW = [
   { cat:'caregiver', q:'간병인을 등록하면 간병비는 자동으로 계산되나요?', a:'환자와 함께 등록하면 병원·시작일·기간과 함께 간병비(환자 일급 − 5,000원)가 자동으로 채워집니다. 간병인만 단독으로 등록하면 근무상태가 기본적으로 "예비"로 저장돼요.', keywords:['간병비자동계산','환자일급','간병인등록','예비상태','근무상태'] },
   { cat:'caregiver', q:'이미 종료된 환자에게 새 간병인을 등록했는데 중복 확인창 없이 그냥 저장돼요.', a:'등록 대상 환자가 이미 "종료" 상태인 경우, 종료된 환자에게 과거에 썼던 간병인 이름을 다시 매칭하는 일이 흔하기 때문에 의도적으로 중복 이름 확인창을 건너뛰도록 되어 있습니다. 정상 동작이니 걱정 마시고, 만약 실수로 동명이인의 별개 간병인을 등록한 것이라면 설정의 "중복 간병인 정리" 도구로 정리하세요.', keywords:['중복확인창','종료된환자','간병인등록','중복간병인정리','동명이인'] },
   { cat:'caregiver', q:'근무 중인 간병인이 예정보다 일찍 그만두는 경우 어떻게 처리하나요?', a:'간병인 카드의 "중도종료" 버튼을 누르면 종료 유형을 선택하는 팝업이 뜹니다. 환자가 계속 간병인이 필요하면 "🔄 재모집"을, 환자도 더 이상 간병이 필요 없어졌다면(퇴원 등) "🚫 완전 종료"를 선택하세요.', keywords:['중도종료','재모집','완전종료','종료유형','조기퇴사'] },
+  { cat:'caregiver', q:'환자와 간병인이 합의해서 간병기간 중에 하루·이틀 쉬었어요. 급여는 어떻게 하나요?', a:'간병인 상세 → "🛌 휴무일 (무급)"에서 "+ 휴무일 등록"으로 쉰 날짜를 등록하세요(이틀이면 두 번). 그 날 입실시간부터 24시간이 1일 무급 처리되어, 그 날이 속한 주차 주급(단기는 단기 급여)과 총 간병비·최종정산에서 1일치 일급이 자동으로 빠집니다. 명절할증 기간에 쉬었다면 그 날 할증도 빠져요. 캘린더 급여 카드와 지출내용에 "휴무 N일 차감/제외"로 표시되고, 잘못 등록했으면 ✕로 삭제하면 바로 원래 금액으로 돌아옵니다. 현재 근무 기간 안의 날짜만 등록할 수 있어요.', keywords:['휴무','휴무일','무급','합의휴무','급여차감','쉬는날'] },
   { cat:'caregiver', q:'매칭된 지 얼마 안 된 간병인이 시작도 하기 전에 취소를 통보했어요.', a:'"중도종료"가 아니라 반드시 "시작 전 취소"를 사용하세요. 근무한 적이 없으므로 급여가 발생하지 않도록 시작일시=마감일시로 자동 고정되며, 문제가 반복되는 간병인이라면 그 자리에서 블랙리스트 등록도 함께 할 수 있습니다.', keywords:['시작전취소','대기중취소','급여미발생','블랙리스트','매칭후취소'] },
   { cat:'caregiver', q:'종료 처리를 잘못 눌렀어요. 되돌릴 수 있나요?', a:'간병인 카드의 "종료취소" 버튼을 사용하세요. 근무상태·마감일·배상보험 정보, 연결된 환자 상태까지 종료 직전 상태로 정확히 복원됩니다. 만약 버튼을 눌러도 복원되지 않는다면(복원용 기록 자체가 없는 경우), 설정 화면의 "중도종료 데이터 복구" 도구로 복원용 기록을 다시 만들 수 있어요.', keywords:['종료취소','복원','배상보험','중도종료데이터복구','종료직전상태'] },
   { cat:'caregiver', q:'예전에 중도종료됐던 간병인을 다른 환자에게 다시 투입하고 싶어요.', a:'간병인 카드의 "재배정" 버튼을 사용하세요. 배정할 환자를 선택하면 간병인이 "대기중" 상태로 재활성화되고, 새 환자는 "매칭완료"로 전환됩니다. 이전 근무 이력은 그대로 보존돼요.', keywords:['재배정','대기중','매칭완료전환','근무이력보존','재투입'] },
@@ -10937,6 +11020,39 @@ function countedWorkDays(w) {
   const fullDays = Math.floor(totalMin / (24*60));
   return (totalMin % (24*60)) / 60 >= 10 ? fullDays + 1 : fullDays;
 }
+// ═══ 휴무일(무급) 계산 (26_10_14_01) ═══
+// 환자·간병인 합의로 간병기간 중 하루·이틀 쉬는 경우, 그 날만큼 급여를 빼고 다시 계산한다.
+// cg.offDays = [{ id, date:'YYYY-MM-DD', memo, addedAt }] — date의 "입실시각부터 24시간" 근무블록 1일이 무급.
+// 근무기간(시작일 블록 ~ 인정일수) 안에 있는 날짜만 적용 → 재배정돼도 이전 근무건 휴무가 새 근무건에 섞이지 않고,
+// 이력 복구 카드(virtualCg)에도 같은 목록을 넘기면 그 기간 것만 반영됨.
+// 10시간 미만 자투리(OT) 블록은 일급이 없으므로 휴무 대상 아님.
+function offDayBlocks(w, fromIdx, toIdx) {
+  if(!w || !w.startDate || !Array.isArray(w.offDays) || !w.offDays.length) return [];
+  const start = parseLocalDate(w.startDate);
+  if(!start) return [];
+  const maxIdx = countedWorkDays(w); // null = 진행중
+  const out = [], seen = {};
+  w.offDays.forEach(o => {
+    if(!o || !o.date) return;
+    const d = parseLocalDate(o.date);
+    if(!d) return;
+    const idx = Math.round((d - start) / 86400000);
+    if(idx < 0) return;
+    if(maxIdx !== null && idx >= maxIdx) return;
+    if(fromIdx != null && idx < fromIdx) return;
+    if(toIdx != null && idx >= toIdx) return;
+    if(seen[idx]) return;
+    seen[idx] = true;
+    out.push({ idx, date: o.date, memo: o.memo || '', id: o.id });
+  });
+  out.sort((a,b)=>a.idx-b.idx);
+  return out;
+}
+function offDayIdxSet(w) {
+  const set = {};
+  offDayBlocks(w).forEach(b => { set[b.idx] = true; });
+  return set;
+}
 // 근무(w: startDate/startTime/endDate/endTime)에서 할증 대상 블록 목록.
 // fromIdx/toIdx: 블록 번호 범위 [fromIdx, toIdx) — 0 = 시작일 블록. 생략하면 전체.
 function holidayPremiumBlocks(w, fromIdx, toIdx) {
@@ -10947,6 +11063,7 @@ function holidayPremiumBlocks(w, fromIdx, toIdx) {
   const maxIdx = countedWorkDays(w); // null = 진행중(제한 없음)
   const out = [];
   const seen = {};
+  const offSet = offDayIdxSet(w); // (26_10_14_01) 휴무한 날은 명절할증도 없음
   periods.forEach(p => {
     const amt = holidayPremiumCgAmount(p);
     if(amt <= 0) return;
@@ -10972,6 +11089,7 @@ function holidayPremiumBlocks(w, fromIdx, toIdx) {
         if(fromIdx != null && idx < fromIdx) continue;
         if(toIdx != null && idx >= toIdx) continue;
         if(seen['i'+idx]) continue; // 명절기간이 겹쳐 등록돼도 같은 블록은 한 번만
+        if(offSet[idx]) continue; // 휴무일
         seen['i'+idx] = true;
         out.push({ idx, date: toLocalDateStr(new Date(c)), periodId: String(p.id||''), periodName: p.name||'', amount: amt });
       }
@@ -10988,6 +11106,7 @@ function holidayPremiumBlocks(w, fromIdx, toIdx) {
       if(toIdx != null && idx >= toIdx) continue;
       const ds = toLocalDateStr(cur);
       if(seen[ds] || seen['i'+idx]) continue; // 명절기간이 겹쳐 등록돼도 같은 날은 한 번만
+      if(offSet[idx]) continue; // 휴무일
       seen[ds] = true; seen['i'+idx] = true;
       out.push({ idx, date: ds, periodId: String(p.id||''), periodName: p.name||'', amount: amt });
     }
@@ -11471,6 +11590,12 @@ function calHpSplitNoteHtml(hp) {
   if(!hp) return '';
   return '<div style="font-size:11px;font-weight:700;color:#C2185B;margin-top:2px">🎉 명절할증 ' + Number(hp).toLocaleString() + '원은 별도 카드로 지급</div>';
 }
+// (26_10_14_01) 급여 카드용 휴무일 차감 안내
+function offDayNoteHtml(blocks, deducted) {
+  if(!blocks || !blocks.length) return '';
+  return '<div style="font-size:11px;font-weight:700;color:#5E35B1;margin-top:2px">🛌 휴무 ' + blocks.length + '일('
+    + blocks.map(b => String(b.date||'').slice(5).replace('-','/')).join(', ') + ') −' + Number(deducted||0).toLocaleString() + '원 차감</div>';
+}
 function holidayPremiumNoteHtml(amount, days, color) {
   if(!amount) return '';
   return '<div style="font-size:11px;font-weight:700;color:' + (color||'#C2185B') + ';margin-top:2px">🎉 명절할증 ' + days + '일 +' + Number(amount).toLocaleString() + '원 포함</div>';
@@ -11505,7 +11630,8 @@ function calcTotalPayAmount(cg) {
     otHour = Math.floor(remainMin / 60);
   }
 
-  return (payPerDay * days) + (otHour * OT_PER_HOUR) + holidayPremiumSum(holidayPremiumBlocks(cg));
+  const offCnt = offDayBlocks(cg).length; // (26_10_14_01) 휴무일 무급
+  return (payPerDay * Math.max(0, days - offCnt)) + (otHour * OT_PER_HOUR) + holidayPremiumSum(holidayPremiumBlocks(cg));
 }
 
 function calcTotalPay(cg) {
@@ -11546,7 +11672,9 @@ function calcTotalPay(cg) {
   const otPay  = otHour * OT_PER_HOUR;
   const hpBlocks = holidayPremiumBlocks(cg);
   const hpPay  = holidayPremiumSum(hpBlocks);
-  const total  = dayPay + otPay + hpPay;
+  const offBlocks = offDayBlocks(cg); // (26_10_14_01) 휴무일 무급
+  const offPay = payPerDay * Math.min(days, offBlocks.length);
+  const total  = dayPay - offPay + otPay + hpPay;
 
   let result = '';
   if(days > 0) {
@@ -11559,10 +11687,13 @@ function calcTotalPay(cg) {
     const otPayStr = otHour > 0 ? ' (+' + otPay.toLocaleString() + '원)' : '';
     result += (result ? '\n' : '') + 'OT ' + otStr + otPayStr;
   }
+  if(offPay > 0) {
+    result += (result ? '\n' : '') + '🛌 휴무 ' + offBlocks.length + '일 (−' + offPay.toLocaleString() + '원)';
+  }
   if(hpPay > 0) {
     result += (result ? '\n' : '') + '🎉 명절할증 ' + hpBlocks.length + '일 (+' + hpPay.toLocaleString() + '원)';
   }
-  if((otHour > 0 || hpPay > 0) && days > 0) {
+  if((otHour > 0 || hpPay > 0 || offPay > 0) && days > 0) {
     result += '\n합계: ' + total.toLocaleString() + '원';
   }
   return result;
@@ -11840,6 +11971,7 @@ function showCalDetail(dateStr, collectOnly) {
       var ptStr = pt ? ' (' + pt.name + ')' : (histFallback ? ' (' + (histFallback.patientName||'') + ')' : '');
       var reserveStr = p.isReserve ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">원래 지급일: ' + (p.payDate||p.endDate) + '</div>' : '';
       var advanceNoteStr = p.advanceDeducted ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">선지급 ' + p.advanceDeducted.toLocaleString() + '원 차감 (원래 ' + (p.originalAmount||0).toLocaleString() + '원)</div>' : '';
+      advanceNoteStr += offDayNoteHtml(p.offBlocks, p.offDeducted); // (26_10_14_01)
       // (26_09_30_07) 명절할증은 별도 카드로 분리 — 이 카드는 기본 급여만
       var hpSp = calHpSplit(p.amount, p.holidayPremium);
       var pBase = hpSp.hp > 0 ? Object.assign({}, p, { amount: hpSp.base, hpSeparate: true }) : p;
@@ -12049,6 +12181,7 @@ function showCalDetail(dateStr, collectOnly) {
       + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
       + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + fSp.base.toLocaleString() + '원</div>'
       + '<div style="font-size:11px;color:var(--gray);margin-top:2px">총 급여 ' + totalOwed.toLocaleString() + '원 − 기지급 ' + alreadyPaid.toLocaleString() + '원' + (fSp.hp > 0 ? ' − 명절할증 ' + fSp.hp.toLocaleString() + '원' : '') + '</div>'
+      + (function(){ var fo = offDayBlocks(cg); return fo.length ? '<div style="font-size:11px;color:#5E35B1;margin-top:2px">🛌 총 급여에 휴무 ' + fo.length + '일(' + fo.map(function(b){return b.date.slice(5).replace('-','/');}).join(', ') + ') 무급 반영됨</div>' : ''; })()
       + calHpSplitNoteHtml(fSp.hp)
       + bankHtml
       + reserveStr
@@ -12091,7 +12224,7 @@ function showCalDetail(dateStr, collectOnly) {
       if(typeof settleAmount !== 'number') {
         // settleAmount가 기록되지 않은 예전 이력: 아카이브된 값만으로 최대한 추정
         // (당시 선지급/차감 내역까지는 복원할 수 없어 추정치임을 함께 표시)
-        const virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
+        const virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime, offDays: cg.offDays };
         const totalOwed = calcTotalPayAmount(virtualCg);
         const alreadyPaidRegular = calcPayDates(virtualCg).reduce(function(sum,p){ return sum + (p.amount||0); }, 0);
         settleAmount = Math.max(0, totalOwed - alreadyPaidRegular);
@@ -12099,7 +12232,7 @@ function showCalDetail(dateStr, collectOnly) {
       } else {
         // 기록 당시의 명절할증분을 빼고 현재 명절기간 기준 할증분으로 다시 더함
         // (명절기간을 나중에 등록/수정/삭제해도 소급 반영되도록 — 예전 이력은 할증분 0원으로 간주)
-        const vcgHp = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
+        const vcgHp = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime, offDays: cg.offDays };
         settleAmount = Math.max(0, settleAmount - (Number(h.settleHolidayPremium)||0) + holidayFinalPartPremium(vcgHp).amount);
       }
       if(settleAmount <= 0) return;
@@ -12127,7 +12260,7 @@ function showCalDetail(dateStr, collectOnly) {
         : '';
       const bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
       // (26_09_30_07) 명절할증은 별도 카드로 분리
-      const vcgHf = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
+      const vcgHf = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime, offDays: cg.offDays };
       const hfHist = holidayFinalPartPremium(vcgHf);
       const hSp = calHpSplit(settleAmount, hfHist.amount);
       const estimateNote = isEstimate
@@ -12195,7 +12328,7 @@ function showCalDetail(dateStr, collectOnly) {
       // 세부 일정만 나중에 바뀐 경우)이면 이 이력은 낡은 스냅샷일 뿐이라 복구 대상에서 제외.
       var stillLiveSamePatient = !!cg.patientId && String(cg.patientId) === String(h.patientId) && cg.workStatus !== '종료';
       if(stillLiveSamePatient) return;
-      var virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
+      var virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime, offDays: cg.offDays }; // (26_10_14_01) 휴무일은 날짜로 그 기간 것만 반영됨
       calcPayDates(virtualCg).forEach(function(vp) {
         if(vp.date !== dateStr) return;
         // (26_10_07_01) 라이브 계산으로 같은 근무건(같은 시작일)·같은 지급일·같은 주차 카드가 이미
@@ -12228,6 +12361,7 @@ function showCalDetail(dateStr, collectOnly) {
           + '<div style="font-size:14px;font-weight:700">' + cg.name + ' (' + (h.patientName||'') + ')</div>'
           + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + (vpBase.amount||0).toLocaleString() + '원</div>'
           + calHpSplitNoteHtml(vSp.hp)
+          + offDayNoteHtml(vp.offBlocks, vp.offDeducted)
           + '<div style="font-size:11px;color:var(--gray);margin-top:2px">간병인이 이후 다른 환자로 재배정되어 현재 상태와는 어긋나 있어요</div>'
           + '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚠️ 선지급/차감 내역은 반영 안 된 금액이에요 — 실제 지급 여부는 별도로 확인해주세요</div>'
           + bankHtml
@@ -12827,12 +12961,15 @@ function calcPayDates(cg) {
     if(!payDate) return [];
     const adjusted = adjustPayDateToMonday(payDate);
     const wasAdjusted = toLocalDateStr(adjusted) !== toLocalDateStr(payDate);
-    const shortTotal = calcTotalPayAmount(cg); // 명절할증 포함
+    const shortTotal = calcTotalPayAmount(cg); // 명절할증 포함, 휴무일 차감
     const hpShort = shortTotal ? holidayPremiumBlocks(cg) : [];
+    const offShort = offDayBlocks(cg); // (26_10_14_01)
     results.push({
       date: toLocalDateStr(adjusted), label: '단기 급여',
       isReserve: wasAdjusted, endDate: toLocalDateStr(payDate),
-      amount: shortTotal || (payPerDay * totalDays), // 정산액과 일치시켜 최종정산 이중계산 방지
+      // 정산액과 일치시켜 최종정산 이중계산 방지. 휴무로 0원이 된 경우엔 일수×일급으로 되돌리지 않음
+      amount: (shortTotal || offShort.length) ? shortTotal : (payPerDay * totalDays),
+      offDays: offShort.length, offDeducted: payPerDay * offShort.length, offBlocks: offShort,
       holidayPremium: holidayPremiumSum(hpShort), holidayDays: hpShort.length, holidayBlocks: hpShort
     });
   } else {
@@ -12854,8 +12991,10 @@ function calcPayDates(cg) {
       // 이 주차에 해당하는 블록(시작일 기준 (week-1)*7 ~ week*7-1번째 날) 중 명절 할증 대상
       const hpWeek = payPerDay ? holidayPremiumBlocks(cg, (week-1)*7, week*7) : []; // 일급 미입력이면 할증도 없음 (총액 계산과 동일)
       const hpWeekAmt = holidayPremiumSum(hpWeek);
+      const offWeek = offDayBlocks(cg, (week-1)*7, week*7); // (26_10_14_01) 이 주차 휴무일
       results.push({ date: adjustedStr, payDate: dateStr, label: `${week}주차 주급`, isReserve: wasAdjusted, week,
-        amount: payPerDay * 7 + hpWeekAmt, // 간병비(일급) × 7일치 + 명절할증
+        amount: payPerDay * (7 - offWeek.length) + hpWeekAmt, // 간병비(일급) × (7일 − 휴무일) + 명절할증
+        offDays: offWeek.length, offDeducted: payPerDay * offWeek.length, offBlocks: offWeek,
         holidayPremium: hpWeekAmt, holidayDays: hpWeek.length, holidayBlocks: hpWeek
       });
       cur.setDate(cur.getDate() + 7);
@@ -12949,8 +13088,22 @@ function buildExpenseMemo(cg, pt, payEntry) {
   const endStr   = fmtMD(rangeEnd, rangeEndTime);
   if(!/^최종/.test(payEntry.label || '')) hpDaysMemo = payEntry.holidayDays || 0;
   const hpMemo = (!payEntry.hpSeparate && hpDaysMemo > 0) ? ', 명절할증 ' + hpDaysMemo + '일 포함' : ''; // hpSeparate: 대시보드에서 명절할증을 별도 카드로 뺀 경우
+  const offMemo = offDayMemoText(payEntry, cg); // (26_10_14_01) 휴무일 제외 표시
 
-  return `${ptName}_${hospital} 간병인(${cgName}) 간병비 지급\n${startStr} ~ ${endStr} 총 ${totalDays}일 ${amount.toLocaleString()}원(${reasonLabel}${hpMemo})`;
+  return `${ptName}_${hospital} 간병인(${cgName}) 간병비 지급\n${startStr} ~ ${endStr} 총 ${totalDays}일 ${amount.toLocaleString()}원(${reasonLabel}${hpMemo}${offMemo})`;
+}
+
+// (26_10_14_01) 지출내용 메모용 휴무일 문구. 정규/단기는 그 지급건의 휴무일, 최종정산은 정규 지급건에 안 들어간 나머지
+function offDayMemoText(payEntry, w) {
+  if(!payEntry) return '';
+  let n = 0;
+  if(/^최종/.test(payEntry.label || '')) {
+    const all = offDayBlocks(w).length;
+    if(all) n = Math.max(0, all - calcPayDates(w).reduce((s,p)=>s+(p.offDays||0), 0));
+  } else if(payEntry.label !== '현장취소') {
+    n = payEntry.offDays || 0;
+  }
+  return n > 0 ? ', 휴무 ' + n + '일 제외' : '';
 }
 
 // ── assignHistory 복구 급여 카드용 지출내용 생성 ──
@@ -12989,7 +13142,7 @@ function buildExpenseMemoFromHistory(cg, h, payEntry) {
     reasonLabel = (pt && pt.endReason) ? pt.endReason : '퇴실';
   } else if(/^최종/.test(payEntry.label || '')) {
     // 최종 정산(이력복구): 이력에 남은 기간으로 마지막 완료 주차를 다시 계산
-    const virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
+    const virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime, offDays: cg.offDays };
     const allDates = calcPayDates(virtualCg).filter(d=>d.week);
     const lastWeekEntry = allDates.sort((a,b)=>b.week-a.week)[0];
     rangeStart     = lastWeekEntry ? (lastWeekEntry.payDate||lastWeekEntry.date) : h.startDate;
@@ -13021,8 +13174,9 @@ function buildExpenseMemoFromHistory(cg, h, payEntry) {
   const endStr   = fmtMD(rangeEnd, rangeEndTime);
   if(!/^최종/.test(payEntry.label || '')) hpDaysMemo = payEntry.holidayDays || 0;
   const hpMemo = (!payEntry.hpSeparate && hpDaysMemo > 0) ? ', 명절할증 ' + hpDaysMemo + '일 포함' : ''; // hpSeparate: 대시보드에서 명절할증을 별도 카드로 뺀 경우
+  const offMemo = offDayMemoText(payEntry, { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime, offDays: cg.offDays }); // (26_10_14_01) 휴무일 제외 표시
 
-  return `${ptName}_${hospital} 간병인(${cgName}) 간병비 지급\n${startStr} ~ ${endStr} 총 ${totalDays}일 ${amount.toLocaleString()}원(${reasonLabel}${hpMemo})`;
+  return `${ptName}_${hospital} 간병인(${cgName}) 간병비 지급\n${startStr} ~ ${endStr} 총 ${totalDays}일 ${amount.toLocaleString()}원(${reasonLabel}${hpMemo}${offMemo})`;
 }
 
 
@@ -13103,7 +13257,7 @@ function hpCollectWorks() {
       // 같은 환자와 아직 매칭이 이어지는 중이면 이 이력은 낡은 스냅샷 (캘린더 이력복구와 같은 기준)
       const stillLiveSamePatient = !!cg.patientId && String(cg.patientId) === String(h.patientId) && cg.workStatus !== '종료';
       if(stillLiveSamePatient) return;
-      const w = { pay: h.pay, startDate: h.startDate, startTime: h.startTime||'', endDate: h.endDate||'', endTime: h.endTime||'' };
+      const w = { pay: h.pay, startDate: h.startDate, startTime: h.startTime||'', endDate: h.endDate||'', endTime: h.endTime||'', offDays: cg.offDays };
       out.push({ cg, live: false, calcObj: w,
         patientId: String(h.patientId), ptName: h.patientName||'', hospital: h.hospital||'',
         pay: h.pay, startDate: h.startDate, startTime: h.startTime||'', endDate: h.endDate||'', endTime: h.endTime||'' });
