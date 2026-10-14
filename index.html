@@ -2328,7 +2328,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_14_03';
+const APP_BUILD = '26_10_14_04';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -4385,6 +4385,7 @@ function savePatientEdit(id) {
   const newEndTime = document.getElementById('ep-endTime')?.value || '';
 
   if(newEndDate) {
+    rememberPlannedEnd(p, newEndDate, newEndTime || p.startTime || ''); // (26_10_14_04) 종료된 환자 종료일 앞당김 → 원래 마감 보관
     // 종료일이 직접 입력됨 → 이걸 기준으로 기간 재계산 (시작일/시간 건드리지 않음)
     p.endDate = newEndDate;
     // 종료시간을 비워두면 입실시간과 동일하게 (간병 일급 24시간 단위 관례) — 26_09_30_05
@@ -4612,22 +4613,10 @@ function confirmEndPatient(id) {
   // 종료시간을 비우면 입실시간 (간병 24시간 단위 관례) — 환자·간병인 모두 같은 값으로 저장
   const finalEndTime = endTime || p.startTime || '';
 
-  // (26_10_14_03) 재입실용 "원래 마감일" 보관 — 아래 recalcDuration()이 p.endDate를 실제 퇴실일로
-  // 덮어쓰므로, 예정 마감보다 일찍 퇴실하는 경우 덮어쓰기 전 마감일시를 따로 남겨둠.
-  // (잠깐 퇴실 후 재입실하면 업체 방식대로 새 매칭으로 잡되 마감일은 이 값 그대로 씀)
-  if(!wasEnded) {
+  // (26_10_14_04) 재입실용 "원래 마감일" 보관 — 처음 종료든, 이미 종료된 건(자동종료 포함)의 종료일을 앞당기는 경우든
+  {
     const _actCg = caregivers.find(c=>String(c.patientId)===String(id) && c.workStatus !== '종료');
-    const planEd = p.endDate || (_actCg && _actCg.endDate) || '';
-    const planEt = (p.endDate ? p.endTime : (_actCg && _actCg.endTime)) || p.startTime || '';
-    const newEndDt  = calcEndDt(endDate, finalEndTime);
-    const planEndDt = calcEndDt(planEd, planEt);
-    if(planEndDt && newEndDt && newEndDt < planEndDt) {
-      p._plannedEndDate = planEd;
-      p._plannedEndTime = planEt;
-    } else {
-      delete p._plannedEndDate;
-      delete p._plannedEndTime;
-    }
+    rememberPlannedEnd(p, endDate, finalEndTime, true, _actCg);
   }
 
   // 상태 변경
@@ -6993,9 +6982,33 @@ function ptIfFinalWorkPeriod(cgId, ptId, startDate) {
   const per = findPtFinalPeriod(pt, pt.endDate, pt.endTime || '', true);
   return (per && String(per.cg.id) === String(cgId) && per.startDate === startDate) ? pt : null;
 }
+// (26_10_14_04) 재입실용 원래 마감일 기억 — 환자 종료일시가 "앞당겨지는" 모든 경로에서 호출.
+// 지금까지 기록된 가장 늦은 마감(보관된 원래 마감 vs 현재 마감)보다 새 종료가 빠르면 그 마감을 원래 마감으로 남김.
+// (26_10_14_03은 근무중→종료 첫 종료 때만 남겨서, 자동종료된 뒤 종료일을 고치거나 간병인/환자 수정 화면에서
+//  고친 경우 원래 마감일이 사라졌음 → 재입실 화면에 마감일이 비어서 나옴)
+// force=false면 종료된 환자에만 적용 (근무중 환자의 마감 단축은 퇴실이 아니므로 제외)
+function rememberPlannedEnd(p, newEd, newEt, force, fallbackCg) {
+  if(!p || !newEd) return;
+  if(!force && p.status !== '종료') return;
+  const curEd = p.endDate || (fallbackCg && fallbackCg.endDate) || '';
+  const curEt = (p.endDate ? p.endTime : (fallbackCg && fallbackCg.endTime)) || p.startTime || '';
+  const nw   = calcEndDt(newEd, newEt || p.startTime || '');
+  const cur  = calcEndDt(curEd, curEt);
+  const plan = p._plannedEndDate ? calcEndDt(p._plannedEndDate, p._plannedEndTime || p.startTime || '') : null;
+  if(!nw) return;
+  if(cur && nw < cur && (!plan || cur > plan)) {
+    p._plannedEndDate = curEd;
+    p._plannedEndTime = curEt;
+  } else if(plan && nw >= plan) {
+    delete p._plannedEndDate; // 원래 마감 이후로 종료 → 퇴실 아님
+    delete p._plannedEndTime;
+  }
+}
+
 function setPtEndFromCg(pt, newEndDate, newEndTime) {
   if(!pt || !newEndDate) return false;
   if(pt.endDate === newEndDate && _endT(pt.endTime) === _endT(newEndTime)) return false;
+  rememberPlannedEnd(pt, newEndDate, newEndTime);
   pt.endDate = newEndDate;
   pt.endTime = newEndTime || '';
   recalcDuration(pt, newEndDate);
@@ -7459,7 +7472,15 @@ function reEntryCandidateCg(p) {
   const pick = hist.find(x => !x.cancelled);
   if(!pick) return { cg: null, reason: '' };
   const cg = pick.cg;
-  if(cg.workStatus !== '종료' || String(cg.patientId||'') !== String(p.id))
+  // (26_10_14_04) 자동종료·종료 처리되면 간병인 patientId가 비워지는 경로가 많아서(checkAutoEnd 등),
+  // "patientId가 이 환자"만 보던 26_10_14_03 조건으로는 연결 후보가 안 나왔음.
+  // → 지금 근무중/대기중이 아니고, 다른 환자에 연결돼 있지 않고, 가장 최근 근무건이 이 환자면 연결 가능
+  const periods = getAssignPeriods(cg);
+  const latest = periods.length ? periods[periods.length - 1] : null;
+  const busy = cg.workStatus === '근무중' || cg.workStatus === '대기중';
+  const linkedElse = cg.patientId && String(cg.patientId) !== String(p.id);
+  const movedOn = latest && String(latest.patientId) !== String(p.id);
+  if(busy || linkedElse || movedOn)
     return { cg: null, reason: `마지막 담당 ${cg.name} 님은 이미 다른 근무로 넘어가 있어서 바로 연결할 수 없어요` };
   return { cg, reason: '' };
 }
@@ -7482,7 +7503,7 @@ function openReEntry(ptId) {
       퇴실: <b style="color:var(--black)">${p.endDate||'—'} ${p.endTime||''}</b>
       ${hasPlan ? ` · 원래 마감: <b style="color:var(--black)">${ed} ${et}</b>` : ''}
     </div>
-    ${hasPlan ? '' : `<div style="background:var(--amber-lt,#FFF4E5);border-radius:var(--rsm);padding:8px 12px;font-size:12px;color:var(--amber);margin-bottom:.875rem">⚠️ 원래 마감일 기록이 없어요 (예정 마감일에 종료됐거나 이 기능 이전에 종료된 건). 업체와 맞춘 마감일을 직접 입력해주세요.</div>`}
+    ${hasPlan ? '' : `<div style="background:var(--amber-lt,#FFF4E5);border-radius:var(--rsm);padding:8px 12px;font-size:12px;color:var(--amber);margin-bottom:.875rem">⚠️ 원래 마감일 기록이 없어요 — 26_10_14_04 이전에 종료일을 고친 건이에요. 업체와 맞춘 원래 마감일(예: 10/14)을 직접 입력해주세요. 앞으로는 종료일을 어디서 앞당기든 자동으로 채워져요.</div>`}
     <div class="g2">
       <div class="field"><label>재입실일 <span class="req">*</span></label><input type="date" id="re-sd" value="${toLocalDateStr(now)}" oninput="reEntryPreview('${id}')"></div>
       <div class="field"><label>재입실시간 <span class="req">*</span></label><input type="time" id="re-st" value="${now.toTimeString().slice(0,5)}" oninput="reEntryPreview('${id}')"></div>
