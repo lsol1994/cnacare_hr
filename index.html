@@ -2332,7 +2332,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_14_07';
+const APP_BUILD = '26_10_14_08';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3697,7 +3697,16 @@ function applyVendorMessageToForm() {
   if(p.startDate) document.getElementById('p-start-date').value = p.startDate;
   if(p.startTime) document.getElementById('p-start-time').value = p.startTime;
   if(p.pay) document.getElementById('p-pay').value = p.pay;
-  if(p.request) document.getElementById('p-request').value = p.request;
+  // 업체 메시지의 요청사항은 단톡방 발송 공고에 노출되지 않도록 "요청사항" 칸이 아니라
+  // 협회 메모(내부 참고용)에 넣음. 이미 적어둔 메모가 있으면 지우지 않고 아래에 덧붙임
+  if(p.request) {
+    const memoEl = document.getElementById('p-memo');
+    if(memoEl) {
+      const line = '요청사항: ' + p.request;
+      const cur = memoEl.value.trim();
+      if(!cur.includes(line)) memoEl.value = cur ? cur + '\n' + line : line;
+    }
+  }
   if(p.duration) {
     const sel = document.getElementById('p-duration-sel');
     const inp = document.getElementById('p-duration');
