@@ -2347,7 +2347,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_14_09';
+const APP_BUILD = '26_10_15_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -9517,7 +9517,7 @@ const MANUAL_SECTIONS = [
 <img class="manual-img" src="${MANUAL_IMG.img26}" alt="출퇴근 체크">
 <div class="manual-sub-title">배상보험 현황</div>
 <p class="manual-p">전체 / 가입전 / 가입 / 만료 상태로 필터링해서 배상보험 가입 현황을 관리합니다. 가입전인 간병인은 근무 시작일이 되면 가입 알림이, 가입된 간병인은 서비스 마감일이 다가오면(설정의 사전 알림 일수) 해지 신고 알림이 뜹니다 — 보험 해지는 <b>서비스 마감일 +1일</b>로 신고하세요. 만료 이력은 연도·월로 검색할 수 있습니다.</p>
-<p class="manual-p">"📄 보험사 등록내역" 탭에서 보험사 사이트의 <b>등록된_전문인내역.xls</b>를 업로드하면, 파일을 기준으로 간병인(생년월일·이름)과 가입일 당시 담당 환자가 자동 매칭되어 배상보험 현황(현재 건·과거 이력)에 바로 반영됩니다. 이미 등록돼 있던 같은 보험 건은 하나로 합쳐져 중복되지 않습니다. 간병인을 못 찾았거나 가입일에 담당 환자가 없는 건은 "확인 필요"에 따로 모이며(가입전·가입·만료에는 나오지 않음), [수정]에서 간병인·가입일·환자를 맞추면 매칭 완료로 옮겨지고 현황에 반영됩니다.</p>
+<p class="manual-p">"📄 보험사 등록내역" 탭에서 보험사 사이트의 <b>등록된_전문인내역.xls</b>를 업로드하면, 파일을 기준으로 간병인(생년월일·이름)과 가입일 당시 담당 환자가 자동 매칭되어 배상보험 현황(현재 건·과거 이력)에 바로 반영됩니다. 이미 등록돼 있던 같은 보험 건은 하나로 합쳐져 중복되지 않습니다. 간병인을 못 찾았거나 가입일에 담당 환자가 없는 건은 "확인 필요"에 따로 모이며(가입전·가입·만료에는 나오지 않음), [수정]에서 간병인·가입일·환자를 맞추면 매칭 완료로 옮겨지고 현황에 반영됩니다. 잘못 가입된 이력처럼 수정할 수 없는 건은 [확인완료]를 누르면 확인 필요에서 빠지고(현황에는 반영 안 됨), 아래 '확인완료' 목록에서 [되돌리기]로 다시 살릴 수 있습니다.</p>
 <img class="manual-img" src="${MANUAL_IMG.img27}" alt="배상보험 현황">
 <div class="manual-sub-title">중도 종료 — 재모집 / 완전종료</div>
 <p class="manual-p">근무 중인 간병인이 예정보다 일찍 그만두는 경우 사용합니다. 카드의 "중도종료" 버튼을 누르면 종료 유형을 선택하는 팝업이 뜹니다. 🔄 재모집(환자는 "모집중"으로 돌아가고 이전 담당 간병인 이름·종료 사유가 재모집 이력에 남으며, 새 간병인이 매칭되면 교체 보고가 자동 작성됨) 또는 🚫 완전 종료(환자와 간병인이 모두 "종료" 상태로 함께 처리됨) 중에서 선택합니다.</p>
@@ -15150,10 +15150,13 @@ function insPeriodPatient(cg, period) {
 }
 
 function insGetFix(r) { return (cfg.insRowFix && cfg.insRowFix[insFixKey(r)]) || null; }
+// 확인완료 처리 정보(cfg.insRowDone) — { at:'YYYY-MM-DD HH:MM', memo:'' }
+function insGetDone(r) { return (cfg.insRowDone && cfg.insRowDone[insFixKey(r)]) || null; }
 
 // 등록내역 1행 → { row, cg, how, date, period, patientName, hospital, candidates, state }
 // how: manual(직접 지정) / auto(생년월일+이름) / birth(생년월일만) / name(이름만)
 // state: ok(매칭 완료) / void(가입일=해지일 정정건, 반영 제외) / nocg(간병인 못 찾음) / noperiod(가입일에 담당 환자 없음)
+//        checked(확인 필요였지만 '확인완료' 처리됨 — 반영 제외)
 function insMatchRosterRow(r) {
   const names = insRowNames(r.n);
   const fix = insGetFix(r);
@@ -15184,8 +15187,11 @@ function insMatchRosterRow(r) {
     if(!period) period = insPickPeriod(cg, date);
   }
   const pi = insPeriodPatient(cg, period);
-  const state = (r.e && r.e === r.s) ? 'void' : !cg ? 'nocg' : !period ? 'noperiod' : 'ok';
-  return { row: r, cg, how, date, period, patientName: pi.name, hospital: pi.hospital, candidates, state, fixed: !!fix };
+  let state = (r.e && r.e === r.s) ? 'void' : !cg ? 'nocg' : !period ? 'noperiod' : 'ok';
+  // 확인완료(잘못 가입된 이력 등 수정 불가 건) → 확인 필요에서 빼고, 현황에도 반영하지 않음
+  const done = insGetDone(r);
+  if(done && (state === 'nocg' || state === 'noperiod')) state = 'checked';
+  return { row: r, cg, how, date, period, patientName: pi.name, hospital: pi.hospital, candidates, state, fixed: !!fix, done };
 }
 
 function insRosterRows() {
@@ -15518,6 +15524,7 @@ function renderInsRoster(el) {
   const tgts = insBuildTargets(); // 연속 재배정으로 이어진 근무건 표시용
   const check = all.filter(m => m.state === 'nocg' || m.state === 'noperiod').sort((a,b) => b.row.s.localeCompare(a.row.s));
   const done  = all.filter(m => m.state === 'ok' || m.state === 'void');
+  const checked = all.filter(m => m.state === 'checked').sort((a,b) => b.row.s.localeCompare(a.row.s));
   refreshInsRosterTabLabel(check.length);
   const months = [...new Set(done.map(m => m.row.s.slice(0,7)))].sort((a,b) => b.localeCompare(a));
   if(insRosterMonth && !months.includes(insRosterMonth)) insRosterMonth = '';
@@ -15545,7 +15552,21 @@ function renderInsRoster(el) {
         <div style="font-size:12px;margin-top:3px">→ ${why}</div>
         ${m.cg ? `<div style="font-size:11px;color:var(--gray);margin-top:2px">담당 이력: ${periods.length ? periods.map(p => insEsc(insPeriodPatient(m.cg,p).name||'?')+' '+p.startDate.slice(5)+'~'+(p.endDate?p.endDate.slice(5):'진행중')).join(' / ') : '없음'}</div>` : ''}
       </div>
-      <button class="btn btn-sm btn-teal" style="font-size:11px;padding:3px 10px" onclick="openInsRosterFix('${insKeyArg(r)}')">✏ 수정</button>
+      <span style="display:flex;gap:5px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-teal" style="font-size:11px;padding:3px 10px" onclick="openInsRosterFix('${insKeyArg(r)}')">✏ 수정</button>
+        <button class="btn btn-sm" style="font-size:11px;padding:3px 10px" onclick="markInsRosterDone('${insKeyArg(r)}')" title="잘못 가입된 이력 등 수정할 수 없는 건 — 확인 필요에서 빼고 현황에는 반영하지 않아요">✔ 확인완료</button>
+      </span>
+    </div>`;
+  }).join('');
+
+  const checkedHtml = checked.map(m => {
+    const r = m.row;
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;opacity:.75">
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">${head(r)}</div>
+        <div style="font-size:11px;color:var(--gray);margin-top:3px">${m.cg ? '<b>' + insEsc(m.cg.name) + '</b> · 가입일에 담당 환자 없음' : '간병인 못 찾음'} · ✔ ${insEsc(m.done.at||'')} 확인완료${m.done.memo ? ' — <span style="color:var(--black)">' + insEsc(m.done.memo) + '</span>' : ''}</div>
+      </div>
+      <button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="undoInsRosterDone('${insKeyArg(r)}')">되돌리기</button>
     </div>`;
   }).join('');
 
@@ -15576,9 +15597,13 @@ function renderInsRoster(el) {
     </div>
     <div style="border:1px solid ${check.length?'#dc262655':'var(--border)'};border-radius:var(--rsm);padding:8px 12px;margin-bottom:14px;background:${check.length?'#dc262608':'transparent'}">
       <div style="font-size:13px;font-weight:700;color:${check.length?'#dc2626':'var(--gray)'}">⚠ 확인 필요 ${check.length}건</div>
-      <div style="font-size:11px;color:var(--gray);margin:2px 0 4px">간병인을 못 찾았거나 가입일에 담당한 환자가 없는 건이에요. 현황(가입전·가입·만료)에는 반영되지 않고, [수정]으로 간병인·가입일·환자를 맞추면 아래 매칭 완료로 옮겨져 바로 반영돼요.</div>
+      <div style="font-size:11px;color:var(--gray);margin:2px 0 4px">간병인을 못 찾았거나 가입일에 담당한 환자가 없는 건이에요. 현황(가입전·가입·만료)에는 반영되지 않고, [수정]으로 간병인·가입일·환자를 맞추면 아래 매칭 완료로 옮겨져 바로 반영돼요. 잘못 가입된 이력처럼 수정할 수 없는 건은 [확인완료]를 누르면 여기서 빠져요.</div>
       ${check.length ? checkHtml : '<div style="font-size:12px;color:var(--gray-lt);padding:4px 0">모두 매칭됐어요 👍</div>'}
     </div>
+    ${checked.length ? `<details style="border:1px solid var(--border);border-radius:var(--rsm);padding:8px 12px;margin-bottom:14px">
+      <summary style="font-size:13px;font-weight:700;color:var(--gray);cursor:pointer">✔ 확인완료 ${checked.length}건 <span style="font-size:11px;font-weight:400">(잘못 가입된 이력 등 — 현황에 반영 안 함)</span></summary>
+      ${checkedHtml}
+    </details>` : ''}
     <div style="border:1px solid var(--border);border-radius:var(--rsm);padding:8px 12px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <div style="font-size:13px;font-weight:700;color:var(--teal)">✅ 매칭 완료 · 현황 반영됨 ${done.filter(m=>m.state==='ok').length}건</div>
@@ -15695,6 +15720,29 @@ function clearInsRosterFix(rowKeyArg) {
   toast('수정을 취소하고 자동 매칭으로 되돌렸어요');
 }
 
+// 확인완료: 잘못 가입된 이력 등 수정할 수 없는 확인 필요 건 → 확인 필요 목록·배지·현황 보류에서 제외
+function markInsRosterDone(rowKeyArg) {
+  const rowKey = decodeURIComponent(rowKeyArg);
+  const r = insRosterRows().find(x => insRowKey(x) === rowKey);
+  if(!r) return;
+  const memo = prompt(`${r.n} (${r.s} ~ ${r.e||'가입중'})\n\n확인완료 처리할까요? 확인 필요에 더 이상 표시되지 않고, 배상보험 현황에도 반영되지 않아요.\n\n메모 (선택, 예: 잘못 가입된 건):`, '잘못 가입된 건');
+  if(memo === null) return;
+  if(!cfg.insRowDone || typeof cfg.insRowDone !== 'object') cfg.insRowDone = {};
+  cfg.insRowDone[insFixKey(r)] = { at: todayStr() + ' ' + new Date().toTimeString().slice(0,5), memo: String(memo).trim().slice(0,100) };
+  markCfgEdited(); save(); renderInsurance();
+  toast('✔ 확인완료 처리했어요');
+}
+
+function undoInsRosterDone(rowKeyArg) {
+  const rowKey = decodeURIComponent(rowKeyArg);
+  const r = insRosterRows().find(x => insRowKey(x) === rowKey);
+  if(!r) return;
+  if(!confirm(`${r.n} (${r.s} ~ ${r.e||'가입중'})\n확인완료를 되돌려서 다시 확인 필요에 표시할까요?`)) return;
+  if(cfg.insRowDone) delete cfg.insRowDone[insFixKey(r)];
+  markCfgEdited(); save(); renderInsurance();
+  toast('확인 필요로 되돌렸어요');
+}
+
 function clearInsRoster() {
   if(!confirm('업로드된 전문인내역을 비울까요?\n(배상보험 현황에 이미 반영된 내용과 수정·연결 정보는 그대로 남아요)')) return;
   cfg.insRoster = { uploadedAt:'', fileName:'', rows:[] };
@@ -15708,7 +15756,7 @@ function downloadInsRosterXLSX() {
     .filter(m => !insRosterMonth || m.row.s.slice(0,7) === insRosterMonth || (m.row.e && m.row.e.slice(0,7) === insRosterMonth));
   if(!rows.length) { toast('내보낼 내역이 없어요', true); return; }
   const tgts = insBuildTargets();
-  const stTxt = { ok:'매칭 완료', void:'당일해지(정정)', nocg:'확인 필요(간병인 없음)', noperiod:'확인 필요(담당 환자 없음)' };
+  const stTxt = { ok:'매칭 완료', void:'당일해지(정정)', nocg:'확인 필요(간병인 없음)', noperiod:'확인 필요(담당 환자 없음)', checked:'확인완료(반영 제외)' };
   const aoa = [['가입일','해지일','이름(보험사)','생년월일','성별','간병인','해당시점 환자','병원','담당기간','상태','이어진 근무건(연속 재배정)']];
   rows.forEach(m => aoa.push([
     m.date, m.row.e||'', m.row.n, m.row.b, m.row.g,
