@@ -2347,7 +2347,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_15_01';
+const APP_BUILD = '26_10_16_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3154,6 +3154,7 @@ function attachFirebaseListener() {
         migrateInsuranceDataOnce(); // 배상보험 이력 관리 도입 전 낡은 데이터 1회성 정리
         migrateReserveStatusOnce(); // 예비 상태 도입 전 낡은 데이터 1회성 정리
         migrateOffDutyStatusOnce(); // 휴무 상태 폐기 — 기존 '휴무' 레코드를 예비로 편입
+        migrateInsHistoryExpiry(); // 과거 보험 이력 만료일 자동작성·만료처리 정리 (2026-10-16)
         setTimeout(autoFillAllAttendance, 1000);
       } catch(e) { console.warn('렌더 오류:', e); }
     } else {
@@ -14632,6 +14633,58 @@ function insFindCarrySource(cg) {
   return src;
 }
 
+// ── 과거 근무건 보험 이력: 만료일 자동작성 / 만료처리 정리 (2026-10-16) ──
+// 근무가 끝난 건의 보험 기록에 만료일이 비어 있으면 "서비스 마감일 + 1일"(=해지 신고일)로 채움.
+// 마감일은 이력에 저장된 담당기간(coverTo) → 그 환자의 최근 근무이력(assignHistory) 종료일 순으로 찾음.
+// 보험사 전문인내역(rosterPeriod)으로 맞춘 건은 등록내역이 기준이라 만료일을 임의로 채우지 않음.
+function insAutoExpiryFor(cg, h) {
+  if(!h) return '';
+  if(h.expiry) return h.expiry;
+  if(h.continued || h.rosterPeriod) return '';
+  let endD = h.coverTo || '';
+  if(!endD && h.patientId) { const ah = insLatestAssignFor(cg, h.patientId); endD = ah ? (ah.endDate||'') : ''; }
+  if(!endD && h.patientName) {
+    const ah = (cg.assignHistory||[]).filter(a => a.patientName === h.patientName && a.endDate)
+      .sort((a,b) => (b.endDate||'').localeCompare(a.endDate||''))[0];
+    endD = ah ? ah.endDate : '';
+  }
+  if(!endD) return '';
+  const exp = insAddDays(endD, 1);
+  return (exp && exp <= todayStr()) ? exp : ''; // 아직 마감 전이면 채우지 않음
+}
+// 담당 환자 없는(종료) 간병인: 현재 보험 칸이 비어 있으면, 과거 이력 중 가장 최근 보험 건을 "현재 표시용"으로 사용
+// (예전엔 근무가 끝나면 현재 칸이 초기화돼서 실제로는 가입했다 만료된 건인데 '❌ 미가입/가입전'으로 보였음)
+function insLastEntry(c) {
+  if(c.patientId) return null;
+  if(c.insuranceActive || c.insuranceStartDate || c.insuranceExpiry) return null;
+  const list = insSortedHistory(c).filter(h => !h.continued && (h.active || h.startDate || h.expiry));
+  return list[0] || null;
+}
+// 과거 이력 전체 정리 (직접 추가/수정한 이력 포함) — 조건이 자기제한적이라 매 세션 재실행해도 안전
+//  ① 가입일이 있는데 '미가입'으로 남은 건 → 가입
+//  ② 만료일이 비어 있으면 서비스 마감일+1일로 자동작성
+//  ③ 만료일이 지났는데 만료처리 안 된 건 → 만료처리 완료
+//  ※ 다음 근무건으로 이어진 건(continued), 연속 재배정 대기 중인 직전 근무건(아직 해지 전)은 건드리지 않음
+function migrateInsHistoryExpiry() {
+  const today = todayStr();
+  let changed = false;
+  caregivers.forEach(cg => {
+    if(!cg.insuranceHistory || !cg.insuranceHistory.length) return;
+    const carry = !cg.patientId ? insFindCarrySource(cg) : null;
+    let touched = false;
+    cg.insuranceHistory.forEach(h => {
+      if(!h || h.continued || h === carry) return;
+      if(!h.active && h.startDate) { h.active = true; touched = true; }
+      if(!h.active) return;
+      if(!h.expiry) { const ex = insAutoExpiryFor(cg, h); if(ex) { h.expiry = ex; touched = true; } }
+      if(h.expiry && h.expiry < today && !h.terminated) { h.terminated = true; touched = true; }
+    });
+    if(touched) { markCgEdited(cg.id); changed = true; } // Firebase 덮어쓰기 방지 (2분)
+  });
+  if(changed) save();
+  return changed;
+}
+
 // 배상보험 이력 관리 도입 전 데이터 정리(1회성): 이미 새 환자로 매칭되어 있는데
 // insurancePatientId가 없는(이 필드 도입 전) 예전 데이터 중, 현재 근무 중/시작 예정인데
 // (=종료 아닌데) 보험이 "만료처리 완료" 또는 이미 지난 만료일로 남아있으면, 이건 예전
@@ -14868,6 +14921,12 @@ function renderInsurance() {
 
   // 간병인별 보험 상태 분류
   function getInsStatus(c) {
+    // 종료(담당 환자 없음) + 현재 칸 비어있음 → 마지막 보험 이력 기준 (미가입으로 보이지 않게)
+    const L = insLastEntry(c);
+    if(L) {
+      const ex = insAutoExpiryFor(c, L);
+      return (L.terminated || (ex && parseLocalDate(ex) < today)) ? 'expired' : 'active';
+    }
     if(!c.insuranceActive) return 'none'; // 가입전
     if(c.insuranceTerminated) return 'expired'; // 만료처리 완료
     if(!c.insuranceExpiry) return 'active'; // 가입 (만료일 미입력)
@@ -14898,6 +14957,31 @@ function renderInsurance() {
   }
 
   el.innerHTML = list.map(c=>{
+    // 종료(담당 환자 없음)인데 현재 칸이 비어 있으면 → 마지막 보험 건(과거 이력)을 현재 줄에 표시하고, 나머지만 과거 이력으로
+    const L = insLastEntry(c);
+    const openSrc = !c.patientId ? insFindCarrySource(c) : null;
+    if(L) {
+      const lExp = insAutoExpiryFor(c, L);
+      const lExpD = lExp ? parseLocalDate(lExp) : null;
+      if(lExpD) lExpD.setHours(0,0,0,0);
+      const lDiff = lExpD ? Math.ceil((lExpD-today)/(1000*60*60*24)) : null;
+      const lOpen = !!(openSrc && String(openSrc.id) === String(L.id));
+      const lDone = L.terminated || (lDiff !== null && lDiff < 0);
+      const lColor = lOpen ? 'var(--amber)' : lDone ? 'var(--gray)' : lDiff===null ? 'var(--gray)' : lDiff <= 3 ? 'var(--amber)' : 'var(--green)';
+      const lTxt = lOpen ? '가입중 (미해지)'
+        : lDone ? `만료처리 완료${lExp?' ('+lExp+')':''}`
+        : lDiff===null ? '만료일 미입력'
+        : lDiff === 0 ? '오늘 만료' : `D-${lDiff}`;
+      const rest = insSortedHistory(c).filter(h => String(h.id) !== String(L.id));
+      return insRowHtml(c, {
+        insHold, curPt: null, openSrc,
+        title: `${insHold.has(String(c.id))?'<span class="badge" style="font-size:10px;background:#dc262622;color:#dc2626;border:1px solid #dc262644;margin-right:4px">확인 필요</span>':''}${c.name}${L.patientName?` <span style="font-weight:400;color:var(--gray);font-size:11px">— 마지막 근무건: ${insEsc(L.patientName)}</span>`:''}`,
+        line: `✅ 가입${L.startDate?' · 가입일 '+L.startDate:''}${lExp?' · 만료 '+lExp:''}${(L.coverFrom||L.coverTo)?` <span style="color:var(--gray-lt)">· 담당 ${L.coverFrom||'?'}~${L.coverTo||'?'}</span>`:''}`,
+        extra: L.carried ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 연속 재배정 — 이전 근무건 보험을 해지 없이 이어서 유지했던 건 (가입일 ${L.startDate||'?'})</div>` : '',
+        memo: L.memo, statusColor: lColor, statusTxt: lTxt, termBox: '',
+        editCall: `editInsuranceHistory('${c.id}','${L.id}')`, hist: rest,
+      });
+    }
     const exp = c.insuranceExpiry ? parseLocalDate(c.insuranceExpiry) : null;
     if(exp) exp.setHours(0,0,0,0);
     const diff = exp ? Math.ceil((exp-today)/(1000*60*60*24)) : null;
@@ -14914,36 +14998,49 @@ function renderInsurance() {
       : diff < 0  ? `만료됨 (${Math.abs(diff)}일 전)`
       : diff === 0 ? '오늘 만료'
       : `D-${diff}`;
-    const histCount = (c.insuranceHistory||[]).length;
     const curPt = c.patientId ? patients.find(p=>String(p.id)===String(c.patientId)) : null;
-    // 담당 환자 없이(종료) 직전 근무건 보험이 아직 해지 안 된 채 남아있으면 표시 (연속 재배정 대기 / 해지 신고 필요)
-    const openSrc = !c.patientId ? insFindCarrySource(c) : null;
-    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <div style="flex:1;min-width:100px">
-          <div style="font-size:13px;font-weight:700">${insHold.has(String(c.id))?'<span class="badge" style="font-size:10px;background:#dc262622;color:#dc2626;border:1px solid #dc262644;margin-right:4px">확인 필요</span>':''}${c.name}${curPt?` <span style="font-weight:400;color:var(--gray);font-size:11px">— ${curPt.name} 담당중</span>`:''}</div>
-          <div style="font-size:11px;color:var(--gray);margin-top:2px">
-            ${c.insuranceActive?'✅ 가입':'❌ 미가입'}
+    return insRowHtml(c, {
+      insHold, curPt, openSrc,
+      title: `${insHold.has(String(c.id))?'<span class="badge" style="font-size:10px;background:#dc262622;color:#dc2626;border:1px solid #dc262644;margin-right:4px">확인 필요</span>':''}${c.name}${curPt?` <span style="font-weight:400;color:var(--gray);font-size:11px">— ${curPt.name} 담당중</span>`:''}`,
+      line: `${c.insuranceActive?'✅ 가입':'❌ 미가입'}
             ${c.insuranceStartDate?'· 가입일 '+c.insuranceStartDate:''}
             ${c.insuranceExpiry?'· 만료 '+c.insuranceExpiry:''}
-            ${c.insuranceActive && !c.insuranceTerminated && c.endDate ? `· <b style="color:var(--amber)">서비스 마감 ${c.endDate} → 해지신고일 ${insAddDays(c.endDate,1)}</b>` : ''}
+            ${c.insuranceActive && !c.insuranceTerminated && c.endDate ? `· <b style="color:var(--amber)">서비스 마감 ${c.endDate} → 해지신고일 ${insAddDays(c.endDate,1)}</b>` : ''}`,
+      extra: c.insuranceActive && c.insuranceCarried ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 연속 재배정 — 이전 근무건 보험을 해지 없이 이어서 유지 중 (가입일 ${c.insuranceStartDate||'?'})</div>` : '',
+      memo: c.insuranceMemo, statusColor, statusTxt,
+      termBox: c.insuranceActive && diff !== null && diff >= 0 ? `
+          <label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer">
+            <input type="checkbox" ${c.insuranceTerminated?'checked':''} style="width:15px;height:15px;accent-color:var(--teal)"
+              onchange="terminateInsurance('${c.id}',this.checked)">
+            <span style="color:var(--gray)">만료처리</span>
+          </label>` : '',
+      editCall: `editInsurance('${c.id}')`, hist: insSortedHistory(c),
+    });
+  }).join('');
+}
+
+// 배상보험 현황 한 줄(간병인 1명) HTML — 현재 건 표시 / 마지막 보험 이력 표시 공통
+function insRowHtml(c, o) {
+  const histCount = o.hist.length;
+  const openSrc = o.openSrc;
+  return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:100px">
+          <div style="font-size:13px;font-weight:700">${o.title}</div>
+          <div style="font-size:11px;color:var(--gray);margin-top:2px">
+            ${o.line}
           </div>
-          ${c.insuranceActive && c.insuranceCarried ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 연속 재배정 — 이전 근무건 보험을 해지 없이 이어서 유지 중 (가입일 ${c.insuranceStartDate||'?'})</div>` : ''}
+          ${o.extra||''}
           ${openSrc ? `<div style="font-size:11px;margin-top:3px;padding:3px 6px;border-radius:5px;background:#d9770611;color:#b45309">🛡 <b>보험 미해지</b> — ${insEsc(openSrc.patientName||'직전 근무건')} 건 (가입 ${openSrc.startDate||'?'}${openSrc.coverTo?' · 서비스 마감 '+openSrc.coverTo:''}) · 연이어 재배정하면 새 근무건으로 자동 이어지고, 재배정 없으면 <b>해지 신고${openSrc.coverTo?'('+insAddDays(openSrc.coverTo,1)+')':''}</b> 후 [해지완료] 체크</div>` : ''}
-          ${c.insuranceMemo?`<div style="font-size:11px;color:var(--teal);margin-top:2px;font-family:var(--mono)">🔖 ${c.insuranceMemo}</div>`:''}
+          ${o.memo?`<div style="font-size:11px;color:var(--teal);margin-top:2px;font-family:var(--mono)">🔖 ${o.memo}</div>`:''}
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           ${openSrc ? `<label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer">
             <input type="checkbox" style="width:15px;height:15px;accent-color:var(--teal)" onchange="terminateInsuranceHistory('${c.id}','${openSrc.id}',this.checked)">
             <span style="color:#b45309">해지완료</span></label>` : ''}
-          <span class="badge" style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}44">${statusTxt}</span>
-          ${c.insuranceActive && diff !== null && diff >= 0 ? `
-          <label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer">
-            <input type="checkbox" ${c.insuranceTerminated?'checked':''} style="width:15px;height:15px;accent-color:var(--teal)"
-              onchange="terminateInsurance('${c.id}',this.checked)">
-            <span style="color:var(--gray)">만료처리</span>
-          </label>` : ''}
-          <button class="btn btn-sm" onclick="editInsurance('${c.id}')">
+          <span class="badge" style="background:${o.statusColor}22;color:${o.statusColor};border:1px solid ${o.statusColor}44">${o.statusTxt}</span>
+          ${o.termBox||''}
+          <button class="btn btn-sm" onclick="${o.editCall}">
             <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>수정
           </button>
         </div>
@@ -14957,10 +15054,10 @@ function renderInsurance() {
       </div>
       ${histCount ? `
       <div id="ins-hist-${c.id}" style="display:none;margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm)">
-        ${insSortedHistory(c).map(h => `
+        ${o.hist.map(h => `
           <div style="font-size:11px;color:var(--gray);padding:4px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
             <div style="flex:1;min-width:0">
-              <b style="color:var(--black)">${h.patientName||'(환자 정보 없음)'}</b> · ${h.active?'가입':'미가입'}${h.startDate?' · 가입일 '+h.startDate:''}${h.expiry?' · '+(h.continued?'해지 ':'만료 ')+h.expiry:''}${h.terminated && !h.continued?' · 만료처리됨':''}
+              <b style="color:var(--black)">${h.patientName||'(환자 정보 없음)'}</b> · ${(h.active||h.startDate)?'가입':'미가입'}${h.startDate?' · 가입일 '+h.startDate:''}${h.expiry?' · '+(h.continued?'해지 ':'만료 ')+h.expiry:''}${h.terminated && !h.continued?' · 만료처리됨':''}
               ${(h.coverFrom||h.coverTo)?`<span style="color:var(--gray-lt)"> · 담당 ${h.coverFrom||'?'}~${h.coverTo||'진행중'}</span>`:''}
               ${h.carried?' <span class="badge" style="font-size:9px;background:#0b7a6e14;color:var(--teal);border:1px solid #0b7a6e33">🔗 이전 건에서 이어짐</span>':''}
               ${h.continued?' <span class="badge" style="font-size:9px;background:#0b7a6e14;color:var(--teal);border:1px solid #0b7a6e33">➡ 다음 근무건으로 이어짐</span>':''}
@@ -14973,7 +15070,6 @@ function renderInsurance() {
           </div>`).join('')}
       </div>` : ''}
     </div>`;
-  }).join('');
 }
 
 // ─── 배상보험: 보험사 "등록된 전문인내역" = 배상보험 현황의 기준 데이터 ───
@@ -15404,7 +15500,7 @@ function insDescCurrent(c) {
 }
 function insDescHist(h) {
   const cover = (h.coverFrom || h.coverTo) ? ` [담당 ${h.coverFrom||'?'}~${h.coverTo||'진행중'}]` : '';
-  return `${h.patientName || '(환자 정보 없음)'} · ${h.active ? '가입' : '미가입'} ${h.startDate||'?'} ~ ${h.expiry||''}${cover}`
+  return `${h.patientName || '(환자 정보 없음)'} · ${(h.active || h.startDate) ? '가입' : '미가입'} ${h.startDate||'?'} ~ ${h.expiry||''}${cover}`
     + (h.carried ? ' · 🔗이전 건에서 이어짐' : '') + (h.continued ? ' · ➡다음 근무건으로 이어짐' : '') + (h.terminated ? ' · 만료처리' : '');
 }
 function insSnapOf(c) {
@@ -16024,7 +16120,7 @@ function startRemind() {
   if(mins > 0) remindTimer = setInterval(fireRemind, mins * 60 * 1000);
   // 배상보험 체크 1시간마다
   // 보험 만료 체크 1시간마다
-  insuranceTimer = setInterval(checkInsuranceExpiry, 60 * 60 * 1000);
+  insuranceTimer = setInterval(() => { try { migrateInsHistoryExpiry(); } catch(e) {} checkInsuranceExpiry(); }, 60 * 60 * 1000);
   // 자동 종료 체크 1분마다
   setInterval(checkAutoEnd, 60 * 1000);
   // 자동 근무시작 체크 1분마다
