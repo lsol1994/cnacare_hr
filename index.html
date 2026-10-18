@@ -2377,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_19_02';
+const APP_BUILD = '26_10_19_03';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -4622,20 +4622,28 @@ function openEndPatientModal(id) {
   if(!p) return;
   const today = toLocalDateStr(new Date());
   const now   = new Date().toTimeString().slice(0,5);
+  // (26_10_19_03) 기본값을 "지금"으로 — 예전엔 환자의 현재 마감일(연장된 미래 날짜)이 기본으로 채워져서,
+  // 날짜를 안 고치고 "종료 확정"을 누르면 아직 마감일이 남았는데 환자·간병인이 그 미래 날짜로 종료됐음.
+  // 이미 종료된 환자의 종료일시를 고치는 경우, 또는 마감일이 이미 지났는데 아직 종료 안 된 경우는 기존 마감일 유지.
+  const _planDt = calcEndDt(p.endDate, p.endTime || p.startTime || '');
+  const _useNow = p.status !== '종료' && (!_planDt || _planDt > new Date());
+  const _defDate = _useNow ? today : (p.endDate || today);
+  const _defTime = _useNow ? now : (p.endTime || now);
+  const _planTxt = (p.status !== '종료' && p.endDate) ? `<br><b>원래 마감: ${p.endDate} ${p.endTime||''}</b>${_useNow ? ' — 아직 남아있어요. 기본값은 지금 시각으로 채웠어요.' : ''}` : '';
 
   document.getElementById('pt-modal-title').textContent = `${p.name} — 종료 처리`;
   document.getElementById('pt-modal-body').innerHTML = `
     <div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 14px;font-size:12px;color:var(--gray);margin-bottom:1rem;line-height:1.7">
-      간병이 종료되는 날짜와 시간을 입력해주세요.
+      간병이 종료되는 날짜와 시간을 입력해주세요.${_planTxt}
     </div>
     <div class="g2">
       <div class="field">
         <label>마감일 <span class="req">*</span></label>
-        <input type="date" id="end-date" value="${p.endDate||today}">
+        <input type="date" id="end-date" value="${_defDate}">
       </div>
       <div class="field">
         <label>마감시간</label>
-        <input type="time" id="end-time" value="${p.endTime||now}">
+        <input type="time" id="end-time" value="${_defTime}">
       </div>
     </div>
     <div class="field">
@@ -4678,6 +4686,21 @@ function confirmEndPatient(id) {
 
   const p = patients.find(x=>String(x.id)===String(id));
   if(!p) { toast('환자를 찾을 수 없어요', true); return; }
+
+  // (26_10_19_03) 처음 종료하는 경우 확인 — 미래 일시로 종료하거나 원래 마감보다 일찍 끝내는 경우
+  if(p.status !== '종료') {
+    const _endDt  = calcEndDt(endDate, endTime || p.startTime || '');
+    const _planDt = calcEndDt(p.endDate, p.endTime || p.startTime || '');
+    const _nowDt  = new Date();
+    if(_endDt && _endDt.getTime() > _nowDt.getTime() + 60000) { // calcEndDt가 59초를 붙이므로 1분 여유 (기본값 "지금"이 미래로 판정되지 않게)
+      if(!confirm(`⚠️ 입력한 종료일시(${endDate} ${endTime||''})가 아직 오지 않았어요.\n\n` +
+        `확정하면 지금 바로 ${p.name} 님과 담당 간병인이 "종료" 상태가 돼요.\n` +
+        `그날 끝날 예정이면 종료 처리 없이 두면 마감일시에 자동으로 종료돼요.\n\n그래도 지금 종료할까요?`)) return;
+    } else if(_planDt && _endDt && _endDt < _planDt && _planDt > _nowDt) {
+      if(!confirm(`⚠️ 원래 마감(${p.endDate} ${p.endTime||''})이 아직 남아있어요.\n\n` +
+        `${endDate} ${endTime||''}에 일찍 종료(퇴실)하는 게 맞나요?\n연장하려던 거라면 취소 후 "📅 연장"을 사용하세요.`)) return;
+    }
+  }
 
   // (26_10_07_04) 바뀌기 전 종료일시 — 이미 종료된 환자의 종료일시를 다시 고치는 경우,
   // 이걸로 "마지막 담당 간병인" 근무건(재배정돼 과거이력에만 남은 경우 포함)을 찾아 같이 바꿈
@@ -5800,6 +5823,21 @@ function saveCg() {
     if(conflictCg) {
       showOverlapWarning(cg, conflictCg, targetPtForDup);
       return; // 겹치는 동안은 등록/수정 차단
+    }
+  }
+
+  // (26_10_19_03) 근무중 간병인을 상태 드롭다운으로 "종료"로 바꾸면 매칭 환자도 함께 종료됨 —
+  // 마감일이 아직 남아있으면 실수일 가능성이 높으므로 확인 (마감일 그대로 종료돼 "날짜 남았는데 종료" 상태가 됨)
+  if(editCgId && cg.workStatus === '종료') {
+    const _b = caregivers.find(x=>String(x.id)===String(editCgId));
+    if(_b && _b.workStatus !== '종료' && _b.patientId) {
+      const _endDt = calcEndDt(cg.endDate || _b.endDate, (cg.endTime !== undefined ? cg.endTime : _b.endTime) || '');
+      if(_endDt && _endDt > new Date()) {
+        const _bp = patients.find(x=>String(x.id)===String(_b.patientId));
+        if(!confirm(`⚠️ ${_b.name} 님의 마감(${cg.endDate || _b.endDate} ${cg.endTime || _b.endTime || ''})이 아직 남아있어요.\n\n` +
+          `지금 "종료"로 저장하면 ${_bp ? _bp.name + ' 님(환자)도' : '매칭된 환자도'} 함께 종료되고, 종료일시는 위 마감일로 남아요.\n` +
+          `일찍 그만두는 거라면 취소 후 "중도종료"를, 기간을 늘리려면 환자 "📅 연장"을 사용하세요.\n\n그래도 종료로 저장할까요?`)) return;
+      }
     }
   }
 
