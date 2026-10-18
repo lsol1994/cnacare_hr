@@ -2377,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_19_01';
+const APP_BUILD = '26_10_19_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -7739,9 +7739,23 @@ function applyReEntry(old, o) {
   return { pt: np, cg };
 }
 
+// (26_10_19_02) 연장 창을 열어둔 사이 원래 마감시각이 지나면, 1분 자동종료가 먼저 돌아서 환자·간병인이
+// 종료된 뒤에 "연장 확정"이 눌리는 사고가 있었음 — 그때 confirmExtend는 이미 종료된 환자의 마감일만 바꾸고
+// "연장됐어요"를 띄워서, 화면엔 연장된 마감일인데 상태는 종료로 남았음.
+// → 이 기기에서 연장 창이 열려 있는 환자는 자동종료를 잠시 보류 (창을 닫거나 10분 지나면 해제)
+var _extendingPtId = null, _extendingSince = 0;
+function isExtendHold(ptId) {
+  if(!_extendingPtId || !ptId || String(_extendingPtId) !== String(ptId)) return false;
+  var ov = document.getElementById('extend-overlay');
+  if(!ov || !ov.classList.contains('open')) { _extendingPtId = null; return false; }
+  if(Date.now() - _extendingSince > 10 * 60 * 1000) return false;
+  return true;
+}
+
 function openExtendPatient(ptId) {
   var p  = patients.find(function(x){return String(x.id)===String(ptId);});
   if(!p) return;
+  _extendingPtId = String(ptId); _extendingSince = Date.now();
   var cg = caregivers.find(function(c){return String(c.patientId)===String(ptId)&&c.workStatus!=='종료';});
   var cgName = cg ? cg.name : '';
   document.getElementById('extend-title').textContent = '📅 ' + p.name + ' 서비스 연장';
@@ -7786,6 +7800,14 @@ function confirmExtend(ptId) {
   var newEndTime = (document.getElementById('ext-endTime')&&document.getElementById('ext-endTime').value)||p.startTime||''; // 비우면 입실시간 (26_09_30_05)
   var cgChange   = document.getElementById('ext-cg-change')&&document.getElementById('ext-cg-change').value;
   if(!newEndDate){toast('새 마감일을 입력해주세요',true);return;}
+  // (26_10_19_02) 창을 연 뒤 다른 기기(또는 10분 넘게 열어둔 이 기기)에서 이미 자동종료·상태 변경된 경우 연장 중단
+  // — 예전엔 종료된 환자의 마감일만 바뀌고 "연장됐어요"가 떠서, 마감일은 남았는데 종료 상태로 보였음
+  if(p.status !== '매칭완료') {
+    _extendingPtId = null;
+    closeOverlay('extend-overlay'); renderPatients(); renderCaregivers();
+    toast('⚠️ '+p.name+' 님은 연장 창을 여는 사이 이미 '+(p.status==='종료'?'종료':p.status)+' 처리돼서 연장하지 않았어요. 간병인 카드의 "종료취소"로 되돌린 뒤 다시 연장해주세요.', true);
+    return;
+  }
   var cg   = caregivers.find(function(c){return String(c.patientId)===String(ptId)&&c.workStatus!=='종료';});
   var days = p.startDate ? Math.round((parseLocalDate(newEndDate)-parseLocalDate(p.startDate))/86400000) : null;
 
@@ -7804,6 +7826,7 @@ function confirmExtend(ptId) {
     if(cg){cg.endDate=newEndDate;cg.endTime=newEndTime;if(days!==null&&days>=0)cg.duration=days+'일';}
     markPtEdited(p.id); // Firebase 덮어쓰기 방지 (10초)
     if(cg) markCgEdited(cg.id);
+    _extendingPtId = null; // (26_10_19_02) 자동종료 보류 해제
     save();
     if(cg) autoFillAttendance(String(cg.id)); // 마감시간 변경에 맞춰 간병일지 동기화
     refreshCalendarIfOpen();
@@ -7833,6 +7856,7 @@ function confirmExtend(ptId) {
     };
     // p.status/caregiverName/recruited는 그대로 둠 → 기존 간병인이 계속 매칭 간병인으로 표시됨
     markPtEdited(p.id); // Firebase 덮어쓰기 방지 (10초)
+    _extendingPtId = null; // (26_10_19_02) 자동종료 보류 해제
     save(); closeOverlay('extend-overlay'); renderPatients(); renderCaregivers(); renderDashboard(); updateSidebar();
     toast('✅ '+p.name+' 연장됐어요. 기존 간병인은 '+repStart+'까지 근무하고, 이후 교체할 간병인 공고를 올려주세요.');
   }
@@ -16473,6 +16497,7 @@ function checkAutoEnd() {
     if(!cg.endDate) return;
     const endDt = calcEndDt(cg.endDate, cg.endTime);
     if(!endDt || now < endDt) return;
+    if(isExtendHold(cg.patientId)) return; // (26_10_19_02) 이 환자 연장 창이 열려 있으면 다음 틱으로 보류
 
     // 종료 처리 전에 마감일까지 간병일지 자동 채우기 (퇴근 미등록 날 포함)
     autoFillAttendanceUntilEnd(String(cg.id), cg.endDate);
@@ -16572,6 +16597,7 @@ function checkAutoEnd() {
 
     // 이미 간병인에서 처리됐으면 스킵
     if(endedItems.some(e=>e.pt&&String(e.pt.id)===String(pt.id))) return;
+    if(isExtendHold(pt.id)) return; // (26_10_19_02) 이 환자 연장 창이 열려 있으면 다음 틱으로 보류
 
     // 환자 endDate 또는 startDate+duration으로 마감일 계산
     let endDate = pt.endDate;
