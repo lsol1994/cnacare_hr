@@ -2083,6 +2083,36 @@ let selRptPt       = null;
 let _fbReady       = false;
 let _fbPause       = false;
 
+// ─── (26_10_19_01) 자동 처리(checkAutoEnd/checkAutoStart) 안전 게이트 ───
+// "연장했는데 중도종료(종료)됐다" 민원 원인: 연장 전부터 절전·화면잠금·네트워크 끊김 상태였던
+// 다른 PC가 깨어나는 순간, 서버 최신본(연장된 마감일)을 받기 전에 1분 타이머가 먼저 돌면서
+// 자기 화면에 남아있던 "연장 전 마감일"로 자동 종료를 실행함. 이때 markCgEdited/markPtEdited로
+// 저장시각(_ts)이 "지금"으로 찍히니, 동기화 때 "더 최근 저장분이 이긴다" 규칙에 따라 이 낡은
+// 종료 처리가 서버의 연장 내용을 통째로 덮어써버림 (부팅 직후 경로는 26_10_07_02에서 막았지만
+// 절전 복귀·재연결 경로는 그대로 열려 있었음).
+// → 서버와 실제로 연결돼 있고, 연결(재연결) 후 최신본을 받은 게 확실할 때만 자동 처리를 허용.
+let _fbConnected   = false; // .info/connected 실시간 값
+let _fbConnectedAt = 0;     // 마지막으로 연결된 시각
+let _fbLastSnapAt  = 0;     // 마지막으로 서버 데이터(cnc 전체)를 받은 시각
+let _autoTickAt    = 0;     // 마지막 자동처리 실행 시각 (타이머 정지 = 절전/탭 동결 감지용)
+let _autoHoldFrom  = 0;     // 절전 복귀 감지 시각
+const AUTO_WAKE_GAP_MS     = 3 * 60 * 1000; // 1분 타이머가 이 시간 이상 멈췄다 돌아오면 절전 복귀로 판단
+const AUTO_WAKE_HOLD_MS    = 60 * 1000;     // 절전 복귀 후 서버 최신본이 안 오면 최대 이만큼 대기
+const AUTO_RECONNECT_GRACE = 15 * 1000;     // 재연결 직후 서버 변경분이 도착할 여유 시간
+function autoProcessBlocked() {
+  if(!_fbReady) return 'not-ready';
+  if(!db) return '';                       // Firebase 미사용(로컬 모드)은 기존 동작 그대로
+  const now = Date.now();
+  if(_autoTickAt && now - _autoTickAt > AUTO_WAKE_GAP_MS) _autoHoldFrom = now;
+  _autoTickAt = now;
+  if(!_fbConnected) return 'offline';
+  // 재연결 후 아직 서버 데이터를 못 받았으면, 변경분이 도착할 여유를 줌
+  if(_fbLastSnapAt < _fbConnectedAt && now - _fbConnectedAt < AUTO_RECONNECT_GRACE) return 'reconnecting';
+  // 절전 복귀 직후: 복귀 이후 서버 데이터를 받았거나, 대기시간이 지나야 허용
+  if(_autoHoldFrom && _fbLastSnapAt < _autoHoldFrom && now - _autoHoldFrom < AUTO_WAKE_HOLD_MS) return 'wake-hold';
+  return '';
+}
+
 // ─── Firebase 부분 업데이트(update()) 를 위한 마지막 동기화 스냅샷 ───
 // id 키 컬렉션(patients/caregivers/logs/attendance/reportLogs/memos/notices):
 //   { 컬렉션명 → { id(String) → JSON 문자열 } }
@@ -2347,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_16_01';
+const APP_BUILD = '26_10_19_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -2710,7 +2740,10 @@ function attachDbConnectionIndicator() {
   if(_dbConnRef) _dbConnRef.off();
   _dbConnRef = db.ref('.info/connected');
   _dbConnRef.on('value', snap => {
-    setDbStatusIndicator(snap.val() === true ? 'online' : 'connecting');
+    const on = snap.val() === true;
+    if(on && !_fbConnected) _fbConnectedAt = Date.now(); // (26_10_19_01) 재연결 시각 기록 — 자동 처리 게이트용
+    _fbConnected = on;
+    setDbStatusIndicator(on ? 'online' : 'connecting');
   });
 }
 
@@ -2733,6 +2766,7 @@ function attachFirebaseListener() {
     if(_fbPause) return;
 
     const d = snap.val();
+    _fbLastSnapAt = Date.now(); // (26_10_19_01) 서버 최신본 수신 시각 — 아래 병합은 동기 처리라 자동 처리와 겹치지 않음
     if(!d || Object.keys(d).length === 0) {
       if(patients.length || caregivers.length) {
         // DB 비어있으면 현재 로컬 데이터를 DB에 저장 (디바운스)
@@ -16322,6 +16356,9 @@ function promotePendingReplacement(pt, outgoingEndDate, outgoingEndTime, incomin
 function checkAutoStart() {
   // Firebase 데이터 로드 완료 전이면 스킵
   if(!_fbReady) return;
+  // (26_10_19_01) checkAutoEnd와 동일한 게이트 — 절전 복귀·재연결 직후 낡은 데이터로 상태를 바꾸지 않음
+  const _blocked = autoProcessBlocked();
+  if(_blocked) { console.log('[checkAutoStart] 보류:', _blocked); return; }
 
   const now = new Date();
   const todayDate = toLocalDateStr(now);
@@ -16416,6 +16453,9 @@ function checkAutoEnd() {
   // "가장 나중에 저장된 것이 이긴다" 규칙에 따라 서버의 최신 데이터를 덮어써버림.
   // 서버 데이터를 받은 직후에는 attachFirebaseListener()가 checkAutoEnd()를 직접 호출하므로 누락 없음.
   if(!_fbReady) return;
+  // (26_10_19_01) 절전 복귀·재연결 직후 낡은 데이터로 자동 종료해서 다른 기기의 연장을 덮어쓰는 것 방지
+  const _blocked = autoProcessBlocked();
+  if(_blocked) { console.log('[checkAutoEnd] 보류:', _blocked); return; }
   const now = new Date();
   let changed = false;
   const endedItems = []; // 종료된 항목 {pt, cg}
