@@ -2377,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_19_04';
+const APP_BUILD = '26_10_19_05';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -5005,11 +5005,29 @@ function deletePatient(id) {
 }
 
 // ─── SEND PAGE ───
+// 단톡방 발송 목록 정렬용: 공고에 나가는 시작일(재모집이면 recruitInfo, 아니면 재모집시작일→시작일) + 시작시간
+function sendStartKey(p) {
+  const ri = p && p.recruitInfo;
+  const d = ri ? (ri.startDate || '') : (p.recruitStartDate || p.startDate || '');
+  const t = ri ? (ri.startTime || '') : (p.startTime || '');
+  return d ? (d + ' ' + (t || '00:00')) : '';
+}
+function cmpSendStart(a, b) {
+  const ka = sendStartKey(a), kb = sendStartKey(b);
+  if(!ka && !kb) return 0;
+  if(!ka) return 1;   // 시작일 없는 건은 뒤로
+  if(!kb) return -1;
+  return ka < kb ? -1 : ka > kb ? 1 : 0;
+}
+
 function renderSend() {
   const active   = patients.filter(p=>p.status==='모집중'&&!p.recruitInfo);
   // 재모집: 일반 재모집(모집중) + 연장 후 예약 교체(매칭완료 상태로 기존 간병인 근무 중, 다음 간병인만 별도 구인)
   // 단, 예약 교체 간병인이 이미 등록됐으면(pendingReplacement) 더 이상 구할 필요 없으므로 발송 목록에서 제외
   const recruit  = patients.filter(p=>p.recruitInfo && !p.pendingReplacement && !p.reservedCgId && (p.status==='모집중'||p.status==='매칭완료'));
+  // 시작일이 빠른 순으로 정렬 (공고에 실제로 나가는 시작일 기준, 시작일 없는 건은 맨 뒤)
+  active.sort(cmpSendStart);
+  recruit.sort(cmpSendStart);
   const el = document.getElementById('send-pt-list');
 
   function ptCard(p, isRecruit) {
@@ -5176,9 +5194,12 @@ function toggleAllSendPt() {
 function copyAllSelected() {
   if(selectedPtIds.size === 0) { toast('환자를 선택해주세요', true); return; }
   const posts = [];
-  selectedPtIds.forEach(id => {
-    const p = patients.find(x=>String(x.id)===String(id));
-    if(!p) return;
+  // 일괄 복사도 목록과 같은 순서(시작일 빠른 순)로 붙여넣어지도록 정렬
+  const selPts = [...selectedPtIds]
+    .map(id => patients.find(x=>String(x.id)===String(id)))
+    .filter(Boolean)
+    .sort(cmpSendStart);
+  selPts.forEach(p => {
     const post = p.recruitInfo ? buildRecruitPost(p) : (p._editedPost || buildPost(p));
     posts.push(post);
   });
