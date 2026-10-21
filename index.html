@@ -2377,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_19_05';
+const APP_BUILD = '26_10_21_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -5597,7 +5597,9 @@ function renderCgForm(cg, p) {
   const v=n=>cg?cg[n]||'':'';
   // 신규 등록: 환자와 함께 등록하면(p 있음) 근무중을 기본값으로, 간병인만 단독 등록하면(p 없음)
   // 아직 매칭 전이므로 예비를 기본값으로 — 기존 레코드 수정 시에는 저장된 값 그대로 사용
-  const defaultWorkStatus = cg ? v('workStatus') : (p ? '근무중' : '예비');
+  // (26_10_21_01) 환자와 함께 신규 등록할 때 기본값은 아래에서 시작일시를 정한 뒤 결정
+  //  (예전엔 무조건 '근무중' → 시작 전인데도 근무중으로 저장돼 "시작 전 취소" 버튼이 안 보였음)
+  let defaultWorkStatus = cg ? v('workStatus') : (p ? '근무중' : '예비');
 
   // ── 간병 시작일/시간 기본값 (신규 등록 시에만 해당) ──
   // ⚠️ 예전엔 p가 있으면 무조건 p.startDate(환자의 "원본 서비스시작일")를 기본값으로 채웠음.
@@ -5613,6 +5615,7 @@ function renderCgForm(cg, p) {
   const existingActiveCg = (p && !cg) ? caregivers.find(c => String(c.patientId)===String(p.id) && c.workStatus!=='종료') : null;
   const cgDefaultStartDate = p ? ((p.recruitInfo && p.recruitInfo.startDate) || (existingActiveCg ? today : p.startDate) || '') : '';
   const cgDefaultStartTime = p ? ((p.recruitInfo && p.recruitInfo.startTime) || (existingActiveCg ? '08:00' : p.startTime) || '08:00') : '08:00';
+  if(!cg && p && cgStartsInFuture(cgDefaultStartDate, cgDefaultStartTime)) defaultWorkStatus = '대기중';
   document.getElementById('cg-form-body').innerHTML=`
     <div class="g2">
       <div class="field"><label>등록일</label><input type="date" id="cg-regDate" value="${cg?v('regDate'):today}"></div>
@@ -5830,6 +5833,14 @@ function saveCg() {
   if(cg.startTime&&!timeOk(cg.startTime)){toast('시작 시간이 올바르지 않아요 (00:00~23:59)',true);return;}
   if(cg.endTime&&!timeOk(cg.endTime)){toast('마감 시간이 올바르지 않아요 (00:00~23:59)',true);return;}
 
+  // (26_10_21_01) 환자에 매칭된 간병인을 '근무중'으로 저장하는데 시작일시가 아직 안 됐으면 '대기중'으로 보정.
+  // 시작 시각이 되면 checkAutoStart()가 근무중으로 전환함. 시작 전 상태여야 "시작 전 취소"가 가능함.
+  let _cgWaitFixed = false;
+  if(cg.workStatus === '근무중' && cg.patientId && cgStartsInFuture(cg.startDate, cg.startTime)) {
+    cg.workStatus = '대기중';
+    _cgWaitFixed = true;
+  }
+
   // ── 신규 등록 시 이름 중복 감지 ──
   // 단, 등록 대상 환자가 이미 "종료"된 환자면 과거 이력을 남기려는 것뿐이라 실제 충돌이 아니므로,
   // 그 간병인이 다른 곳에서 근무중/대기중이어도 그냥 등록을 허용한다 (간병인 내역에 남기기 위함)
@@ -6044,6 +6055,8 @@ function saveCg() {
   save();
   autoFillAttendance(String(cg.id)); // 간병 시작/마감 시간에 맞춰 간병일지 즉시 동기화
   refreshCalendarIfOpen();
+  // (26_10_21_01) 근무중 → 대기중 보정 안내 (등록 완료 토스트에 가려지지 않게 조금 뒤에 표시)
+  if(_cgWaitFixed) setTimeout(() => toast(`ℹ️ ${cg.name} 님은 아직 간병 시작 전이라 "대기중"으로 저장했어요 (시작 시각에 자동으로 근무중 전환)`), 2600);
   sendSheets({type:'caregiver', ...cg});
   sendSheets({type:'journal', caregiverName:cg.name, phone:cg.phone||'', hospital:cg.hospital,
     startDate:cg.startDate, startTime:cg.startTime, endDate:cg.endDate, endTime:cg.endTime});
@@ -16545,6 +16558,16 @@ function checkAutoStart() {
 // ── 마감 시각 계산 헬퍼 (전역) ──
 // 서비스 종료: endDate + endTime (간병인/환자에 저장된 실제 마감시각)
 // 24시간 기준: 6/4 16:00 시작 + 2일 = 6/6 16:00 마감
+// (26_10_21_01) 간병 시작일시가 아직 안 왔는지 (시작시간 없으면 00:00 기준 — checkAutoStart와 동일)
+function cgStartsInFuture(startDate, startTime) {
+  if(!startDate) return false;
+  const [y, mo, d] = String(startDate).split('-').map(Number);
+  if(!y || !mo || !d) return false;
+  const [h, m] = (startTime && /^\d{1,2}:\d{2}$/.test(startTime) ? startTime : '00:00').split(':').map(Number);
+  const dt = new Date(y, mo-1, d, h, m, 0, 0);
+  return !isNaN(dt.getTime()) && dt > new Date();
+}
+
 function calcEndDt(endDate, endTime) {
   if(!endDate) return null;
   // endTime 없으면 23:59
