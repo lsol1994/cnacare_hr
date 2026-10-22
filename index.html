@@ -2377,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_22_01';
+const APP_BUILD = '26_10_22_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -4208,7 +4208,9 @@ function openPatient(id) {
         <div style="font-size:12px;color:var(--gray);margin-top:3px">예약 기간: ${na.startDate||'—'} ${na.startTime||''} → ${na.endDate||'—'} ${na.endTime||''}${na.pay?` · 일급 ${Number(na.pay).toLocaleString()}원`:''}</div>
         <div style="font-size:12px;color:var(--gray);margin-top:2px">현재 ${curPt?curPt.name+' 간병중':'간병중'}${rcg.endDate?` · ${rcg.endDate} ${rcg.endTime||''} 마감 후 자동 인계`:''}</div>
         ${warn?`<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ ${warn}</div>`:''}
-        <div style="display:flex;gap:6px;margin-top:8px">
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+          <button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="showReservedMatchMessage('${rcg.id}')">📋 매칭 안내 문자</button>
+          <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="showReservedArrivalNotice('${rcg.id}')">📋 입실 안내 문자</button>
           <button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="closeOverlay('pt-overlay');showPage('caregiver');setTimeout(()=>openCgDetail('${rcg.id}'),100)">간병인 상세 →</button>
           <button class="btn btn-sm" style="border-color:var(--red);color:var(--red)" onclick="cancelReservation('${p.id}')">예약 취소</button>
         </div>
@@ -4249,6 +4251,10 @@ function openPatient(id) {
         <div style="font-size:11px;color:var(--gray);margin-top:2px">${formatPhone(p.pendingReplacement.phone)||''}</div>
       </div>
       ${p.recruitInfo.reason==='교체(시차)' ? '' : `<button class="btn btn-sm" onclick="openReplacementForm('${p.id}')">수정</button>`}
+    </div>
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <button class="btn btn-sm" style="flex:1;justify-content:center;border-color:var(--blue);color:var(--blue)" onclick="showPendingMatchMessage('${p.id}')">📋 매칭 안내 문자</button>
+      <button class="btn btn-sm" style="flex:1;justify-content:center;border-color:var(--teal);color:var(--teal)" onclick="showPendingArrivalNotice('${p.id}')">📋 입실 안내 문자</button>
     </div>` : (p.recruitInfo.reason==='교체(시차)' ? '' : `
     <button class="btn btn-teal btn-sm" onclick="openReplacementForm('${p.id}')">🔜 예정 교체 간병인 등록</button>`)}
     ` : ''}
@@ -6396,12 +6402,13 @@ function addPopupCopyBtn(id, label, msg) {
 }
 
 // 매칭 안내 메시지 팝업 표시 (공용 헬퍼) — 신규 매칭/교체/예약교체 인계 어디서든 재사용
-function showMatchMessagePopup(pt, cg) {
-  const matchMsg = buildMatchMessage(pt, cg);
+function showMatchMessagePopup(pt, cg, opts) {
+  const matchMsg = buildMatchMessage(pt, cg, opts);
   const popup = document.getElementById('remind-popup');
   resetPopupButtons();
   document.getElementById('remind-popup-body').innerHTML =
-    `📋 <strong>${cg.name}</strong> 님께 보낼 매칭 안내 메시지예요.\n\n` +
+    `📋 <strong>${cg.name}</strong> 님께 보낼 매칭 안내 메시지예요.` +
+    (opts && opts.note ? `\n<span style="font-size:11px;opacity:.9">${opts.note}</span>` : '') + `\n\n` +
     `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:6px;font-size:12px;white-space:pre-wrap;line-height:1.8">${matchMsg}</div>` +
     `<div style="font-size:11px;margin-top:6px;opacity:.85">⚠️ 주소는 비어있어요 — 복사 후 직접 채워서 보내주세요</div>`;
   popup.style.display = 'block';
@@ -6417,6 +6424,56 @@ function showMatchMessage(cgId) {
   const pt = cg.patientId ? patients.find(p=>String(p.id)===String(cg.patientId)) : null;
   if(!pt) { toast('매칭된 환자가 없어요', true); return; }
   showMatchMessagePopup(pt, cg);
+}
+
+// ═══ (26_10_22_02) 예정간병인(인계 전)에게 매칭/입실 안내 문자 미리 보내기 ═══
+// 맞교체·교체(시차)·연장 후 예약교체의 예정간병인은 인계 시각 전까지 간병인 레코드가 없고
+// 환자의 pendingReplacement에만 있으므로, 그 정보 + recruitInfo의 입실 예정일시로
+// 임시 간병인 객체를 만들어 문자를 생성한다. (데이터는 전혀 변경하지 않음 — 읽기 전용)
+function pendingRepMsgCg(pt) {
+  if(!pt || !pt.pendingReplacement || !pt.recruitInfo) return null;
+  const ri = pt.recruitInfo, rep = pt.pendingReplacement;
+  return Object.assign({}, rep, {
+    startDate: ri.startDate || '', startTime: ri.startTime || '',
+    endDate: ri.endDate || pt.endDate || '', endTime: pt.endTime || ''
+  });
+}
+function scheduleNote(cg) {
+  return cg && cg.startDate ? `🕐 입실 예정: ${formatSchedule(cg.startDate, cg.startTime || '')}` : '';
+}
+function showPendingMatchMessage(ptId) {
+  const pt = patients.find(p=>String(p.id)===String(ptId));
+  const mcg = pendingRepMsgCg(pt);
+  if(!mcg) { toast('예정 교체 간병인 정보가 없어요', true); return; }
+  showMatchMessagePopup(pt, mcg, { useCgSchedule: true, cgPay: mcg.pay, note: scheduleNote(mcg) });
+}
+function showPendingArrivalNotice(ptId) {
+  const pt = patients.find(p=>String(p.id)===String(ptId));
+  const mcg = pendingRepMsgCg(pt);
+  if(!mcg) { toast('예정 교체 간병인 정보가 없어요', true); return; }
+  showArrivalNoticePopup(mcg, { note: scheduleNote(mcg) });
+}
+// 예약매칭(nextAssign): 지금 다른 환자를 간병 중이지만 다음 환자로 예약된 간병인
+function reservedMsgCg(cg) {
+  if(!cg || !cg.nextAssign) return null;
+  const na = cg.nextAssign;
+  return Object.assign({}, cg, {
+    startDate: na.startDate || '', startTime: na.startTime || '',
+    endDate: na.endDate || '', endTime: na.endTime || ''
+  });
+}
+function showReservedMatchMessage(cgId) {
+  const cg = caregivers.find(x=>String(x.id)===String(cgId));
+  const mcg = reservedMsgCg(cg);
+  const pt = mcg ? patients.find(p=>String(p.id)===String(cg.nextAssign.patientId)) : null;
+  if(!mcg || !pt) { toast('예약된 환자를 찾을 수 없어요', true); return; }
+  showMatchMessagePopup(pt, mcg, { useCgSchedule: true, cgPay: cg.nextAssign.pay, note: scheduleNote(mcg) + ` · ${pt.name} 환자(예약)` });
+}
+function showReservedArrivalNotice(cgId) {
+  const cg = caregivers.find(x=>String(x.id)===String(cgId));
+  const mcg = reservedMsgCg(cg);
+  if(!mcg) { toast('예약 정보가 없어요', true); return; }
+  showArrivalNoticePopup(mcg, { note: scheduleNote(mcg) + ` · ${cg.nextAssign.patientName||''} 환자(예약)` });
 }
 
 function openCgDetail(id) {
@@ -6493,6 +6550,7 @@ function openCgDetail(id) {
       <button class="btn btn-teal btn-sm" onclick="closeOverlay('cg-overlay');editCg('${cg.id}')">수정</button>
       ${pt?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="showMatchMessage('${cg.id}')">📋 매칭 안내 문자</button>`:''}
       <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="showArrivalNoticePopup(caregivers.find(x=>String(x.id)===String('${cg.id}')))">📋 입실 안내 문자</button>
+      ${cg.nextAssign?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="showReservedMatchMessage('${cg.id}')">📅 예약(${cg.nextAssign.patientName||'다음 환자'}) 매칭 문자</button><button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="showReservedArrivalNotice('${cg.id}')">📅 예약(${cg.nextAssign.patientName||'다음 환자'}) 입실 문자</button>`:''}
       ${cg.patientId&&cg.workStatus==='근무중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="closeOverlay('cg-overlay');openEarlyTerminate('${cg.id}')">중도종료</button>`:''}
       ${cg.patientId&&cg.workStatus==='대기중'?`<button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="openPreStartCancel('${cg.id}')">🚫 시작 전 취소</button>`:''}
       ${cg.workStatus==='종료'?`<button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="cancelEarlyTerminate('${cg.id}')">↩ 종료취소</button>`:''}
@@ -10556,16 +10614,48 @@ function formatSchedule(dateStr, timeStr) {
 }
 
 // 간병인 매칭 시 간병인에게 보내는 안내 메시지 (일정/기간/병원/환자/보호자연락처는 환자 정보 기준, 간병비는 환자 금액-5,000원)
-function buildMatchMessage(pt, cg) {
-  const schedule = formatSchedule(pt?.startDate || cg?.startDate, pt?.startTime || cg?.startTime || '');
-  const hasEndDate = !!(pt?.endDate || cg?.endDate);
-  const endSchedule = hasEndDate ? formatSchedule(pt?.endDate || cg?.endDate, pt?.endTime || cg?.endTime || '') : '미정';
-  const duration = pt?.duration || '________';
+// (26_10_22_02) 매칭 문자 일정을 "간병인 본인의 입실 예정 일정"으로 써야 하는지 판단.
+// 간병인 시작일시가 환자 최초 시작일시보다 늦으면(=교체/맞교체/시차교체로 중간에 들어온 간병인)
+// 환자 최초 시작일이 아니라 그 간병인의 실제 입실 일정을 안내해야 함. 최초 간병인은 시작일시가
+// 환자와 같으므로 기존 문자와 완전히 동일하게 나옴.
+function matchUsesCgSchedule(pt, cg) {
+  if(!cg || !cg.startDate || !pt || !pt.startDate) return false;
+  const c = calcEndDt(cg.startDate, cg.startTime || '00:00');
+  const p = calcEndDt(pt.startDate, pt.startTime || '00:00');
+  return !!(c && p && c.getTime() > p.getTime());
+}
+// 시작일~마감일 일수 ('N일') — 맞교체/시차교체의 repDays 계산과 동일한 방식
+function matchSpanDays(startDate, endDate) {
+  const s = parseLocalDate(startDate), e = parseLocalDate(endDate);
+  if(!s || !e) return '';
+  const n = Math.round((e - s) / 86400000);
+  return n >= 0 ? n + '일' : '';
+}
+
+// opts (선택, 26_10_22_02): { useCgSchedule: 간병인 일정 강제 사용, cgPay: 간병인 일급 직접 지정 }
+// — 예정간병인(맞교체 대기·예약매칭)에게 인계 전에 미리 보낼 때 사용. 생략하면 기존과 동일.
+function buildMatchMessage(pt, cg, opts) {
+  opts = opts || {};
+  const useCg = !!(cg && cg.startDate && (opts.useCgSchedule || matchUsesCgSchedule(pt, cg)));
+  let schedule, hasEndDate, endSchedule, duration;
+  if(useCg) {
+    const eDate = cg.endDate || pt?.endDate || '';
+    const eTime = cg.endDate ? (cg.endTime || '') : (pt?.endTime || '');
+    schedule    = formatSchedule(cg.startDate, cg.startTime || '');
+    hasEndDate  = !!eDate;
+    endSchedule = hasEndDate ? formatSchedule(eDate, eTime) : '미정';
+    duration    = hasEndDate ? (matchSpanDays(cg.startDate, eDate) || '________') : '미정';
+  } else {
+    schedule    = formatSchedule(pt?.startDate || cg?.startDate, pt?.startTime || cg?.startTime || '');
+    hasEndDate  = !!(pt?.endDate || cg?.endDate);
+    endSchedule = hasEndDate ? formatSchedule(pt?.endDate || cg?.endDate, pt?.endTime || cg?.endTime || '') : '미정';
+    duration    = pt?.duration || '________';
+  }
   const hospital = (pt?.hospital||'') + (pt?.station ? ' / '+pt.station : '') + (pt?.room ? ' '+pt.room : '') || '________';
   const ptName   = pt?.name || '________';
   const guardianPhone = formatPhone(pt?.contact) || '________';
   const basePay  = pt?.pay ? Number(pt.pay) : (cg?.pay ? Number(cg.pay)+5000 : 0);
-  const cgPay    = basePay ? Math.max(0, basePay - 5000) : 0;
+  const cgPay    = (opts.cgPay && Number(opts.cgPay)) ? Number(opts.cgPay) : (basePay ? Math.max(0, basePay - 5000) : 0);
   const payStr   = cgPay ? cgPay.toLocaleString()+'원' : '________';
   // 마감일이 미정인 경우 24시간 교대 기준 안내 문구를 일정 줄 바로 아래에 덧붙임
   const shiftNote = hasEndDate ? '' : '\n*본 근무는 24시간을 기준으로 운영됩니다. (예: 오늘 09:00 출근 ~ 익일 09:00 퇴근)';
@@ -10606,15 +10696,21 @@ function buildArrivalNotice() {
 }
 
 // 입실 안내 문자 팝업 표시 (공용 헬퍼) — 모든 간병인 동일 양식
-function showArrivalNoticePopup(cg) {
+// (26_10_22_02) extra 선택: { note: 상단 안내줄(예: 입실 예정 일시), matchMsg: 함께 복사할 매칭 안내 문자 }
+function showArrivalNoticePopup(cg, extra) {
+  if(!cg) return '';
+  extra = extra || {};
   const msg = buildArrivalNotice();
   const popup = document.getElementById('remind-popup');
   resetPopupButtons();
   document.getElementById('remind-popup-body').innerHTML =
-    `📋 <strong>${cg.name}</strong> 님께 보낼 입실 안내 문자예요.\n\n` +
-    `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:6px;font-size:12px;white-space:pre-wrap;line-height:1.8">${msg}</div>`;
+    `📋 <strong>${cg.name}</strong> 님께 보낼 입실 안내 문자예요.` +
+    (extra.note ? `\n<span style="font-size:11px;opacity:.9">${extra.note}</span>` : '') + `\n\n` +
+    `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:6px;font-size:12px;white-space:pre-wrap;line-height:1.8">${msg}</div>` +
+    (extra.matchMsg ? `<div style="font-size:11px;margin-top:6px;opacity:.85">매칭 안내 문자도 아래 버튼으로 복사할 수 있어요</div>` : '');
   popup.style.display = 'block';
   addPopupCopyBtn('remind-copy-btn', '📋 입실 안내 문자 복사', msg);
+  if(extra.matchMsg) addPopupCopyBtn('remind-copy-btn2', '📋 매칭 안내 메시지 복사', extra.matchMsg);
   if(cfg.sound !== false) playBeep();
   return msg;
 }
@@ -16915,9 +17011,17 @@ function checkAutoEnd() {
 
   // 연장 후 예약 교체로 새 간병인에게 인계된 경우 → 매칭 안내 메시지 자동 팝업
   // (여러 건이 한 번에 인계되면 마지막 건이 팝업에 표시됨)
+  // (26_10_22_02) 맞교체·연장 후 예약교체처럼 인계 즉시 '근무중'이 된 간병인은 checkAutoStart()를
+  // 거치지 않아 입실 안내 문자가 안 떴음 → 입실 시각인 지금 입실 안내 문자를 띄우고 매칭 문자도 함께 복사 가능.
+  // 교체(시차)처럼 '대기중'으로 등록된 경우는 기존대로 매칭 문자를 띄우고, 입실 문자는 실제 입실
+  // 시각에 checkAutoStart()가 띄움.
   if(promotedItems.length > 0) {
     const last = promotedItems[promotedItems.length - 1];
-    showMatchMessagePopup(last.pt, last.newCg);
+    if(last.newCg && last.newCg.workStatus === '근무중') {
+      showArrivalNoticePopup(last.newCg, { note: scheduleNote(last.newCg) + ` · ${last.pt.name} 환자 인계`, matchMsg: buildMatchMessage(last.pt, last.newCg) });
+    } else {
+      showMatchMessagePopup(last.pt, last.newCg);
+    }
   }
 
   if(changed) {
