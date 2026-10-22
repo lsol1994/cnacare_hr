@@ -2377,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_21_01';
+const APP_BUILD = '26_10_22_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3425,12 +3425,40 @@ function closeOverlay(id, e) {
 // ─── BUILD POST TEXT ───
 // ─── 재모집 공고 생성 ───
 // 기본공고 → 수정본 → 수정본에서 시작일/기간만 재모집 값으로 교체
+// (26_10_22_01) 공고 한 건 텍스트에 다른 공고가 붙어 저장된 경우(일괄복사 결과를 붙여넣고 저장 등)
+// 두 번째 공고 제목 줄(<구인/… 또는 <급구/…)부터 뒤를 잘라 첫 번째 공고만 남긴다.
+// 일괄복사 구분선(───) 줄도 함께 제거.
+function stripExtraPosts(text) {
+  if(!text) return text;
+  const lines = String(text).split('\n');
+  const isTitle = l => /^<(구인|급구)\//.test(l.trim());
+  const first = lines.findIndex(isTitle);
+  if(first < 0) return text;
+  const second = lines.findIndex((l, i) => i > first && isTitle(l));
+  if(second < 0) return text;
+  let cut = second;
+  while(cut > first + 1 && (/^\s*$/.test(lines[cut-1]) || /^─{3,}\s*$/.test(lines[cut-1].trim()))) cut--;
+  return lines.slice(0, cut).join('\n');
+}
+// 재모집 수정본이 "어떤 재모집 값 기준으로 저장됐는지" 표시하는 키
+// (저장 이후 재모집 시작일/시작시간/기간이 바뀌었을 때만 수정본 위에 새 값을 다시 반영하기 위함)
+function recruitEditKey(p) {
+  const ri = p && p.recruitInfo;
+  return ri ? [ri.startDate||'', ri.startTime||'', ri.duration||''].join('|') : '';
+}
+
 function buildRecruitPost(p) {
   const ri = p.recruitInfo;
-  if(!ri) return p._editedPost || buildPost(p);
+  if(!ri) return stripExtraPosts(p._editedPost) || buildPost(p);
+
+  // (26_10_22_01) 현재 재모집 값 기준으로 직접 저장한 수정본이면 손대지 않고 그대로 사용
+  // (예전엔 제목~협회비 구간을 매번 다시 생성해서, 그 구간 안에서 고친 내용이 저장해도 다 되돌아갔음)
+  if(p._editedPost && p._editedPostRiKey && p._editedPostRiKey === recruitEditKey(p)) {
+    return stripExtraPosts(p._editedPost);
+  }
 
   // 베이스: 수정본 있으면 수정본, 없으면 기본 공고
-  const text = p._editedPost || buildPost(p);
+  const text = stripExtraPosts(p._editedPost) || buildPost(p);
 
   // 재모집 시작일/기간으로 임시 치환한 사본을 만들어서, 그 내용으로 제목~협회비 구간만 갈아끼움
   // (smartUpdatePost가 병원/시작/환자/가격/기간이 여러 줄로 접히는 경우까지 정확히 처리해줌)
@@ -4581,6 +4609,8 @@ function savePatientEdit(id) {
   // 수정본 스마트 업데이트
   if(p._editedPost) {
     p._editedPost = smartUpdatePost(p._editedPost, p);
+    // 재모집 중이면 위 갱신이 원래 시작일 기준이라, 공고 표시 때 재모집 값을 다시 반영하도록 키 해제
+    if(p.recruitInfo) delete p._editedPostRiKey;
   }
   // (26_10_07_04) 종료된 환자의 종료일시를 고친 경우 → 마지막 담당 간병인의 종료일시도 같이 변경
   // (간병인이 이미 다른 환자로 재배정돼 과거이력에만 남아있어도 그 이력을 고침)
@@ -5028,6 +5058,9 @@ function renderSend() {
   // 시작일이 빠른 순으로 정렬 (공고에 실제로 나가는 시작일 기준, 시작일 없는 건은 맨 뒤)
   active.sort(cmpSendStart);
   recruit.sort(cmpSendStart);
+  // (26_10_22_01) 목록에서 빠진 환자(매칭·종료 등)가 체크된 채로 남아 일괄복사에 몰래 섞이지 않도록 정리
+  const visibleIds = new Set([...active, ...recruit].map(p=>String(p.id)));
+  [...selectedPtIds].forEach(id => { if(!visibleIds.has(id)) selectedPtIds.delete(id); });
   const el = document.getElementById('send-pt-list');
 
   function ptCard(p, isRecruit) {
@@ -5075,6 +5108,13 @@ function selectSendPt(id) {
   const card = document.getElementById('send-preview-card');
   if(selPt) {
     const preview  = document.getElementById('send-preview');
+    // (26_10_22_01) 저장된 수정본에 다른 공고가 붙어있으면 첫 번째 공고만 남기고 바로 정리해서 저장
+    if(selPt._editedPost && stripExtraPosts(selPt._editedPost) !== selPt._editedPost) {
+      selPt._editedPost = stripExtraPosts(selPt._editedPost);
+      markPtEdited(selPt.id);
+      save();
+      toast('⚠️ 이 환자 수정본에 다른 공고가 같이 저장돼 있어서 정리했어요');
+    }
     const basePost = getBasePost(selPt);
 
     // 기존 수정본이 현재 원본(재모집/일반)과 너무 다르면 무시하고 원본 사용
@@ -5097,8 +5137,11 @@ function selectSendPt(id) {
       preview.value = basePost;
       if(edited) {
         delete selPt._editedPost;
+        delete selPt._editedPostRiKey;
         const idx = patients.findIndex(p=>String(p.id)===String(selPt.id));
-        if(idx>-1) delete patients[idx]._editedPost;
+        if(idx>-1) { delete patients[idx]._editedPost; delete patients[idx]._editedPostRiKey; }
+        markPtEdited(selPt.id);
+        save();
       }
     }
 
@@ -5200,7 +5243,7 @@ function copyAllSelected() {
     .filter(Boolean)
     .sort(cmpSendStart);
   selPts.forEach(p => {
-    const post = p.recruitInfo ? buildRecruitPost(p) : (p._editedPost || buildPost(p));
+    const post = p.recruitInfo ? buildRecruitPost(p) : (stripExtraPosts(p._editedPost) || buildPost(p));
     posts.push(post);
   });
   const combined = posts.join('\n\n' + '─'.repeat(10) + '\n\n');
@@ -5225,10 +5268,14 @@ function updateSendEditLabel() {
   const lbl = document.getElementById('send-edit-label');
   if(!lbl || !selPt) return;
   const preview  = document.getElementById('send-preview');
-  const original = getBasePost(selPt);
-  const isEdited = preview.value !== original;
-  if(isEdited) {
-    lbl.textContent = '✏️ 수정본 사용 중';
+  // (26_10_22_01) 저장된 상태(수정본 또는 원본)와 비교 — 예전엔 재모집 환자는 저장 직후에도 "원본"으로 떠서
+  // 저장이 안 된 것처럼 보였음
+  const saved = selPt.recruitInfo ? buildRecruitPost(selPt) : (selPt._editedPost || buildPost(selPt));
+  if(preview.value !== saved) {
+    lbl.textContent = '✏️ 수정 중 (저장 안 됨)';
+    lbl.style.color = 'var(--red)';
+  } else if(selPt._editedPost && (!selPt.recruitInfo || selPt._editedPostRiKey === recruitEditKey(selPt))) {
+    lbl.textContent = '✏️ 수정본 저장됨';
     lbl.style.color = 'var(--amber)';
   } else {
     lbl.textContent = '원본';
@@ -5238,20 +5285,32 @@ function updateSendEditLabel() {
 
 function saveSendEdit() {
   if(!selPt) return;
-  selPt._editedPost = document.getElementById('send-preview').value;
+  const previewEl = document.getElementById('send-preview');
+  const raw = previewEl.value;
+  const clean = stripExtraPosts(raw);
+  const stripped = clean !== raw;
+  if(stripped) previewEl.value = clean;
   const idx = patients.findIndex(p=>String(p.id)===String(selPt.id));
-  if(idx>-1) patients[idx]._editedPost = selPt._editedPost;
+  const target = idx>-1 ? patients[idx] : selPt;
+  target._editedPost = clean;
+  // 재모집 환자는 어떤 재모집 값 기준으로 저장했는지 기록 → 그 값이 그대로면 수정본을 그대로 사용
+  if(target.recruitInfo) target._editedPostRiKey = recruitEditKey(target);
+  else delete target._editedPostRiKey;
+  if(target !== selPt) { selPt._editedPost = target._editedPost; selPt._editedPostRiKey = target._editedPostRiKey; }
+  markPtEdited(selPt.id); // (26_10_22_01) _ts 갱신 — 없으면 다른 기기의 옛 수정본이 서버를 다시 덮어씀
   save();
   updateSendEditLabel();
-  toast('✅ 수정본 저장됐어요. 새로고침 후에도 유지됩니다.');
+  toast(stripped ? '✅ 수정본 저장됐어요 (같이 붙어있던 다른 공고는 빼고 저장)' : '✅ 수정본 저장됐어요. 새로고침 후에도 유지됩니다.');
 }
 
 function resetSendPreview() {
   if(!selPt) return;
-  document.getElementById('send-preview').value = getBasePost(selPt);
   delete selPt._editedPost;
+  delete selPt._editedPostRiKey;
   const idx = patients.findIndex(p=>String(p.id)===String(selPt.id));
-  if(idx>-1) delete patients[idx]._editedPost;
+  if(idx>-1) { delete patients[idx]._editedPost; delete patients[idx]._editedPostRiKey; }
+  document.getElementById('send-preview').value = getBasePost(selPt);
+  markPtEdited(selPt.id);
   save();
   updateSendEditLabel();
   toast('원본 공고로 복원됐어요');
