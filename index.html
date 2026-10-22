@@ -2268,7 +2268,7 @@ function clearDeletedPtIds() { localStorage.removeItem('cnc_deletedPtIds'); }
 // (26_10_01_05) 삭제 표시(cnc_deletedCgIds/cnc_deletedPtIds)가 무기한 남아 서버에 살아있는 레코드를
 // 이 기기에서만 영영 숨기던 문제 방지. 삭제 후 24시간이 지났는데도 Firebase에 그대로 있으면
 // = 삭제가 서버에 반영되지 못했거나 다른 기기가 되살린 것 → 이 기기에서도 숨김을 풀고 경고만 띄움.
-// (원근·이복순이 한 PC에서만 안 보여 윤광현·양정희 매칭 간병인이 비어 보이던 건)
+// (일부 간병인이 한 PC에서만 안 보여 그 간병인이 매칭된 환자의 담당 간병인이 비어 보이던 건)
 const DELETED_STALE_MS = 24 * 60 * 60 * 1000;
 function releaseStaleDeletedIds(storageKey, fbList) {
   try {
@@ -2377,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_22_03';
+const APP_BUILD = '26_10_22_04';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3662,7 +3662,7 @@ function parseVendorMessageForRegistration(text) {
     return '';
   };
 
-  // 이름: "남영욱(여, 52세)" → 이름/성별/나이 분리 (괄호가 있어야만 성별로 인식 — 안 그러면
+  // 이름: "홍길동(여, 52세)" → 이름/성별/나이 분리 (괄호가 있어야만 성별로 인식 — 안 그러면
   // "남OO"처럼 이름 자체가 "남"으로 시작할 때 성별로 잘못 인식하는 문제가 있어서 괄호를 필수로 둠)
   const nameRaw = getLine('이름');
   let name = nameRaw, gender = '', age = '';
@@ -4137,7 +4137,7 @@ function openPatient(id) {
   // 종료된 환자인데 위에서 못 찾은 경우: 연결이 끊긴 마지막 담당 간병인을 대신 찾음
   // (26_10_01_03) 예전엔 earlyEndPatientId(중도종료·시작 전 취소)가 있으면 무조건 1순위로 골라서,
   // 시작 전 취소된 간병인(0일 근무)이 실제로 근무 후 정상 종료돼 이력에만 남은 간병인을 가려버렸음
-  // (서명숙 환자: 시작 전 취소 이영애(1)만 보이고 실제 근무한 최진애가 안 보이던 문제).
+  // (환자A: 시작 전 취소된 간병인B(1)만 보이고 실제 근무한 간병인C가 안 보이던 문제).
   // 이제 중도종료·이력 후보를 전부 모아서 "실제 근무한 건 우선 → 가장 늦게 마감된 건"으로 고름.
   const ptCgHist = getPatientCgHistory(p.id);
   let lastCg = null;
@@ -4458,7 +4458,7 @@ function editPatient(id) {
 }
 
 // (26_10_19_04) 이미 종료된 건의 종료일을 "미래"로 바꾸면 날짜만 연장된 것처럼 보이고 상태는 종료로 남음.
-// (박양숙 건: 원래 마감 10/18 10:00에 자동종료 → 종료된 줄 모르고 환자 수정에서 마감일을 10/22로 변경
+// (환자D 건: 원래 마감 10/18 10:00에 자동종료 → 종료된 줄 모르고 환자 수정에서 마감일을 10/22로 변경
 //  → 환자·간병인 모두 "종료 10/22", 종료보고 본문도 10/22로 바뀌어 "연장했는데 종료됐다"로 보였음)
 // 종료된 환자엔 📅 연장 버튼이 없어서 수정 폼으로 날짜를 늘리는 실수가 생기므로 확인창으로 막음.
 function confirmEndedFutureEdit(who, newEndDate, newEndTime, oldEndDate, oldEndTime) {
@@ -4585,7 +4585,7 @@ function savePatientEdit(id) {
       }
       if(newEndDate) {
         // (26_10_01_02) 이미 종료된 간병인은 제외 — 정상 종료돼도 patientId가 남아있어서, 예전엔 환자 정보만
-        // 고쳐도 끝난 근무건의 시작·마감이 환자 일정으로 덮어써졌음(박옥순·김이리나·한정환 등 현재값 오염 원인).
+        // 고쳐도 끝난 근무건의 시작·마감이 환자 일정으로 덮어써졌음(여러 간병인의 현재값 오염 원인).
         // 끝난 근무건의 날짜 정정은 간병인 쪽(마감일 직접수정/간병인 수정)에서 해야 함.
         matched.filter(c => c.workStatus !== '종료').forEach(c=>{
           c.endDate = newEndDate;
@@ -5007,7 +5007,7 @@ function deletePatient(id) {
   // 기록이 안 됨. (2026-09-08 이전: 이 처리 자체가 없어서 "매칭 중이던 근무건"이 삭제되면
   // 근무이력·미정산금액·배상보험 상태가 통째로 유실되고, 나중에 이 간병인 레코드가 다른
   // 환자로 재사용될 때 낡은 배상보험 상태가 새 근무건에 그대로 노출되는 사고로 이어졌음 —
-  // 김금자님 건 참고)
+  // 간병인E 건 참고)
   caregivers.forEach(cg => {
     if(String(cg.patientId)===String(id)) {
       saveToAssignHistory(cg); // 근무이력 + 미정산금액 보존 (환자가 지워지기 전에 먼저 기록)
@@ -5366,7 +5366,7 @@ function parseVendorMessage(text) {
     return '';
   };
 
-  // 이름: "김은기(남, 64세)" → 성별/나이만 추출 (이름 자체는 공고에 표시 안 함)
+  // 이름: "홍길동(남, 64세)" → 성별/나이만 추출 (이름 자체는 공고에 표시 안 함)
   // "이름" 줄에 성별/나이가 없으면, "성별"/"나이" 라벨이 따로 있는 경우도 시도
   const nameRaw = getLine('이름', '환자');
   let gender = '', age = '';
@@ -6995,7 +6995,7 @@ function saveToAssignHistory(cg, overridePatientId) {
   }
 
   // (26_10_01_01) 환자 삭제 후 재등록된 경우, 삭제된 옛 환자ID로 남은 같은 근무건 이력을 정리
-  // — 안 그러면 같은 근무가 옛ID/새ID 두 건으로 이중 집계됨 (최진애·서명숙, 김옥란·정정숙 건)
+  // — 안 그러면 같은 근무가 옛ID/새ID 두 건으로 이중 집계됨 (실제 발생 사례 2건)
   pruneReRegisteredOrphanHist(cg, pt);
 
   // 같은 환자 + 시작일이 이미 있으면 업데이트
@@ -7083,9 +7083,9 @@ function pickNewerHist(local, remote) {
 // 각 보정은 고정 시각(at)을 수정 시각으로 찍으므로 어느 기기에서 돌아도 결과가 같고,
 // 보정 이후 사람이 직접 고친 값(더 최근 시각)은 절대 덮어쓰지 않음. 이력이 없는 기기는 건너뜀.
 const HIST_DATA_FIXES = [
-  // 신현이 — 최려자 9/14 12:30 맞교체 대근(2일). 9/16 교체 처리가 다른 간병인 기준으로 돼서
+  // 간병인F — 환자G 9/14 12:30 맞교체 대근(2일). 9/16 교체 처리가 다른 간병인 기준으로 돼서
   // 이력 마감이 환자 마감(10/24)·근무중으로 남아 매주 가짜 주급 카드가 생기던 건
-  { id: '26_10_06_shinhyuni', at: 1791277200000, cgId: '1789395841969', patientId: '1787897608464', startDate: '2026-09-14',
+  { id: '26_10_06_01_fix1', at: 1791277200000, cgId: '1789395841969', patientId: '1787897608464', startDate: '2026-09-14',
     set: { endDate: '2026-09-16', endTime: '12:30', status: '종료', settleAmount: 0, settleHolidayPremium: 0 } }
 ];
 function applyHistDataFixes() {
@@ -7459,7 +7459,7 @@ function mergeAllDuplicateCg() {
     const keepCg   = sorted[0];
     const deleteCgs = sorted.slice(1);
     // 현장취소 지급 기록(onsiteCancelDate)은 그 레코드에만 있고 병합 시 옮겨지지 않음 →
-    // 지우면 캘린더의 현장취소 지급 카드가 사라지므로 자동 정리에서 제외 (문정옥 8/5 건)
+    // 지우면 캘린더의 현장취소 지급 카드가 사라지므로 자동 정리에서 제외 (8/5 실제 사례)
     if(deleteCgs.some(cg => cg.onsiteCancelDate)) { skippedOnsite.push(name); return; }
     mergedGroups++;
     if(!keepCg.assignHistory) keepCg.assignHistory = [];
@@ -10435,7 +10435,7 @@ function findCgForPatient(p) {
 
     // (26_10_01_04) 1·2순위 통합: 라이브 배정 + 근무이력 + 중도종료 건을 모두 모아 환자 상세와 같은 기준
     // ("실제 근무한 건 우선 → 가장 늦게 마감된 건")으로 고름. 예전엔 patientId/earlyEndPatientId만 순서대로 봐서
-    // 시작 전 취소된 간병인(이영애(1))이 실제 근무 후 이력에만 남은 간병인(최진애)을 가려 종료보고에 잘못 들어갔음.
+    // 시작 전 취소된 간병인(간병인B(1))이 실제 근무 후 이력에만 남은 간병인(간병인C)을 가려 종료보고에 잘못 들어갔음.
     const hist = getPatientCgHistory(p.id);
     if(hist.length) {
       const pick = hist.find(x => !x.cancelled) || hist[0];
@@ -10961,7 +10961,7 @@ function fixRematchAutoEndBug() {
 
 // ─── 근무이력 누락 자동 복구 (isReturningCg 게이트 버그로 생긴 과거 데이터 정리, 2026-09-15) ───
 // 환자의 recruitHistory에 prevCg로 이름이 남아있는데, 정작 그 간병인 쪽 assignHistory에는
-// 이 근무건이 없는 경우를 찾아 복구한다 (박종보/김춘복 건과 동일한 패턴).
+// 이 근무건이 없는 경우를 찾아 복구한다 (이전 실제 사례와 동일한 패턴).
 // 라이브 필드(patientId 해제됨 + endDate가 recruitHistory의 endDate와 정확히 일치)가 그
 // 근무건 그대로 남아있는 경우만 saveToAssignHistory()로 안전하게 자동 복구하고, 그 사이 다른
 // 환자로 재배정되어 라이브 필드가 이미 덮어써졌거나 동명이인이라 특정할 수 없는 경우는
@@ -15421,7 +15421,7 @@ function insEsc(s) {
   return String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
 function insNormName(s) { return String(s||'').toUpperCase().replace(/[^A-Z가-힣]/g,''); }
-// "ZINSHUNJIN(김순금)" → ['ZINSHUNJIN','김순금']
+// "HONGGILDONG(홍길동)" → ['HONGGILDONG','홍길동']
 function insRowNames(name) {
   const s = String(name||'');
   const m = s.match(/^([^(（]*)[(（]([^)）]*)[)）]?/);
@@ -16796,7 +16796,7 @@ function checkAutoEnd() {
     // (26_10_22_03) 같은 환자에 연결된 다른 미종료 간병인 (있으면 이 cg는 정리 안 된 앞 간병인)
     const _otherActiveForPt = pt ? caregivers.find(c => String(c.id) !== String(cg.id) && String(c.patientId) === String(pt.id) && c.workStatus !== '종료') : null;
 
-    // (26_10_22_03) 마감일 불일치 보정 — 심윤택 건 원인.
+    // (26_10_22_03) 마감일 불일치 보정 — 실제 발생 사례(26_10_22) 원인.
     // 환자 마감(예: 10/23)은 그대로인데 간병인 마감만 더 이른 날짜(예: 10/22)로 어긋나 있으면, 아래 분기가
     // 이걸 "연장 후 대체 간병인 미확보"로 오인해 간병인을 종료하고 환자를 재모집(모집중)으로 돌려버렸음.
     // 교체 예약(맞교체·연장 후 예약교체·교체(시차))이 없는데 날짜만 다른 건 데이터 불일치이므로, 종료하지 않고
@@ -18133,7 +18133,7 @@ function autoMatch() {
     // 레코드일 경우 이전 근무건의 배상보험 상태(만료처리/만료일 지남 등)가 초기화
     // 안 된 채 그대로 새 근무건에 남아있게 됨 — 재배정/등록 화면(saveCg, confirmReassign)은
     // 전부 syncInsuranceForPatientChange()를 거치는데 이 자동매칭 경로만 빠져있었음.
-    // (2026-09-08: 김금자님 건 — 만료처리된 낡은 보험 상태가 오늘 시작한 새 근무건에
+    // (2026-09-08: 간병인E 건 — 만료처리된 낡은 보험 상태가 오늘 시작한 새 근무건에
     // 그대로 노출된 사고의 원인)
     syncInsuranceForPatientChange(cg, cg.patientId, String(p.id));
     cg.patientId = String(p.id);
