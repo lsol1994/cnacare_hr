@@ -4034,7 +4034,7 @@ function ptRowHTML(p) {
         ${(ptDisplayTab(p)==='모집중' && !p.reservedCgId && !p.pendingReplacement && !caregivers.some(c=>String(c.patientId)===String(p.id)))?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="openReserveCg('${p.id}')">📅 간병인 예약</button>`:''}
         ${(p.status==='매칭완료' && !p.reservedCgId)?`<button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="openExtendPatient('${p.id}')">📅 연장</button>`:''}
         ${(p.status==='매칭완료' && !p.recruitInfo && !p.reservedCgId)?`<button class="btn btn-sm" style="border-color:var(--green);color:var(--green)" onclick="openDirectSwap('${p.id}')">🔀 맞교체</button><button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="openGapSwap('${p.id}')">⏱️ 교체(시차)</button>`:''}
-        <button class="btn btn-sm" onclick="doCopy(patients.find(x=>String(x.id)==='${p.id}')?._editedPost || buildPost(patients.find(x=>String(x.id)==='${p.id}')))">
+        <button class="btn btn-sm" onclick="doCopy(stripExtraPosts(patients.find(x=>String(x.id)==='${p.id}')?._editedPost) || buildPost(patients.find(x=>String(x.id)==='${p.id}')))">
           <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>복사
         </button>
         <button class="btn btn-sm" onclick="openPatient('${p.id}')">상세</button>
@@ -4288,7 +4288,7 @@ function openPatient(id) {
       ${(p.status==='종료' && !reEntryNextPt(p)) ? `<button class="btn btn-sm" style="border-color:#5E35B1;color:#5E35B1" onclick="openReEntry('${p.id}')">🔁 재입실</button>` : ''}
       <button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="confirmOnsiteCancel('${p.id}')">🚫 현장 취소</button>
       <button class="btn btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="confirmOnsiteCancelReassign('${p.id}')">🚫 현장 취소(간병인만)</button>
-      <button class="btn btn-sm" onclick="doCopy(patients.find(x=>String(x.id)==='${p.id}')?._editedPost || buildPost(patients.find(x=>String(x.id)==='${p.id}')));closeOverlay('pt-overlay')">공고 복사</button>
+      <button class="btn btn-sm" onclick="doCopy(stripExtraPosts(patients.find(x=>String(x.id)==='${p.id}')?._editedPost) || buildPost(patients.find(x=>String(x.id)==='${p.id}')));closeOverlay('pt-overlay')">공고 복사</button>
       <button class="btn btn-red btn-sm" onclick="deletePatient('${p.id}')">환자 삭제</button>
     </div>
     <div class="hr"></div>
