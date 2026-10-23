@@ -2377,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_23_01';
+const APP_BUILD = '26_10_23_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3698,10 +3698,30 @@ function parseVendorMessageForRegistration(text) {
     }
   }
 
-  // 병증 칸에 증상이 너무 많이 들어가지 않도록, 슬래시(/)로 구분된 첫 번째 묶음만 병증에 넣고
-  // 나머지 묶음은 "상세 증상" 칸으로 보냄. 쉼표로 이어진 증상은 한 묶음으로 보고 병증에 그대로 둠
+  // 병증/상세증상 분리 규칙:
+  //  - 상태의 맨 처음 묶음 = 병증/진단명
+  //  - 병증 뒤 "(10/20)" 같은 괄호 안 날짜(수술·시술일)는 병증에 함께 포함 → 괄호 안의 "/"에서는 자르지 않음
+  //    (괄호 없이 "10/20"처럼 숫자/숫자로 붙은 날짜도 자르지 않음)
+  //  - 그 다음 "/"로 나뉜 단어들 = 상세증상, "/" 대신 ", "로 이어서 넣음
+  // (예전엔 "/"를 무조건 잘라서 "고관절골절(10/20)/거동불가" → 병증 "고관절골절(10", 상세 "20), 거동불가"로 깨졌음)
+  const splitTopLevelSlash = str => {
+    const out = []; let buf = '', depth = 0;
+    for(let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      if(ch === '(' || ch === '（' || ch === '[') depth++;
+      else if((ch === ')' || ch === '）' || ch === ']') && depth > 0) depth--;
+      if(ch === '/' && depth === 0) {
+        const prev = buf.replace(/\s+$/,'').slice(-1);
+        const next = str.slice(i+1).replace(/^\s+/,'').charAt(0);
+        if(!(/\d/.test(prev) && /\d/.test(next))) { out.push(buf); buf = ''; continue; }
+      }
+      buf += ch;
+    }
+    out.push(buf);
+    return out;
+  };
   let extra = '';
-  const symptoms = diagnosis.split(/\s*\/\s*/).map(s => s.trim().replace(/[,，、]\s*$/,'').trim()).filter(Boolean);
+  const symptoms = splitTopLevelSlash(diagnosis).map(s => s.trim().replace(/[,，、]\s*$/,'').trim()).filter(Boolean);
   if(symptoms.length > 1) {
     diagnosis = symptoms[0];
     extra = symptoms.slice(1).join(', ');
