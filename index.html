@@ -2377,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_22_04';
+const APP_BUILD = '26_10_23_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -12258,6 +12258,61 @@ function calcTotalPayAmount(cg) {
   return (payPerDay * days) + (otHour * OT_PER_HOUR) + holidayPremiumSum(holidayPremiumBlocks(cg));
 }
 
+// (26_10_23_01) calcTotalPayAmount와 같은 규칙으로 근무일수·OT시간만 반환 (지출내용 표시용)
+function calcWorkDaysOt(cg) {
+  if(!cg || !cg.startDate || !cg.endDate) return { days: 0, otHour: 0 };
+  const [sh=8,sm=0] = (cg.startTime||'08:00').split(':').map(Number);
+  const [eh=8,em=0] = (cg.endTime  ||'08:00').split(':').map(Number);
+  const sD = parseLocalDate(cg.startDate), eD = parseLocalDate(cg.endDate);
+  if(!sD || !eD) return { days: 0, otHour: 0 };
+  const startMs = sD.getTime() + (sh*60+sm)*60000;
+  const endMs   = eD.getTime() + (eh*60+em)*60000;
+  if(isNaN(startMs)||isNaN(endMs)||endMs<=startMs) return { days: 0, otHour: 0 };
+  const totalMin  = Math.round((endMs - startMs) / 60000);
+  const fullDays  = Math.floor(totalMin / (24*60));
+  const remainMin = totalMin % (24*60);
+  if(remainMin / 60 >= 10) return { days: fullDays + 1, otHour: 0 };
+  return { days: fullDays, otHour: Math.floor(remainMin / 60) };
+}
+
+// (26_10_23_01) 퇴실일 = 정규 주급일인 경우, 최종정산(OT·자투리)을 그날 주급 카드에 합쳐서 한 건으로 지급
+// 예: 10/16 10:00 ~ 10/23 11:38 → 예전엔 "1주차 주급 7일 875,000원" + "최종정산 0일 10,000원" 두 건,
+//     이제는 "최종 정산(근무 마감) 7일 885,000원(1주차 주급_퇴실, OT 1시간 포함)" 한 건.
+// 명절할증은 기존처럼 별도 카드로 유지. 대시보드 캘린더(라이브 카드) 표시 전용 — 계산 엔진은 그대로.
+// 반환: 합칠 대상이면 { week, settleAmount, totalOwed, alreadyPaid, base, hp, hfLive, wasAdjusted }, 아니면 null
+function calcFinalMergeInfo(cg, dateStr) {
+  if(!cg || !cg.endDate || !cg.pay || cg.onsiteCancelDate) return null;
+  const rawEnd = parseLocalDate(cg.endDate);
+  if(!rawEnd) return null;
+  if(toLocalDateStr(adjustPayDateToMonday(rawEnd)) !== dateStr) return null;
+  const entries = calcPayDates(cg);
+  const weekEntry = entries.filter(p => p.week && p.date === dateStr).sort((a,b) => b.week - a.week)[0];
+  if(!weekEntry) return null;
+  const totalOwed = calcTotalPayAmount(cg);
+  const alreadyPaid = entries.reduce((s,p) => s + (p.amount||0), 0) + totalAdvance(cg);
+  const settleAmount = totalOwed - alreadyPaid;
+  if(settleAmount <= 0) return null;
+  const hfLive = holidayFinalPartPremium(cg);
+  const sp = calHpSplit(settleAmount, hfLive.amount);
+  if(sp.base <= 0) return null; // 명절할증분만 남은 경우는 합칠 기본급이 없음 (할증 카드는 따로 표시)
+  return { week: weekEntry.week, settleAmount, totalOwed, alreadyPaid, base: sp.base, hp: sp.hp, hfLive,
+    wasAdjusted: toLocalDateStr(adjustPayDateToMonday(rawEnd)) !== cg.endDate };
+}
+// 합쳐진 카드의 지출내용 (라이브 pt 또는 이력 h 기준)
+function buildMergedFinalMemo(cg, ptName, hospital, isReplace, week, amount) {
+  function fmtMD(dateStr, timeStr) {
+    const d = parseLocalDate(dateStr);
+    if(!d) return (dateStr||'') + (timeStr?' '+timeStr:'');
+    return (d.getMonth()+1) + '/' + d.getDate() + (timeStr ? ' '+timeStr : '');
+  }
+  const wkStart = parseLocalDate(cg.startDate);
+  wkStart.setDate(wkStart.getDate() + (week-1)*7);
+  const w = calcWorkDaysOt(cg);
+  const days = Math.max(0, w.days - (week-1)*7);
+  const reason = week + '주차 주급_' + (isReplace ? '교체' : '퇴실') + (w.otHour > 0 ? ', OT ' + w.otHour + '시간 포함' : '');
+  return `${ptName||''}_${hospital||''} 간병인(${cg.name||''}) 간병비 지급\n${fmtMD(toLocalDateStr(wkStart), cg.startTime)} ~ ${fmtMD(cg.endDate, cg.endTime)} 총 ${days}일 ${Number(amount||0).toLocaleString()}원(${reason})`;
+}
+
 function calcTotalPay(cg) {
   if(!cg.pay || !cg.startDate || !cg.endDate) return '';
   const payPerDay = Number(cg.pay);
@@ -12716,11 +12771,13 @@ function showCalDetail(dateStr, collectOnly) {
     var bankStr = (cg.bankName||cg.bankAccount)
       ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
       : '';
+    var mergeInfo = calcFinalMergeInfo(cg, dateStr); // (26_10_23_01) 퇴실일=주급일이면 최종정산을 이 카드에 합침
     calcPayDates(cg).forEach(function(p) {
       if(p.date !== dateStr) return;
       paidCgIdsToday[String(cg.id)] = true;
       // (26_10_07_01) 아래 "이력 기반 정규 주급 복구" 블록이 같은 지급건을 한 번 더 만들지 않도록 기록
       livePayKeysToday[livePayKey(cg.id, cg.startDate, p.date, p.label)] = true;
+      var isMerged = !!(mergeInfo && p.week === mergeInfo.week);
       var bgColor = p.isReserve ? '#FFF3E0' : 'var(--amber-lt)';
       var bdColor = p.isReserve ? '#E65100' : 'var(--amber)';
       var pt = resolveCalPt(cg);
@@ -12731,11 +12788,26 @@ function showCalDetail(dateStr, collectOnly) {
       // (26_09_30_07) 명절할증은 별도 카드로 분리 — 이 카드는 기본 급여만
       var hpSp = calHpSplit(p.amount, p.holidayPremium);
       var pBase = hpSp.hp > 0 ? Object.assign({}, p, { amount: hpSp.base, hpSeparate: true }) : p;
+      var cardMemo, cardAmount = pBase.amount, mergeNoteStr = '';
+      if(isMerged) {
+        // 주급 기본급 + 최종정산 기본급(OT·자투리)을 한 건으로 — 명절할증은 각각 별도 카드 유지
+        cardAmount = pBase.amount + mergeInfo.base;
+        var mPtName = pt ? pt.name : (histFallback ? (histFallback.patientName||'') : '');
+        var mHosp = pt ? (pt.hospital||'') : (histFallback ? (histFallback.hospital||'') : '');
+        var mPtRec = pt || (histFallback ? patients.find(function(x){ return String(x.id) === String(histFallback.patientId); }) : null);
+        var mReplace = !!(mPtRec && mPtRec.status !== '종료');
+        cardMemo = (pt || histFallback) ? buildMergedFinalMemo(cg, mPtName, mHosp, mReplace, p.week, cardAmount) : '';
+        var mWo = calcWorkDaysOt(cg);
+        mergeNoteStr = '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + p.label + ' ' + pBase.amount.toLocaleString() + '원 + 마감 정산'
+          + (mWo.otHour > 0 ? '(OT ' + mWo.otHour + '시간)' : '') + ' ' + mergeInfo.base.toLocaleString() + '원</div>';
+      } else {
+        cardMemo = pt ? buildExpenseMemo(cg, pt, pBase) : (histFallback ? buildExpenseMemoFromHistory(cg, histFallback, pBase) : '');
+      }
       // (26_10_14_09) 대시보드 직접 수정값 적용 (환자·간병인 정보는 그대로)
-      var ovx = payOvCard({ cgId: cg.id, startDate: cg.startDate, date: p.date, label: p.label, amount: pBase.amount,
-        memo: pt ? buildExpenseMemo(cg, pt, pBase) : (histFallback ? buildExpenseMemoFromHistory(cg, histFallback, pBase) : ''),
+      var ovx = payOvCard({ cgId: cg.id, startDate: cg.startDate, date: p.date, label: p.label, amount: cardAmount,
+        memo: cardMemo,
         cgName: cg.name, ptName: pt ? pt.name : (histFallback ? (histFallback.patientName||'') : '') });
-      var amountStr = (pBase.amount || hpSp.hp || ovx.ov) ? '<div style="font-size:15px;font-weight:900;color:'+bdColor+';margin-top:4px">' + ovx.amountHtml + '</div>' : '';
+      var amountStr = (cardAmount || hpSp.hp || ovx.ov) ?'<div style="font-size:15px;font-weight:900;color:'+bdColor+';margin-top:4px">' + ovx.amountHtml + '</div>' : '';
       amountStr += calHpSplitNoteHtml(hpSp.hp);
       var bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
       var expenseHtml = '';
@@ -12767,11 +12839,12 @@ function showCalDetail(dateStr, collectOnly) {
       payEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid ' + bdColor + ';margin-bottom:8px;background:' + bgColor + ';border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
-        + '<span style="font-size:11px;font-weight:700;color:' + bdColor + '">💰 ' + p.label + (isEndWeekPay(cg, p) ? ' (근무 마감)' : '') + (p.isReserve?' [주말·공휴일 조정]':'') + '</span>'
+        + '<span style="font-size:11px;font-weight:700;color:' + bdColor + '">💰 ' + (isMerged ? '최종 정산 (근무 마감)' : p.label + (isEndWeekPay(cg, p) ? ' (근무 마감)' : '')) + (p.isReserve?' [주말·공휴일 조정]':'') + '</span>'
         + unpaidToggleHtml(cg.id, p.date, p.label, ovx.amount)
         + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ptStr + '</div>'
         + amountStr
+        + mergeNoteStr
         + bankHtml
         + reserveStr
         + advanceNoteStr
@@ -12908,6 +12981,9 @@ function showCalDetail(dateStr, collectOnly) {
     // (26_09_30_07) 명절할증은 별도 카드로 분리
     var hfLive = holidayFinalPartPremium(cg);
     var fSp = calHpSplit(settleAmount, hfLive.amount);
+    // (26_10_23_01) 같은 날 주급 카드에 이미 합쳐졌으면 기본급 카드는 만들지 않음 (명절할증 카드만 아래에서 표시)
+    var mergedIntoWeek = !!calcFinalMergeInfo(cg, dateStr);
+    if(!mergedIntoWeek) {
     // (26_10_14_09) 대시보드 직접 수정값 적용
     var ovx = payOvCard({ cgId: cg.id, startDate: cg.startDate, date: dateStr, label: '최종 정산', amount: fSp.base,
       memo: pt ? buildExpenseMemo(cg, pt, { label: '최종 정산 (근무 마감)', amount: fSp.base, hpSeparate: fSp.hp > 0 }) : (histFallback ? buildExpenseMemoFromHistory(cg, histFallback, { label: '최종 정산 (근무 마감)', amount: fSp.base, hpSeparate: fSp.hp > 0 }) : ''),
@@ -12957,6 +13033,7 @@ function showCalDetail(dateStr, collectOnly) {
           memo: ovx.memo }))
       + ovx.btnHtml
       + '</div>' });
+    } // (26_10_23_01) !mergedIntoWeek
     if(fSp.hp > 0) {
       var hfBlocks = holidayFinalPartBlocks(cg);
       var fHpPtName = pt ? pt.name : (histFallback ? histFallback.patientName : '');
