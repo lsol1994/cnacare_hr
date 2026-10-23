@@ -2377,7 +2377,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_23_02';
+const APP_BUILD = '26_10_23_03';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -4202,7 +4202,8 @@ function openPatient(id) {
       <button class="btn btn-sm" style="border-color:var(--green);color:var(--green)" onclick="closeOverlay('pt-overlay');showPage('caregiver');setTimeout(()=>openCgDetail('${cg.id}'),100)">
         간병인 상세 →
       </button>
-    </div>` : lastCg ? `
+    </div>
+    <button class="btn btn-sm" style="width:100%;justify-content:center;margin-top:6px;border-color:var(--teal);color:var(--teal)" onclick="showPatientMatchMsgCurrent('${p.id}')">📋 환자 안내 문자</button>` : lastCg ? `
     <div class="hr"></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);margin-bottom:8px">🔗 마지막 담당 간병인 <span style="font-weight:400;text-transform:none">${lastCgSource==='earlyEnd' ? '(중도종료됨)' : lastCgSource==='cancelled' ? '(시작 전 취소)' : '(이후 다른 환자로 이동, 과거 이력)'}</span></div>
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--rsm);padding:10px 14px;display:flex;align-items:center;gap:12px">
@@ -4231,6 +4232,7 @@ function openPatient(id) {
         <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
           <button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="showReservedMatchMessage('${rcg.id}')">📋 매칭 안내 문자</button>
           <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="showReservedArrivalNotice('${rcg.id}')">📋 입실 안내 문자</button>
+          <button class="btn btn-sm" style="border-color:var(--teal);color:var(--teal)" onclick="showReservedPatientMatchMsg('${rcg.id}')">📋 환자 안내 문자</button>
           <button class="btn btn-sm" style="border-color:var(--blue);color:var(--blue)" onclick="closeOverlay('pt-overlay');showPage('caregiver');setTimeout(()=>openCgDetail('${rcg.id}'),100)">간병인 상세 →</button>
           <button class="btn btn-sm" style="border-color:var(--red);color:var(--red)" onclick="cancelReservation('${p.id}')">예약 취소</button>
         </div>
@@ -4275,7 +4277,8 @@ function openPatient(id) {
     <div style="display:flex;gap:6px;margin-top:6px">
       <button class="btn btn-sm" style="flex:1;justify-content:center;border-color:var(--blue);color:var(--blue)" onclick="showPendingMatchMessage('${p.id}')">📋 매칭 안내 문자</button>
       <button class="btn btn-sm" style="flex:1;justify-content:center;border-color:var(--teal);color:var(--teal)" onclick="showPendingArrivalNotice('${p.id}')">📋 입실 안내 문자</button>
-    </div>` : (p.recruitInfo.reason==='교체(시차)' ? '' : `
+    </div>
+    <button class="btn btn-sm" style="width:100%;justify-content:center;margin-top:6px;border-color:var(--teal);color:var(--teal)" onclick="showPendingPatientMatchMsg('${p.id}')">📋 환자 안내 문자</button>` : (p.recruitInfo.reason==='교체(시차)' ? '' : `
     <button class="btn btn-teal btn-sm" onclick="openReplacementForm('${p.id}')">🔜 예정 교체 간병인 등록</button>`)}
     ` : ''}
     <div class="hr"></div>
@@ -6193,12 +6196,14 @@ function saveCg() {
     popup.style.display = 'block';
     addPopupCopyBtn('remind-copy-btn',  '📋 교체보고 복사', replaceMsg);
     addPopupCopyBtn('remind-copy-btn2', '📋 매칭 안내 메시지 복사', matchMsg);
+    addPopupCopyBtn('remind-copy-btn3', '📋 환자 안내 문자 복사', buildPatientMatchMessage(pt, cg)); // (26_10_23_03)
     if(cfg.sound !== false) playBeep();
     toast(`✅ 간병인 등록 완료! 교체보고 + 매칭 안내 메시지가 자동 작성됐어요.`);
   } // isReplace 블록 끝
   else if(pt) {
     // 일반 매칭(교체 아님): 간병인에게 보낼 매칭 안내 메시지 자동 작성 + 팝업
     showMatchMessagePopup(pt, cg);
+    addPopupCopyBtn('remind-copy-btn3', '📋 환자 안내 문자 복사', buildPatientMatchMessage(pt, cg)); // (26_10_23_03)
     toast('✅ 간병인 등록 완료! 매칭 안내 메시지가 자동 작성됐어요.');
   }
   else {
@@ -6408,7 +6413,7 @@ function toggleCalExpense(idx) {
 // remind-popup의 복사 버튼들을 깨끗이 정리 (이전 팝업에서 남은 버튼 잔존 방지)
 
 function resetPopupButtons() {
-  ['remind-copy-btn','remind-copy-btn2'].forEach(id=>{
+  ['remind-copy-btn','remind-copy-btn2','remind-copy-btn3'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.remove();
   });
@@ -6439,6 +6444,74 @@ function showMatchMessagePopup(pt, cg, opts) {
   addPopupCopyBtn('remind-copy-btn', '📋 매칭 안내 메시지 복사', matchMsg);
   if(cfg.sound !== false) playBeep();
   return matchMsg;
+}
+
+// ═══ (26_10_23_03) 환자에게 보내는 매칭 안내 문자 ═══
+// 매칭된 간병인 이름(성별) / 연락처 / 서비스기간(재확인용). 간병인용 매칭 문자와 별개.
+// 서비스기간은 그 간병인의 실제 근무 일정(시작~마감) 기준 — 교체 간병인도 본인 입실 일정으로 안내.
+// 읽기 전용(데이터 변경 없음).
+function buildPatientMatchMessage(pt, cg) {
+  const ptName = pt?.name || '________';
+  const cgName = cg?.name || '________';
+  const g      = shortGender(cg?.gender || '');
+  const phone  = formatPhone(cg?.phone) || '________';
+  const sDate  = cg?.startDate || pt?.startDate || '';
+  const sTime  = cg?.startDate ? (cg.startTime || '') : (pt?.startTime || '');
+  const eDate  = cg?.endDate || pt?.endDate || '';
+  const eTime  = cg?.endDate ? (cg.endTime || '') : (pt?.endTime || '');
+  const start  = formatSchedule(sDate, sTime);
+  let period;
+  if(eDate) {
+    const days = matchSpanDays(sDate, eDate);
+    period = `${start} ~ ${formatSchedule(eDate, eTime)}${days ? ' ('+days+')' : ''}`;
+  } else {
+    period = `${start} ~ 종료일 미정`;
+  }
+  return `안녕하세요, ${ptName} 님.
+씨앤에이케어협회입니다.
+요청하신 간병인 매칭이 완료되어 안내드립니다.
+
+■ 간병인 : ${cgName} 선생님${g ? ' ('+g+')' : ''}
+■ 연락처 : ${phone}
+■ 서비스 기간 : ${period}
+
+위 서비스 기간이 맞는지 한 번 더 확인 부탁드리며,
+일정 변경이나 문의사항은 협회로 연락 주세요.
+감사합니다!`;
+}
+function showPatientMatchMessagePopup(pt, cg, note) {
+  const msg = buildPatientMatchMessage(pt, cg);
+  const popup = document.getElementById('remind-popup');
+  resetPopupButtons();
+  document.getElementById('remind-popup-body').innerHTML =
+    `📋 <strong>${pt.name}</strong> 님(환자)께 보낼 매칭 안내 메시지예요.` +
+    (note ? `\n<span style="font-size:11px;opacity:.9">${note}</span>` : '') + `\n\n` +
+    `<div style="background:rgba(255,255,255,.15);border-radius:6px;padding:10px;margin-top:6px;font-size:12px;white-space:pre-wrap;line-height:1.8">${msg}</div>`;
+  popup.style.display = 'block';
+  addPopupCopyBtn('remind-copy-btn', '📋 환자 안내 문자 복사', msg);
+  return msg;
+}
+// 환자 상세 → 현재 매칭 간병인
+function showPatientMatchMsgCurrent(ptId) {
+  const pt = patients.find(p=>String(p.id)===String(ptId));
+  const cg = pt ? caregivers.find(c=>String(c.patientId)===String(pt.id)) : null; // 환자 상세 모달과 같은 기준
+  if(!pt || !cg) { toast('매칭된 간병인이 없어요', true); return; }
+  showPatientMatchMessagePopup(pt, cg);
+}
+// 예약 간병인(다른 환자 간병 후 인계 예정)
+function showReservedPatientMatchMsg(cgId) {
+  const cg = caregivers.find(x=>String(x.id)===String(cgId));
+  const mcg = reservedMsgCg(cg);
+  const pt = mcg ? patients.find(p=>String(p.id)===String(cg.nextAssign.patientId)) : null;
+  if(!mcg || !pt) { toast('예약된 환자를 찾을 수 없어요', true); return; }
+  showPatientMatchMessagePopup(pt, mcg, scheduleNote(mcg) + ' · 예약 간병인');
+}
+// 예정 교체 간병인(맞교체·교체(시차)·연장 후 예약교체)
+function showPendingPatientMatchMsg(ptId) {
+  const pt = patients.find(p=>String(p.id)===String(ptId));
+  const mcg = pendingRepMsgCg(pt);
+  if(!mcg) { toast('예정 교체 간병인 정보가 없어요', true); return; }
+  showPatientMatchMessagePopup(pt, mcg, scheduleNote(mcg) + ' · 예정 교체 간병인');
 }
 
 // 매칭 안내 메시지 다시 보기/복사 (간병인 상세에서 언제든 재생성 가능)
