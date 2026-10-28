@@ -2379,7 +2379,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_28_01';
+const APP_BUILD = '26_10_28_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -9395,7 +9395,9 @@ function confirmEarlyTerminate(cgId) {
       if(!pt.recruitHistory) pt.recruitHistory = [];
       pt.recruitHistory.push({
         endDate, recruitDate: endDate, reason: reason||'',
-        prevCg: prevCgName, recordedAt: new Date().toLocaleDateString('ko-KR')
+        prevCg: prevCgName, recordedAt: new Date().toLocaleDateString('ko-KR'),
+        // (26_10_28_02) 시작 전 취소 → 재구인 건 표시 (대시보드 교체내역에서 제외용)
+        ...(wasNotStartedYet ? { startCancelled: true } : {})
       });
       sendSheets({type:'updatePatient', name:pt.name, startDate:pt.startDate, caregiverName:'', status:'모집중'});
     }
@@ -12807,6 +12809,33 @@ function removePayOverride(k) {
   toast('↩️ 시스템 계산값으로 되돌렸어요');
 }
 
+// (26_10_28_02) 재모집 이력(recruitHistory) 항목이 "시작 전 취소 → 재구인"인지 판단.
+// 시작 전 취소는 실제로 근무한 적이 없으니 대시보드 교체내역에 띄우지 않는다.
+// 새로 기록되는 건은 startCancelled 플래그로, 그 전 데이터는 이전 간병인의 근무 기록이
+// "시작일시=마감일시 + 종료"(시작 전 취소 처리 결과)인지로 판별. 도착 후 취소는 제외.
+function isPreStartCancelHist(p, h) {
+  if(!h) return false;
+  if(h.startCancelled) return true;
+  if(h.newCg) return false; // 맞교체·교체(시차)·예약교체는 실제 인계
+  if(String(h.reason||'').indexOf('도착 후 취소') !== -1) return false;
+  if(!h.prevCg || !p) return false;
+  var pid = String(p.id);
+  return caregivers.some(function(c) {
+    if(c.name !== h.prevCg) return false;
+    var recs = (c.assignHistory||[]).filter(function(x){ return String(x.patientId) === pid; });
+    if(String(c.earlyEndPatientId||'') === pid || String(c.patientId||'') === pid) {
+      recs = recs.concat([{ startDate: c.startDate, startTime: c.startTime, endDate: c.endDate, endTime: c.endTime, status: c.workStatus }]);
+    }
+    return recs.some(function(r) {
+      if(!r.startDate || r.startDate !== r.endDate) return false;
+      if((r.startTime||'') !== (r.endTime||'')) return false;
+      if(r.status && r.status !== '종료') return false;
+      if(c.onsiteCancelDate && c.onsiteCancelDate === r.startDate) return false; // 도착 후 취소/현장취소
+      return true;
+    });
+  });
+}
+
 function showCalDetail(dateStr, collectOnly) {
   // collectOnly: 화면은 그리지 않고 카드별 지출결의서 등록 데이터(_hrExpSink)만 계산 (미지급 알림용)
   var bodyEl = collectOnly ? null : document.getElementById('cal-detail-body');
@@ -12893,9 +12922,11 @@ function showCalDetail(dateStr, collectOnly) {
     });
   });
   // ② 이미 인계 완료(이력): recruitHistory에 이 날짜로 기록된 교체 건을 그대로 복원
+  // (26_10_28_02) 단, 시작 전 취소로 재구인해 대체된 건은 실제 교체(인계)가 아니므로 제외
   patients.forEach(function(p) {
     (p.recruitHistory||[]).forEach(function(h) {
       if(h.recruitDate !== dateStr) return;
+      if(isPreStartCancelHist(p, h)) return;
       swapEvents.push({ time: h.recruitTime||'', html:
         swapCardHtml(p.name, p.hospital, p.room, h.prevCg||'', h.newCg||'', h.remainDuration||'', h.recruitTime||'')
       });
