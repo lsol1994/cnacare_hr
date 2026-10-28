@@ -1144,6 +1144,8 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
           <button id="ins-flt-none"    class="btn btn-sm btn-teal" onclick="setInsFlt('none')"    style="font-size:11px">가입전</button>
           <button id="ins-flt-active"  class="btn btn-sm btn-teal" onclick="setInsFlt('active')"  style="font-size:11px">가입</button>
           <button id="ins-flt-expired" class="btn btn-sm" onclick="setInsFlt('expired')" style="font-size:11px">만료</button>
+          <button id="ins-flt-gap"     class="btn btn-sm" onclick="setInsFlt('gap')"     style="font-size:11px" title="실제로 근무했는데 배상보험 가입 기록이 없는 근무건 (시작 전 취소·도착 후 취소는 제외)">⚠ 미가입(누락)</button>
+          <button id="ins-flt-cancel"  class="btn btn-sm" onclick="setInsFlt('cancel')"  style="font-size:11px" title="시작 전 취소 · 도착 후 취소 — 근무가 없어 보험 가입이 필요 없는 건">🚫 취소(가입불필요)</button>
           <button id="ins-flt-roster"  class="btn btn-sm" onclick="setInsFlt('roster')"  style="font-size:11px" title="보험사 전문인내역 업로드 · 간병인/매칭환자 자동 연결 · 확인 필요 건 수정">📄 보험사 등록내역</button>
           <input type="file" id="ins-roster-file" accept=".xls,.xlsx,.htm,.html,.csv" style="display:none" onchange="onInsRosterFile(this)">
         </div>
@@ -2377,7 +2379,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_23_04';
+const APP_BUILD = '26_10_28_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -9929,6 +9931,7 @@ const MANUAL_SECTIONS = [
 <img class="manual-img" src="${MANUAL_IMG.img26}" alt="출퇴근 체크">
 <div class="manual-sub-title">배상보험 현황</div>
 <p class="manual-p">전체 / 가입전 / 가입 / 만료 상태로 필터링해서 배상보험 가입 현황을 관리합니다. 가입전인 간병인은 근무 시작일이 되면 가입 알림이, 가입된 간병인은 서비스 마감일이 다가오면(설정의 사전 알림 일수) 해지 신고 알림이 뜹니다 — 보험 해지는 <b>서비스 마감일 +1일</b>로 신고하세요. 만료 이력은 연도·월로 검색할 수 있습니다.</p>
+<p class="manual-p"><b>⚠ 미가입(누락) / 🚫 취소(가입불필요)</b> 탭은 근무건(간병인 × 환자) 단위로 보험 가입 여부를 나눠 보여줍니다. <b>시작 전 취소·도착 후 취소</b>처럼 근무 없이 끝난 건(시작=마감)은 가입 대상이 아니므로 취소 탭에만 모이고, <b>실제로 근무했는데 보험 기록이 없는 건</b>만 미가입(누락)에 나옵니다(과거 전체 대상). [가입 처리]를 누르면 그 근무건 정보로 보험 입력창이 미리 채워지고, 가입 대상이 아니었던 건은 [✔ 확인완료](여러 건 선택 가능)로 목록에서 뺄 수 있습니다(아래 확인완료 목록에서 되돌리기). 현재 환자와 근무 중인데 보험 기록이 없는 간병인은 '가입' 탭 맨 위에 <b>⚠ 미가입(누락)</b>으로 표시되고, 2026-10-28 이후까지 이어진 누락 건은 배상보험 알림 팝업으로도 안내됩니다.</p>
 <ul>
 <li><b>근무가 끝난 간병인</b> — 담당 환자가 없는 간병인은 마지막 보험 건이 현재 줄에 "— 마지막 근무건: 환자명"과 함께 표시되고 상태(만료처리 완료 / D-n / 가입중(미해지))가 나옵니다. 예전처럼 실제로는 가입했다 만료된 건이 "미가입·가입전"으로 보이지 않습니다.</li>
 <li><b>과거 이력 자동 정리</b> — 끝난 근무건의 보험 이력에 만료일이 비어 있으면 "서비스 마감일 + 1일"로 자동 채워지고, 만료일이 지난 건은 "만료처리 완료"로 바뀝니다. 가입일이 있는데 미가입으로 남은 건은 가입으로 고쳐집니다. 보험사 등록내역으로 맞춘 건, 다음 근무건으로 이어진 건(연속 재배정), 아직 해지 전인 직전 근무건은 건드리지 않습니다.</li>
@@ -10261,6 +10264,7 @@ const QNA_ITEMS_RAW = [
   { cat:'caregiver', q:'"협회 간병인"이나 "빠른매칭" 메뉴를 찾을 수 없어요.', a:'현재 배포된 버전에는 해당 명칭의 기능이 없습니다. 과거 버전이나 다른 안내에서 쓰이던 이름일 수 있어요. 간병인을 환자에게 연결하는 것은 간병인 등록·재배정·간병인 예약 화면을 통해 이뤄지니, 매뉴얼의 "기능 비교표"를 참고해주세요.', keywords:['협회간병인','빠른매칭','메뉴없음','간병인등록','재배정'] },
 
   { cat:'caregiver', q:'근무가 끝난 간병인의 배상보험이 어떻게 표시되나요?', a:'담당 환자가 없는 간병인은 마지막 보험 건이 현재 줄에 "— 마지막 근무건: 환자명"과 함께 나오고, 상태가 만료처리 완료 / D-n / 가입중(미해지)로 표시돼요. 과거 이력에 만료일이 비어 있으면 "서비스 마감일 + 1일"로 자동 채워지고, 만료일이 지난 건은 자동으로 만료처리 완료가 됩니다. 보험사 등록내역으로 맞춘 건과 연속 재배정으로 이어진 건은 그대로 둡니다.', keywords:['배상보험','종료간병인','마지막보험','만료일자동','만료처리'] },
+  { cat:'caregiver', q:'시작 전 취소·도착 후 취소한 간병인이 배상보험 미가입으로 보여요. 진짜 누락이랑 어떻게 구분하나요?', a:'배상보험 현황의 [🚫 취소(가입불필요)] 탭에는 근무 없이 끝난(시작=마감) 시작 전 취소·도착 후 취소 건만 모이고, 현황 줄에도 "🚫 시작 전 취소 — 가입 불필요"처럼 표시돼요. 실제로 근무했는데 보험 기록이 없는 건만 [⚠ 미가입(누락)] 탭에 나와요. 누락 건은 [가입 처리]로 그 근무건 보험을 기록하고, 가입 대상이 아니었던 건은 [✔ 확인완료]로 빼세요(되돌리기 가능). 지금 근무 중인데 미가입인 간병인은 "가입" 탭 맨 위에 ⚠ 미가입(누락)으로 표시돼요.', keywords:['배상보험','미가입','누락','시작전취소','도착후취소','현장취소','가입불필요','확인완료'] },
   { cat:'caregiver', q:'보험사 등록내역의 "확인 필요" 중 잘못 가입된 건은 어떻게 하나요?', a:'[수정]으로 맞출 수 없는 건(잘못 가입된 이력 등)은 [✔ 확인완료]를 누르고 메모를 남기세요. 확인 필요 목록과 배지에서 빠지고 배상보험 현황에도 반영되지 않아요. 아래 "✔ 확인완료 n건"을 펼쳐 [되돌리기]로 다시 확인 필요로 돌릴 수 있습니다.', keywords:['보험사등록내역','확인필요','확인완료','잘못가입','되돌리기'] },
   { cat:'caregiver', q:'간병인 근무상태를 "종료"로 바꾸려니 확인창이 떠요.', a:'근무중 간병인을 종료로 바꾸면 매칭된 환자도 함께 종료되는데, 마감이 아직 남아 있어서 실수인지 확인하는 거예요. 일찍 그만두는 경우는 "중도종료"를, 기간을 늘리려면 환자 "📅 연장"을 사용하세요.', keywords:['근무상태','종료','확인창','중도종료','연장'] },
   { cat:'caregiver', q:'간병인에게 급여를 미리 줬어요(선지급). 어떻게 기록하나요?', a:'간병인 상세의 "💰 선지급 내역"에서 "+ 선지급 등록"으로 지급일·금액·메모를 저장하세요. 캘린더 지급일에 "💰 선지급" 카드로 나오고(지출결의서 등록 가능), 이후 주급·최종 정산에서 시간순으로 자동 차감됩니다. 한 번에 다 차감되지 않으면 남은 금액은 다음 지급일로 넘어가요.', keywords:['선지급','선지급등록','자동차감','이월','간병인상세'] },
@@ -15059,7 +15063,7 @@ function checkOut(cgId) {
 
 
 // ─── 배상보험 ───
-let insFlt = 'default'; // default=가입전+가입, all, none, active, expired
+let insFlt = 'default'; // default=가입전+가입, all, none, active, expired, gap(미가입 누락), cancel(취소·가입불필요), roster
 
 // 배상보험현황에는 대기중/근무중/종료 간병인만 대상으로 함.
 // 예비(한번도 매칭된 적 없음) 간병인은 보험 관리 대상이 아니므로 어떤 탭/검색에서도 노출되지 않아야 함.
@@ -15069,7 +15073,7 @@ function isInsEligible(c) {
 
 function setInsFlt(flt) {
   insFlt = flt;
-  ['all','none','active','expired','roster'].forEach(t=>{
+  ['all','none','active','expired','gap','cancel','roster'].forEach(t=>{
     const btn = document.getElementById('ins-flt-'+t);
     if(!btn) return;
     const isOn = flt===t || (flt==='default' && (t==='none'||t==='active'));
@@ -15448,6 +15452,12 @@ function renderInsurance() {
   const searchYear  = showSearch ? (document.getElementById('ins-search-year')?.value || '')  : '';
   const searchMonth = showSearch ? (document.getElementById('ins-search-month')?.value || '') : '';
 
+  // (26_10_28_01) 근무건 단위 분류: 미가입(누락) / 취소(가입 불필요) — 탭 배지는 어느 탭에서든 갱신
+  const gscan = insGapScan();
+  refreshInsGapTabLabels(gscan);
+  if(insFlt === 'gap')    { renderInsGap(el, gscan); return; }
+  if(insFlt === 'cancel') { renderInsCancel(el, gscan); return; }
+
   // 보험사 등록내역(전문인내역 업로드 · 확인 필요 · 매칭 완료) 보기
   if(insFlt === 'roster') { renderInsRoster(el); return; }
   refreshInsRosterTabLabel(); // 다른 탭에서도 "확인 필요" 건수 표시
@@ -15471,6 +15481,12 @@ function renderInsurance() {
       const ex = insAutoExpiryFor(c, L);
       return (L.terminated || (ex && parseLocalDate(ex) < today)) ? 'expired' : 'active';
     }
+    // (26_10_28_01) 근무중인데 보험 기록 없음 → 미가입(누락): 가입전이 아니라 '가입' 탭에 ⚠로 표시
+    if(!c.insuranceActive && c.patientId && c.workStatus === '근무중') {
+      const ge = gscan.byKey.get(insGapKey(c.id, c.patientId, c.startDate));
+      if(ge && ge.type === 'gap') return 'gap';
+      if(ge && ge.type === 'gapdone') return 'gapdone';
+    }
     if(!c.insuranceActive) return 'none'; // 가입전
     if(c.insuranceTerminated) return 'expired'; // 만료처리 완료
     if(!c.insuranceExpiry) return 'active'; // 가입 (만료일 미입력)
@@ -15487,7 +15503,7 @@ function renderInsurance() {
   const insHold = insRosterHoldIds();
   if(insFlt !== 'all') list = list.filter(c => !insHold.has(String(c.id)));
   if(insFlt === 'none')         list = list.filter(c=>c.workStatus!=='종료' && getInsStatus(c)==='none');
-  else if(insFlt === 'active')  list = list.filter(c=>c.workStatus!=='종료' && getInsStatus(c)==='active');
+  else if(insFlt === 'active')  list = list.filter(c=>c.workStatus!=='종료' && ['active','gap','gapdone'].includes(getInsStatus(c)));
   else if(insFlt === 'expired') list = list.filter(c=>getInsStatus(c)==='expired' || c.workStatus==='종료');
   else if(insFlt === 'all')     { /* 전체 (대기중/근무중/종료) */ }
   else {
@@ -15499,8 +15515,12 @@ function renderInsurance() {
     el.innerHTML='<div class="empty" style="padding:.75rem 0"><p style="font-size:12px">해당하는 간병인이 없어요</p></div>';
     return;
   }
+  // 근무중 미가입(누락)은 맨 위로 (나머지 순서는 그대로)
+  { const gapIds = new Set(list.filter(c => getInsStatus(c) === 'gap').map(c => String(c.id)));
+    if(gapIds.size) list = list.filter(c => gapIds.has(String(c.id))).concat(list.filter(c => !gapIds.has(String(c.id)))); }
 
   el.innerHTML = list.map(c=>{
+    const lastE = insLatestPeriodEntry(c, gscan); // 가장 최근 근무건 분류 (취소/누락 표시용)
     // 종료(담당 환자 없음)인데 현재 칸이 비어 있으면 → 마지막 보험 건(과거 이력)을 현재 줄에 표시하고, 나머지만 과거 이력으로
     const L = insLastEntry(c);
     const openSrc = !c.patientId ? insFindCarrySource(c) : null;
@@ -15521,7 +15541,7 @@ function renderInsurance() {
         insHold, curPt: null, openSrc,
         title: `${insHold.has(String(c.id))?'<span class="badge" style="font-size:10px;background:#dc262622;color:#dc2626;border:1px solid #dc262644;margin-right:4px">확인 필요</span>':''}${c.name}${L.patientName?` <span style="font-weight:400;color:var(--gray);font-size:11px">— 마지막 근무건: ${insEsc(L.patientName)}</span>`:''}`,
         line: `✅ 가입${L.startDate?' · 가입일 '+L.startDate:''}${lExp?' · 만료 '+lExp:''}${(L.coverFrom||L.coverTo)?` <span style="color:var(--gray-lt)">· 담당 ${L.coverFrom||'?'}~${L.coverTo||'?'}</span>`:''}`,
-        extra: L.carried ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 연속 재배정 — 이전 근무건 보험을 해지 없이 이어서 유지했던 건 (가입일 ${L.startDate||'?'})</div>` : '',
+        extra: (L.carried ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 연속 재배정 — 이전 근무건 보험을 해지 없이 이어서 유지했던 건 (가입일 ${L.startDate||'?'})</div>` : '') + insAfterNote(lastE),
         memo: L.memo, statusColor: lColor, statusTxt: lTxt, termBox: '',
         editCall: `editInsuranceHistory('${c.id}','${L.id}')`, hist: rest,
       });
@@ -15529,28 +15549,48 @@ function renderInsurance() {
     const exp = c.insuranceExpiry ? parseLocalDate(c.insuranceExpiry) : null;
     if(exp) exp.setHours(0,0,0,0);
     const diff = exp ? Math.ceil((exp-today)/(1000*60*60*24)) : null;
-    const statusColor = !c.insuranceActive ? 'var(--gray-lt)'
+    let statusColor = !c.insuranceActive ? 'var(--gray-lt)'
       : c.insuranceTerminated ? 'var(--gray)'
       : diff===null ? 'var(--gray)'
       : diff < 0  ? '#dc2626'
       : diff === 0 ? 'var(--red)'
       : diff <= 3 ? 'var(--amber)'
       : 'var(--green)';
-    const statusTxt = !c.insuranceActive ? '가입전'
+    let statusTxt = !c.insuranceActive ? '가입전'
       : c.insuranceTerminated ? `만료처리 완료${c.insuranceExpiry?' ('+c.insuranceExpiry+')':''}`
       : diff===null ? '만료일 미입력'
       : diff < 0  ? `만료됨 (${Math.abs(diff)}일 전)`
       : diff === 0 ? '오늘 만료'
       : `D-${diff}`;
+    // (26_10_28_01) 보험 기록이 없을 때 '가입전' 대신 근무건 분류로 표시: 미가입(누락) / 확인완료 / 시작 전·도착 후 취소(가입 불필요)
+    let lineHead = c.insuranceActive ? '✅ 가입' : '❌ 미가입', gapNote = '';
+    if(!c.insuranceActive) {
+      const curE = c.patientId ? gscan.byKey.get(insGapKey(c.id, c.patientId, c.startDate)) : null;
+      const e = (curE && curE.type !== 'future' && curE.type !== 'ok') ? curE
+              : (lastE && (!c.patientId || String(lastE.p.patientId) === String(c.patientId))) ? lastE : null;
+      if(e && e.type === 'gap') {
+        statusColor = '#dc2626'; statusTxt = '⚠ 미가입(누락)';
+        gapNote = `<div style="font-size:11px;margin-top:3px;padding:3px 6px;border-radius:5px;background:#dc262611;color:#dc2626">⚠ <b>근무 중인데 배상보험 가입 기록이 없어요</b> — ${insEsc(e.ptName||'환자')} 건 근무 ${insPeriodTxt(e.p)}${e.days!==null?` (${e.ongoing?e.days+1+'일째':e.days+'일'})`:''}. 가입 신고 후 [수정]에서 가입 처리하고, 가입 대상이 아니면 미가입(누락) 탭에서 [확인완료]하세요</div>`;
+        if(!e.ongoing) gapNote = gapNote.replace('근무 중인데 배상보험', '근무했는데 배상보험');
+      } else if(e && e.type === 'gapdone') {
+        statusColor = 'var(--gray)'; statusTxt = '✔ 확인완료(미가입)';
+        gapNote = `<div style="font-size:11px;color:var(--gray);margin-top:2px">✔ 미가입 확인완료 ${insEsc(e.done.at||'')}${e.done.memo?' · '+insEsc(e.done.memo):''}</div>`;
+      } else if(e && e.type === 'cancel') {
+        statusColor = 'var(--gray)'; statusTxt = `🚫 ${insCancelLabel(e.kind)} — 가입 불필요`;
+        lineHead = `🚫 근무 없이 취소 (${e.p.startDate}${e.p.startTime?' '+e.p.startTime:''}) · 보험 가입 대상 아님`;
+      }
+    } else if(lastE && !c.patientId) {
+      gapNote = insAfterNote(lastE);
+    }
     const curPt = c.patientId ? patients.find(p=>String(p.id)===String(c.patientId)) : null;
     return insRowHtml(c, {
       insHold, curPt, openSrc,
       title: `${insHold.has(String(c.id))?'<span class="badge" style="font-size:10px;background:#dc262622;color:#dc2626;border:1px solid #dc262644;margin-right:4px">확인 필요</span>':''}${c.name}${curPt?` <span style="font-weight:400;color:var(--gray);font-size:11px">— ${curPt.name} 담당중</span>`:''}`,
-      line: `${c.insuranceActive?'✅ 가입':'❌ 미가입'}
+      line: `${lineHead}
             ${c.insuranceStartDate?'· 가입일 '+c.insuranceStartDate:''}
             ${c.insuranceExpiry?'· 만료 '+c.insuranceExpiry:''}
             ${c.insuranceActive && !c.insuranceTerminated && c.endDate ? `· <b style="color:var(--amber)">서비스 마감 ${c.endDate} → 해지신고일 ${insAddDays(c.endDate,1)}</b>` : ''}`,
-      extra: c.insuranceActive && c.insuranceCarried ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 연속 재배정 — 이전 근무건 보험을 해지 없이 이어서 유지 중 (가입일 ${c.insuranceStartDate||'?'})</div>` : '',
+      extra: (c.insuranceActive && c.insuranceCarried ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">🔗 연속 재배정 — 이전 근무건 보험을 해지 없이 이어서 유지 중 (가입일 ${c.insuranceStartDate||'?'})</div>` : '') + gapNote,
       memo: c.insuranceMemo, statusColor, statusTxt,
       termBox: c.insuranceActive && diff !== null && diff >= 0 ? `
           <label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer">
@@ -15614,6 +15654,321 @@ function insRowHtml(c, o) {
           </div>`).join('')}
       </div>` : ''}
     </div>`;
+}
+
+// ─── 배상보험: 미가입(누락) / 취소(가입 불필요) 구분 (26_10_28_01) ───
+// 예전엔 간병인 1명당 "현재 보험 칸"만 보고 비어 있으면 전부 '❌ 미가입/가입전'으로 보여서,
+// 근무 없이 끝난 건(시작 전 취소·도착 후 취소 — 보험 가입 대상 아님)과 실제로 근무했는데 가입이 빠진 건을
+// 구별할 수 없었음. 판정 단위를 "근무건(간병인 × 환자 × 시작일)"으로 바꿔 아래처럼 나눔:
+//  · 취소(가입 불필요): 시작=마감(0시간) 근무건 → 현장취소 표시가 있으면 '도착 후 취소', 아니면 '시작 전 취소'
+//  · 가입: 그 근무건에 맞는 보험 기록이 있음 (현재 칸 / 과거 이력 / 연속 재배정으로 이어짐 / 보험사 등록내역 매칭)
+//  · 미가입(누락): 근무가 시작됐고(대기중 제외) 근무 시간이 있는데 보험 기록이 없음 → 과거 전체 대상
+//    가입 대상이 아닌 예외는 [확인완료](cfg.insGapDone)로 목록에서 뺌 — 근무이력 병합에 영향 없도록 간병인 레코드가 아닌 cfg에 저장
+//  · 알림 팝업은 INS_GAP_ALERT_FROM 이후까지 이어진(진행 중 포함) 근무건만 — 예전 건은 탭에서만 확인
+var INS_GAP_ALERT_FROM = '2026-10-28';
+let insGapMonth = '';      // 미가입(누락) 탭 월 필터 ('' = 전체)
+let insCancelMonth = '';   // 취소 탭 월 필터
+let insGapSel = new Set(); // 미가입(누락) 탭에서 체크한 근무건 키 (일괄 확인완료용)
+
+function insGapKey(cgId, pid, s) {
+  return (String(cgId) + '_' + String(pid || 'X') + '_' + String(s || 'X')).replace(/[.#$\[\]\/\s]/g, '_');
+}
+function insGapArg(k) { return encodeURIComponent(k).replace(/'/g, '%27'); }
+function insGetGapDone(k) { return (cfg.insGapDone && typeof cfg.insGapDone === 'object' && cfg.insGapDone[k]) || null; }
+
+// 시작=마감(0시간) 근무건 = 근무 없이 취소된 건 (getPatientCgHistory의 cancelled 판정과 동일 기준)
+function insPeriodIsCancel(p) {
+  return !!(p && p.endDate && p.startDate === p.endDate && (p.startTime || '') === (p.endTime || ''));
+}
+// 취소 종류: 'onsite'(도착 후 취소 — 현장 취소/간병인만 종료, 15,000원 지급) / 'prestart'(시작 전 취소)
+function insCancelKind(cg, p, pt) {
+  if(cg.onsiteCancelDate && cg.onsiteCancelDate === p.startDate) return 'onsite';
+  if(pt) {
+    if(pt.endReason === '현장 취소' && (pt.endDate === p.startDate || pt.startDate === p.startDate)) return 'onsite';
+    const isOnsite = r => r && /도착 후 취소/.test(r.reason || '');
+    if((pt.recruitHistory || []).some(r => isOnsite(r) && r.endDate === p.startDate && (!r.prevCg || r.prevCg === cg.name))) return 'onsite';
+    if(isOnsite(pt.recruitInfo) && pt.recruitInfo.startDate === p.startDate) return 'onsite';
+  }
+  return 'prestart';
+}
+
+// 이 간병인의 보험 기록 전체(현재 칸 + 과거 이력)를 판정용으로 정리
+function insCgRecords(cg) {
+  const out = [];
+  if(cg.insuranceActive || cg.insuranceStartDate) {
+    const end = cg.insuranceExpiry || '';
+    out.push({ pid: String(cg.insurancePatientId || cg.patientId || ''), pname: '', start: cg.insuranceStartDate || '', end, open: !end && !cg.insuranceTerminated });
+  }
+  (cg.insuranceHistory || []).forEach(h => {
+    if(!h || !(h.active || h.startDate)) return;
+    const end = h.expiry || (h.coverTo ? insAddDays(h.coverTo, 1) : '');
+    out.push({ pid: String(h.patientId || ''), pname: h.patientName || '', start: h.startDate || '', end, open: !end && !h.terminated });
+  });
+  return out;
+}
+// 근무건 p에 맞는 보험 기록이 있는지
+//  ① 같은 환자 건으로 기록된 보험  ② 환자ID 없이 환자명만 입력한 과거 이력(이름 일치)
+//  ③ 보험기간이 근무기간과 겹침(연속 재배정으로 해지 없이 이어진 경우 등)
+function insPeriodCovered(p, ptName, recs) {
+  const pn = insNormName(ptName);
+  const pS = p.startDate, pE = p.endDate || todayStr();
+  return recs.some(r => {
+    if(r.pid && r.pid === String(p.patientId)) return true;
+    if(!r.pid && r.pname && pn && insNormName(r.pname) === pn) return true;
+    if(!r.start || r.start > pE) return false;
+    if(r.end) return r.end > pS; // 해지일이 근무 시작일보다 뒤 = 근무 기간 중 보험 유지
+    return r.open;
+  });
+}
+// 보험사 등록내역(전문인내역)으로 매칭된 근무건 — 아직 [적용] 전이어도 가입된 것으로 봄 (연속 재배정 이어짐 포함)
+function insRosterCoveredKeys() {
+  const set = new Set();
+  try {
+    insBuildTargets().forEach((byP, cgKey) => { byP.forEach((T, pk) => set.add(String(cgKey) + '#' + pk)); });
+  } catch(e) {}
+  return set;
+}
+function insDaysBetween(a, b) {
+  const x = insDayNum(a), y = insDayNum(b);
+  return (x === null || y === null) ? null : y - x;
+}
+
+// 전체 근무건 분류 → { gaps(미가입 누락), done(확인완료된 누락), cancels(취소), byKey }
+function insGapScan() {
+  const today = todayStr();
+  const rosterKeys = insRosterCoveredKeys();
+  let hold = new Set();
+  try { hold = insRosterHoldIds(); } catch(e) {}
+  const gaps = [], done = [], cancels = [], byKey = new Map();
+  caregivers.forEach(cg => {
+    const periods = getAssignPeriods(cg);
+    if(!periods.length) return;
+    const recs = insCgRecords(cg);
+    periods.forEach(p => {
+      if(!p.startDate) return;
+      const pt = patients.find(x => String(x.id) === String(p.patientId)) || null;
+      const pi = insPeriodPatient(cg, p);
+      const key = insGapKey(cg.id, p.patientId, p.startDate);
+      const covered = rosterKeys.has(String(cg.id) + '#' + insPeriodKey(p)) || insPeriodCovered(p, pi.name, recs);
+      const e = { key, cg, p, pt, ptName: pi.name, hospital: pi.hospital, covered };
+      if(insPeriodIsCancel(p)) {
+        e.type = 'cancel'; e.kind = insCancelKind(cg, p, pt);
+        cancels.push(e); byKey.set(key, e); return;
+      }
+      if(covered) { e.type = 'ok'; byKey.set(key, e); return; }
+      if(p.startDate > today) { e.type = 'future'; byKey.set(key, e); return; }
+      if(p.live && cg.workStatus === '대기중') { e.type = 'future'; byKey.set(key, e); return; } // 아직 근무 시작 전 → 가입전
+      e.ongoing = !!(p.live && cg.workStatus !== '종료');
+      e.noEnd = !p.endDate && !e.ongoing; // 마감 미기록 이력
+      const endForDays = (p.endDate && p.endDate < today) ? p.endDate : today;
+      e.days = insDaysBetween(p.startDate, endForDays);
+      e.hold = hold.has(String(cg.id));
+      e.done = insGetGapDone(key);
+      e.type = e.done ? 'gapdone' : 'gap';
+      (e.done ? done : gaps).push(e);
+      byKey.set(key, e);
+    });
+  });
+  const byStartDesc = (a, b) => (b.p.startDate || '').localeCompare(a.p.startDate || '') || String(a.cg.name).localeCompare(String(b.cg.name));
+  gaps.sort(byStartDesc); done.sort(byStartDesc); cancels.sort(byStartDesc);
+  return { gaps, done, cancels, byKey };
+}
+// 간병인의 가장 최근 근무건 분류 (현황 줄 표시용)
+function insLatestPeriodEntry(c, scan) {
+  const ps = getAssignPeriods(c);
+  if(!ps.length) return null;
+  const last = ps[ps.length - 1]; // 시작일 오름차순 정렬 → 마지막이 최신
+  return scan.byKey.get(insGapKey(c.id, last.patientId, last.startDate)) || null;
+}
+// 마지막 보험 건 이후에 끝난 근무건이 취소/누락이면 현황 줄에 한 줄 안내 (보험 기록이 있는 건이면 표시 안 함)
+function insAfterNote(e) {
+  if(!e || e.covered) return '';
+  const who = insEsc(e.ptName || '환자');
+  if(e.type === 'cancel') return `<div style="font-size:11px;color:var(--gray);margin-top:2px">🚫 이후 근무건 ${who} (${e.p.startDate}): ${insCancelLabel(e.kind)} — 가입 불필요</div>`;
+  if(e.type === 'gap') return `<div style="font-size:11px;color:#dc2626;margin-top:2px">⚠ 이후 근무건 ${who} (${insPeriodTxt(e.p)}): 배상보험 미가입(누락)</div>`;
+  if(e.type === 'gapdone') return `<div style="font-size:11px;color:var(--gray);margin-top:2px">✔ 이후 근무건 ${who}: 미가입 확인완료${e.done.memo?' · '+insEsc(e.done.memo):''}</div>`;
+  return '';
+}
+function insCancelLabel(kind) { return kind === 'onsite' ? '도착 후 취소' : '시작 전 취소'; }
+function insPeriodTxt(p) {
+  return `${p.startDate}${p.startTime ? ' ' + p.startTime : ''} ~ ${p.endDate ? p.endDate + (p.endTime ? ' ' + p.endTime : '') : '진행중'}`;
+}
+
+function refreshInsGapTabLabels(scan) {
+  const g = document.getElementById('ins-flt-gap');
+  if(g) g.innerHTML = '⚠ 미가입(누락)' + (scan.gaps.length ? ` <span style="background:#dc2626;color:#fff;border-radius:9px;padding:0 6px;font-size:10px;margin-left:2px">${scan.gaps.length}</span>` : '');
+  const c = document.getElementById('ins-flt-cancel');
+  if(c) c.innerHTML = '🚫 취소(가입불필요)' + (scan.cancels.length ? ` <span style="font-size:10px;opacity:.75;margin-left:2px">${scan.cancels.length}</span>` : '');
+}
+
+function insMonthSelectHtml(list, cur, onchangeFn) {
+  const months = [...new Set(list.map(e => (e.p.startDate || '').slice(0, 7)).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+  return `<select onchange="${onchangeFn}(this.value)" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--black)">
+    <option value="">근무 시작월 전체</option>
+    ${months.map(m => `<option value="${m}" ${m === cur ? 'selected' : ''}>${m.slice(0, 4)}년 ${parseInt(m.slice(5, 7))}월</option>`).join('')}
+  </select>`;
+}
+function setInsGapMonth(v) { insGapMonth = v || ''; insGapSel.clear(); renderInsurance(); }
+function setInsCancelMonth(v) { insCancelMonth = v || ''; renderInsurance(); }
+
+// ── 미가입(누락) 탭 ──
+function renderInsGap(el, scan) {
+  const list = scan.gaps.filter(e => !insGapMonth || (e.p.startDate || '').slice(0, 7) === insGapMonth);
+  [...insGapSel].forEach(k => { if(!list.some(e => e.key === k)) insGapSel.delete(k); });
+  const allOn = list.length && list.every(e => insGapSel.has(e.key));
+  const head = `<div style="font-size:12px;color:var(--gray);line-height:1.7;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm);margin-bottom:8px">
+      실제로 근무했는데(근무 시간 있음) 배상보험 가입 기록이 없는 근무건이에요. <b>시작 전 취소·도착 후 취소</b>는 가입 대상이 아니라 여기 나오지 않고 <b>🚫 취소(가입불필요)</b> 탭에 따로 모여요.<br>
+      보험사에 가입돼 있던 건이면 <b>[가입 처리]</b>로 기록을 남기거나 전문인내역을 올리고, 가입 대상이 아니었던 건은 <b>[✔ 확인완료]</b>로 목록에서 빼세요.
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      ${insMonthSelectHtml(scan.gaps, insGapMonth, 'setInsGapMonth')}
+      <label class="ck-wrap" style="font-size:12px;gap:5px;cursor:pointer"><input type="checkbox" ${allOn ? 'checked' : ''} onchange="toggleInsGapAll(this.checked)" style="width:15px;height:15px;accent-color:var(--teal)">전체 선택</label>
+      <button class="btn btn-sm" style="font-size:11px" onclick="markInsGapDoneSelected()" ${insGapSel.size ? '' : 'disabled'}>✔ 선택 ${insGapSel.size}건 확인완료</button>
+      <button class="btn btn-sm" style="font-size:11px;margin-left:auto" onclick="downloadInsGapXLSX()">📥 엑셀</button>
+    </div>`;
+  const rows = list.length ? list.map(e => {
+    const c = e.cg;
+    return `<div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+      <input type="checkbox" ${insGapSel.has(e.key) ? 'checked' : ''} onchange="toggleInsGapSel('${insGapArg(e.key)}',this.checked)" style="width:15px;height:15px;margin-top:2px;accent-color:var(--teal)">
+      <div style="flex:1;min-width:160px">
+        <div style="font-size:13px;font-weight:700">${insEsc(c.name)} <span style="font-weight:400;color:var(--gray);font-size:11px">— ${insEsc(e.ptName || '(환자 정보 없음)')}${e.hospital ? ' · ' + insEsc(e.hospital) : ''}</span></div>
+        <div style="font-size:11px;color:var(--gray);margin-top:2px">근무 ${insPeriodTxt(e.p)}${e.days !== null ? ` · ${e.ongoing ? e.days + 1 + '일째' : e.days + '일'}` : ''}${e.noEnd ? ' · <span style="color:var(--amber)">마감 미기록</span>' : ''}</div>
+        ${e.hold ? `<div style="font-size:11px;color:#dc2626;margin-top:2px">📄 보험사 등록내역에 이 간병인의 '확인 필요' 건이 있어요 — 먼저 등록내역 탭에서 맞춰보세요</div>` : ''}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span class="badge" style="font-size:10px;background:${e.ongoing ? '#dc262622' : 'var(--surface2)'};color:${e.ongoing ? '#dc2626' : 'var(--gray)'};border:1px solid ${e.ongoing ? '#dc262644' : 'var(--border)'}">${e.ongoing ? '근무중' : '근무 종료'}</span>
+        <button class="btn btn-sm btn-teal" style="font-size:11px" onclick="insGapJoin('${insGapArg(e.key)}')">가입 처리</button>
+        <button class="btn btn-sm" style="font-size:11px" onclick="markInsGapDone('${insGapArg(e.key)}')">✔ 확인완료</button>
+      </div>
+    </div>`;
+  }).join('') : `<div class="empty" style="padding:1rem 0"><p style="font-size:12px">${insGapMonth ? '이 달에 시작한 ' : ''}미가입(누락) 근무건이 없어요 👍</p></div>`;
+  const doneList = scan.done.filter(e => !insGapMonth || (e.p.startDate || '').slice(0, 7) === insGapMonth);
+  const doneHtml = doneList.length ? `<details style="margin-top:10px">
+      <summary style="font-size:12px;color:var(--gray);cursor:pointer">✔ 확인완료 ${doneList.length}건 (가입 대상 아님으로 처리)</summary>
+      ${doneList.map(e => `<div style="font-size:11px;color:var(--gray);padding:5px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;justify-content:space-between;align-items:flex-start">
+        <div><b style="color:var(--black)">${insEsc(e.cg.name)}</b> — ${insEsc(e.ptName || '(환자 정보 없음)')} · 근무 ${insPeriodTxt(e.p)}
+          <div style="color:var(--teal)">✔ ${insEsc(e.done.at || '')}${e.done.memo ? ' · ' + insEsc(e.done.memo) : ''}</div></div>
+        <button class="btn btn-sm" style="font-size:10px;padding:2px 7px;flex-shrink:0" onclick="undoInsGapDone('${insGapArg(e.key)}')">되돌리기</button>
+      </div>`).join('')}
+    </details>` : '';
+  el.innerHTML = head + rows + doneHtml;
+}
+
+// ── 취소(가입 불필요) 탭 ──
+function renderInsCancel(el, scan) {
+  const list = scan.cancels.filter(e => !insCancelMonth || (e.p.startDate || '').slice(0, 7) === insCancelMonth);
+  const nPre = list.filter(e => e.kind !== 'onsite').length, nOn = list.length - nPre;
+  const head = `<div style="font-size:12px;color:var(--gray);line-height:1.7;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm);margin-bottom:8px">
+      근무 없이 끝난 건(시작=마감)이라 배상보험 가입 대상이 아니에요. 미가입(누락)·가입전에는 나오지 않아요.<br>
+      <b>보험 가입 기록 있음</b>으로 표시된 건은 이미 가입 신고를 했던 건이니 보험사 해지 여부를 확인하세요.
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      ${insMonthSelectHtml(scan.cancels, insCancelMonth, 'setInsCancelMonth')}
+      <span style="font-size:11px;color:var(--gray)">시작 전 취소 ${nPre}건 · 도착 후 취소 ${nOn}건</span>
+      <button class="btn btn-sm" style="font-size:11px;margin-left:auto" onclick="downloadInsGapXLSX()">📥 엑셀</button>
+    </div>`;
+  const rows = list.length ? list.map(e => {
+    const on = e.kind === 'onsite';
+    return `<div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:1;min-width:160px">
+        <div style="font-size:13px;font-weight:700">${insEsc(e.cg.name)} <span style="font-weight:400;color:var(--gray);font-size:11px">— ${insEsc(e.ptName || '(환자 정보 없음)')}${e.hospital ? ' · ' + insEsc(e.hospital) : ''}</span></div>
+        <div style="font-size:11px;color:var(--gray);margin-top:2px">취소일시 ${e.p.startDate}${e.p.startTime ? ' ' + e.p.startTime : ''}${on ? ' · 간병인 15,000원 지급 대상' : ' · 근무·급여 없음'}</div>
+        ${e.covered ? `<div style="font-size:11px;color:var(--amber);margin-top:2px">🛡 보험 가입 기록 있음 — 보험사 해지(또는 가입 취소) 여부를 확인하세요</div>` : ''}
+      </div>
+      <span class="badge" style="font-size:10px;background:${on ? '#d9770622' : 'var(--surface2)'};color:${on ? '#b45309' : 'var(--gray)'};border:1px solid ${on ? '#d9770644' : 'var(--border)'}">🚫 ${insCancelLabel(e.kind)} · 가입 불필요</span>
+    </div>`;
+  }).join('') : `<div class="empty" style="padding:1rem 0"><p style="font-size:12px">취소된 근무건이 없어요</p></div>`;
+  el.innerHTML = head + rows;
+}
+
+function toggleInsGapSel(keyArg, on) {
+  const k = decodeURIComponent(keyArg);
+  if(on) insGapSel.add(k); else insGapSel.delete(k);
+  renderInsurance();
+}
+function toggleInsGapAll(on) {
+  insGapSel.clear();
+  if(on) insGapScan().gaps.filter(e => !insGapMonth || (e.p.startDate || '').slice(0, 7) === insGapMonth).forEach(e => insGapSel.add(e.key));
+  renderInsurance();
+}
+function insSetGapDone(entries, memo) {
+  if(!cfg.insGapDone || typeof cfg.insGapDone !== 'object') cfg.insGapDone = {};
+  const at = todayStr() + ' ' + new Date().toTimeString().slice(0, 5);
+  entries.forEach(e => {
+    cfg.insGapDone[e.key] = { at, memo: String(memo || '').trim().slice(0, 100), cg: e.cg.name || '', pt: e.ptName || '', s: e.p.startDate || '' };
+  });
+  markCfgEdited(); save(); renderInsurance();
+}
+function markInsGapDone(keyArg) {
+  const k = decodeURIComponent(keyArg);
+  const e = insGapScan().gaps.find(x => x.key === k);
+  if(!e) { renderInsurance(); return; }
+  const memo = prompt(`${e.cg.name} — ${e.ptName || '환자'} (근무 ${insPeriodTxt(e.p)})\n\n가입 대상이 아니었던 건으로 확인완료 처리할까요? 미가입(누락) 목록·알림에서 빠지고, 아래 '확인완료' 목록에서 되돌릴 수 있어요.\n\n메모 (선택):`, '가입 대상 아님');
+  if(memo === null) return;
+  insGapSel.delete(k);
+  insSetGapDone([e], memo);
+  toast('✔ 확인완료 처리했어요');
+}
+function markInsGapDoneSelected() {
+  if(!insGapSel.size) return;
+  const list = insGapScan().gaps.filter(e => insGapSel.has(e.key));
+  if(!list.length) { insGapSel.clear(); renderInsurance(); return; }
+  const memo = prompt(`선택한 ${list.length}건을 확인완료 처리할까요?\n미가입(누락) 목록·알림에서 빠지고, '확인완료' 목록에서 하나씩 되돌릴 수 있어요.\n\n메모 (선택, 모든 건에 같이 남아요):`, '가입 대상 아님');
+  if(memo === null) return;
+  insGapSel.clear();
+  insSetGapDone(list, memo);
+  toast(`✔ ${list.length}건 확인완료 처리했어요`);
+}
+function undoInsGapDone(keyArg) {
+  const k = decodeURIComponent(keyArg);
+  const d = insGetGapDone(k);
+  if(!d) return;
+  if(!confirm(`${d.cg || ''} — ${d.pt || ''} (${d.s || ''} 시작)\n확인완료를 되돌려서 다시 미가입(누락)으로 표시할까요?`)) return;
+  delete cfg.insGapDone[k];
+  markCfgEdited(); save(); renderInsurance();
+  toast('미가입(누락)으로 되돌렸어요');
+}
+// [가입 처리] — 현재 근무건이면 보험 칸 수정, 지난 근무건이면 그 근무건으로 미리 채운 과거 이력 추가
+function insGapJoin(keyArg) {
+  const k = decodeURIComponent(keyArg);
+  const e = insGapScan().byKey.get(k);
+  if(!e) return;
+  const cg = e.cg, p = e.p;
+  if(p.live && String(cg.patientId || '') === String(p.patientId)) {
+    editInsurance(String(cg.id));
+    if(!cg.insuranceActive) {
+      const a = document.getElementById('ins-active'); if(a) a.checked = true;
+      const s = document.getElementById('ins-start'); if(s && !s.value) s.value = p.startDate;
+    }
+    return;
+  }
+  addInsuranceHistory(String(cg.id), {
+    patientId: String(p.patientId || ''), patientName: e.ptName || '',
+    startDate: p.startDate, expiry: p.endDate ? insAddDays(p.endDate, 1) : '',
+    coverFrom: p.startDate, coverTo: p.endDate || '',
+  });
+}
+
+function downloadInsGapXLSX() {
+  if(typeof XLSX === 'undefined') { toast('❌ 엑셀 라이브러리를 불러오지 못했어요', true); return; }
+  const scan = insGapScan();
+  const aoa = [['구분', '간병인', '환자', '병원', '근무 시작', '근무 마감', '근무일수', '상태', '보험 기록', '확인완료 메모']];
+  const push = (label, e, extra) => aoa.push([
+    label, e.cg.name || '', e.ptName || '', e.hospital || '',
+    e.p.startDate + (e.p.startTime ? ' ' + e.p.startTime : ''),
+    e.p.endDate ? e.p.endDate + (e.p.endTime ? ' ' + e.p.endTime : '') : '진행중',
+    e.type === 'cancel' ? 0 : (e.days ?? ''), extra || '', e.covered ? '있음' : '없음',
+    e.done ? `${e.done.at || ''} ${e.done.memo || ''}`.trim() : '',
+  ]);
+  scan.gaps.forEach(e => push('미가입(누락)', e, e.ongoing ? '근무중' : '근무 종료'));
+  scan.done.forEach(e => push('미가입(확인완료)', e, e.ongoing ? '근무중' : '근무 종료'));
+  scan.cancels.forEach(e => push(insCancelLabel(e.kind), e, '가입 불필요'));
+  if(aoa.length === 1) { toast('내보낼 내역이 없어요', true); return; }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:15},{wch:10},{wch:10},{wch:18},{wch:16},{wch:16},{wch:8},{wch:10},{wch:8},{wch:30}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '미가입·취소 구분');
+  XLSX.writeFile(wb, `배상보험_미가입_취소구분_${todayStr()}.xlsx`);
 }
 
 // ─── 배상보험: 보험사 "등록된 전문인내역" = 배상보험 현황의 기준 데이터 ───
@@ -16590,17 +16945,23 @@ function deleteInsuranceHistory(cgId, histId) {
 
 // 과거 근무건 보험 이력을 새로 수동 추가 (자동으로 근무건이 넘어갈 때뿐 아니라,
 // 예전에 놓친 기록이나 다른 곳에서 관리하던 과거 이력을 직접 입력하고 싶을 때 사용)
-function addInsuranceHistory(cgId) {
+// pre(선택): 미가입(누락) 탭의 [가입 처리]에서 그 근무건 정보로 미리 채움 (patientId·담당기간도 같이 저장 → 그 근무건이 '가입'으로 판정됨)
+function addInsuranceHistory(cgId, pre) {
   const cg = caregivers.find(c=>String(c.id)===cgId);
   if(!cg) return;
+  pre = pre || {};
   document.getElementById('cg-modal-title').textContent = cg.name+' — 과거 배상보험 이력 추가';
   document.getElementById('cg-form-body').innerHTML=`
     <div style="font-size:13px;color:var(--gray);margin-bottom:1rem;line-height:1.7">
       예전 근무건의 배상보험 기록을 직접 추가합니다. 만료일을 입력해두면 만료 이력 검색(월별/연도별)에서 찾을 수 있어요.
+      ${pre.patientId ? `<div style="font-size:12px;color:var(--teal);margin-top:4px">⚠ 미가입(누락) 근무건(${insEsc(pre.patientName||'환자')} · 근무 ${insEsc(pre.coverFrom||'')} ~ ${insEsc(pre.coverTo||'')})의 정보로 미리 채웠어요. 보험사 가입일·해지일과 다르면 고쳐서 저장하세요.</div>` : ''}
     </div>
+    <input type="hidden" id="ins-h-pid" value="${insEsc(pre.patientId||'')}">
+    <input type="hidden" id="ins-h-cfrom" value="${insEsc(pre.coverFrom||'')}">
+    <input type="hidden" id="ins-h-cto" value="${insEsc(pre.coverTo||'')}">
     <div class="field">
       <label>담당 환자명</label>
-      <input type="text" id="ins-h-patientname" placeholder="예: 홍길동">
+      <input type="text" id="ins-h-patientname" placeholder="예: 홍길동" value="${insEsc(pre.patientName||'')}">
     </div>
     <div class="field">
       <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:13px;font-weight:600;letter-spacing:0;cursor:pointer">
@@ -16610,11 +16971,11 @@ function addInsuranceHistory(cgId) {
     </div>
     <div class="field">
       <label>보험 가입일</label>
-      <input type="date" id="ins-h-start">
+      <input type="date" id="ins-h-start" value="${insEsc(pre.startDate||'')}">
     </div>
     <div class="field">
       <label>보험 만료일 <span style="font-size:10px;font-weight:400;color:var(--gray)">(월별/연도별 검색 기준일)</span></label>
-      <input type="date" id="ins-h-expiry">
+      <input type="date" id="ins-h-expiry" value="${insEsc(pre.expiry||'')}">
     </div>
     <div class="field">
       <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:13px;font-weight:600;letter-spacing:0;cursor:pointer">
@@ -16642,9 +17003,15 @@ function saveNewInsuranceHistory(cgId) {
     if(!confirm('가입일/만료일을 모두 입력하지 않았어요. 이대로 추가할까요?\\n(만료일이 없으면 나중에 월별/연도별 검색에는 나오지 않아요)')) return;
   }
   if(!cg.insuranceHistory) cg.insuranceHistory = [];
-  cg.insuranceHistory.unshift({
+  const preEntry = {}; // (26_10_28_01) 미가입(누락) [가입 처리]로 열었으면 그 근무건과 연결
+  const prePid = document.getElementById('ins-h-pid')?.value || '';
+  if(prePid) {
+    preEntry.coverFrom = document.getElementById('ins-h-cfrom')?.value || '';
+    preEntry.coverTo   = document.getElementById('ins-h-cto')?.value || '';
+  }
+  cg.insuranceHistory.unshift(Object.assign({
     id: genId(),
-    patientId: '',
+    patientId: prePid,
     patientName: document.getElementById('ins-h-patientname').value.trim(),
     active: document.getElementById('ins-h-active').checked,
     startDate: startDate,
@@ -16652,7 +17019,7 @@ function saveNewInsuranceHistory(cgId) {
     memo: document.getElementById('ins-h-memo').value.trim(),
     terminated: document.getElementById('ins-h-terminated').checked,
     archivedAt: todayStr(),
-  });
+  }, preEntry));
   markCgEdited(cgId); // Firebase 덮어쓰기 방지 (2분)
   save(); closeOverlay('cg-overlay'); renderInsurance();
   toast('✅ 과거 보험 이력이 추가됐어요');
@@ -17400,12 +17767,19 @@ function insuranceAlertItems() {
       }
     }
   });
-  return { join, end };
+  // ④ (26_10_28_01) 미가입(누락): 근무했는데(취소건 제외) 보험 기록이 없는 근무건 — INS_GAP_ALERT_FROM 이후까지 이어진 건만
+  //    (①의 '가입 필요'로 이미 안내 중인 현재 근무건은 중복 제외, 확인완료한 건은 제외)
+  let gap = [];
+  try {
+    const joinKeys = new Set(join.map(x => insGapKey(x.c.id, x.c.patientId, x.c.startDate)));
+    gap = insGapScan().gaps.filter(g => (g.p.endDate || '9999-12-31') >= INS_GAP_ALERT_FROM && !joinKeys.has(g.key));
+  } catch(e) {}
+  return { join, end, gap };
 }
 
 function checkInsuranceExpiry() {
-  const { join, end } = insuranceAlertItems();
-  if(!join.length && !end.length) return;
+  const { join, end, gap } = insuranceAlertItems();
+  if(!join.length && !end.length && !gap.length) return;
   const parts = [];
   if(join.length) {
     parts.push('🟢 배상보험 가입 필요 (근무 시작)\n' + join.map(x =>
@@ -17421,12 +17795,18 @@ function checkInsuranceExpiry() {
     }).join('\n') + '\n※ 보험 해지는 서비스 마감일 +1일로 신고해주세요. 신고 후 [만료처리]/[해지완료] 체크하면 알림이 멈춰요'
       + '\n※ 연이어 다른 환자로 재배정할 예정이면 해지하지 말고 그대로 두세요 — 새 근무건으로 보험이 자동으로 이어져요');
   }
+  if(gap.length) {
+    parts.push('⚠ 배상보험 미가입(누락)\n' + gap.map(g =>
+      `• ${g.cg.name}${g.ptName?' ('+g.ptName+')':''} — 근무 ${g.p.startDate} ~ ${g.p.endDate||'진행중'}${g.ongoing?' (근무중)':''}`).join('\n')
+      + '\n→ 보험사 가입 여부를 확인하고, 배상보험 현황의 [⚠ 미가입(누락)] 탭에서 [가입 처리] 하세요. 가입 대상이 아니면 [확인완료]하면 알림이 멈춰요'
+      + '\n※ 시작 전 취소·도착 후 취소는 가입 대상이 아니라 여기 나오지 않아요');
+  }
   const popup = document.getElementById('remind-popup');
   document.getElementById('remind-popup-body').innerHTML = insEsc(parts.join('\n\n'));
   popup.style.display = 'block';
   if(cfg.sound !== false) playBeep('#insurance');
   if(typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    const t = [join.length ? `가입 필요 ${join.length}명` : '', end.length ? `해지 신고 ${end.length}명` : ''].filter(Boolean).join(' · ');
+    const t = [join.length ? `가입 필요 ${join.length}명` : '', end.length ? `해지 신고 ${end.length}명` : '', gap.length ? `미가입(누락) ${gap.length}건` : ''].filter(Boolean).join(' · ');
     new Notification('배상보험 알림', { body: t + ' — 앱에서 확인해주세요' });
   }
 }
