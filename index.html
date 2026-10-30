@@ -2379,7 +2379,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_30_01';
+const APP_BUILD = '26_10_30_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -12624,14 +12624,16 @@ function findUnpaidPay(cgId, date, label) {
   return (cfg.unpaidPayments || []).find(function(u){ return u.key === key; }) || null;
 }
 
-function markPayUnpaid(cgId, date, label, amount) {
+// (26_10_30_02) keyOverride/ptNameOverride: "이력에서 복구됨" 카드용 — 재배정으로 라이브 값이 다른 근무건이
+// 되어도 그 근무건(시작일 포함 키)에 미지급을 걸 수 있게 하고, 환자명도 라이브가 아닌 이력 환자로 저장
+function markPayUnpaid(cgId, date, label, amount, keyOverride, ptNameOverride) {
   if(!cfg.unpaidPayments) cfg.unpaidPayments = [];
-  var key = payUnpaidKey(cgId, date, label);
+  var key = keyOverride || payUnpaidKey(cgId, date, label);
   if(cfg.unpaidPayments.some(function(u){ return u.key === key; })) return; // 이미 등록됨
   var cg = caregivers.find(function(c){ return String(c.id) === String(cgId); });
   if(!cg) { toast('간병인 정보를 찾을 수 없어요', true); return; }
-  var pt = resolveCalPt(cg);
-  var ptStr = pt ? ' (' + pt.name + ')' : '';
+  var pt = ptNameOverride ? null : resolveCalPt(cg);
+  var ptStr = ptNameOverride ? ' (' + ptNameOverride + ')' : (pt ? ' (' + pt.name + ')' : '');
   var bankStr = (cg.bankName||cg.bankAccount)
     ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
     : '';
@@ -12660,12 +12662,16 @@ function releasePayUnpaid(id) {
 // 카드 상단 우측 구석에 작게 넣는 미지급 토글(뱃지/버튼). 미지급 상태면 빨간 알약 뱃지(클릭 시
 // 해제), 아니면 테두리만 있는 작은 버튼(클릭 시 등록)을 반환. 카드 헤더 줄(flex 컨테이너)의
 // 오른쪽 끝에 이어붙여 사용.
-function unpaidToggleHtml(cgId, date, label, amount) {
-  var u = findUnpaidPay(cgId, date, label);
+function unpaidToggleHtml(cgId, date, label, amount, opt) {
+  var oKey = opt && opt.key ? String(opt.key) : '';
+  var u = oKey ? ((cfg.unpaidPayments || []).find(function(x){ return x.key === oKey; }) || null) : findUnpaidPay(cgId, date, label);
   if(u) {
     return '<span title="등록일: ' + u.markedAt + '" style="font-size:10px;font-weight:700;color:#fff;background:var(--red);padding:2px 7px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayUnpaid(\'' + u.id + '\')">⚠️ 미지급</span>';
   }
-  return '<span style="font-size:10px;font-weight:600;color:var(--red);border:1px solid var(--red);padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="markPayUnpaid(\'' + cgId + '\',\'' + date + '\',\'' + label + '\',' + (amount||0) + ')">미지급 체크</span>';
+  return '<span style="font-size:10px;font-weight:600;color:var(--red);border:1px solid var(--red);padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="markPayUnpaid(\'' + cgId + '\',\'' + date + '\',\'' + label + '\',' + (amount||0) + (oKey ? ',\'' + _jsq(oKey) + '\',\'' + _jsq(opt.ptName||'') + '\'' : '') + ')">미지급 체크</span>';
+}
+// onclick 문자열 안에 넣을 값의 따옴표/역슬래시 이스케이프
+function _jsq(v) { return String(v == null ? '' : v).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
 // ── (26_10_14_09) 대시보드 급여 카드 직접 수정 + 메모 ──
@@ -13298,7 +13304,10 @@ function showCalDetail(dateStr, collectOnly) {
       const stBg = isSettled ? 'var(--green-lt)' : 'var(--amber-lt)';
       payEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid ' + stColor + ';margin-bottom:8px;background:' + stBg + ';border-radius:0 var(--rsm) var(--rsm) 0">'
-        + '<div style="font-size:11px;font-weight:700;color:' + stColor + ';margin-bottom:3px">' + (isSettled ? '✅ 최종 정산 (정산 완료)' : '💰 최종 정산 (이력에서 복구됨)') + '</div>'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
+        + '<span style="font-size:11px;font-weight:700;color:' + stColor + '">' + (isSettled ? '✅ 최종 정산 (정산 완료)' : '💰 최종 정산 (이력에서 복구됨)') + '</span>'
+        + (isSettled ? '' : unpaidToggleHtml(cg.id, dateStr, '최종 정산', ovx.amount, { key: 'H|' + cg.id + '|' + dateStr + '|최종 정산|' + h.startDate, ptName: h.patientName || '' }))
+        + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ' (' + (h.patientName||'') + ')</div>'
         + '<div style="font-size:15px;font-weight:900;color:' + stColor + ';margin-top:4px">' + ovx.amountHtml + (isEstimate && !ovx.ov ?' <span style="font-size:11px;font-weight:700">(추정)</span>':'') + '</div>'
         + calHpSplitNoteHtml(hSp.hp)
@@ -13378,7 +13387,10 @@ function showCalDetail(dateStr, collectOnly) {
         }
         payEvents.push({ time: '', html:
           '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
-          + '<div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:3px">💰 ' + vp.label + (vp.isReserve?' [주말·공휴일 조정]':'') + ' (이력에서 복구됨)</div>'
+          + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
+          + '<span style="font-size:11px;font-weight:700;color:var(--amber)">💰 ' + vp.label + (vp.isReserve?' [주말·공휴일 조정]':'') + ' (이력에서 복구됨)</span>'
+          + unpaidToggleHtml(cg.id, vp.date, vp.label, ovx.amount, { key: 'H|' + cg.id + '|' + vp.date + '|' + vp.label + '|' + h.startDate, ptName: h.patientName || '' })
+          + '</div>'
           + '<div style="font-size:14px;font-weight:700">' + cg.name + ' (' + (h.patientName||'') + ')</div>'
           + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + ovx.amountHtml + '</div>'
           + calHpSplitNoteHtml(vSp.hp)
