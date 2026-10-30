@@ -2379,7 +2379,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_28_02';
+const APP_BUILD = '26_10_30_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -6673,18 +6673,15 @@ function openCgDetail(id) {
         <div style="display:flex;flex-direction:column;gap:6px">
           ${hist.map(h => {
             const isActive = h.status === '근무중' || h.status === '대기중';
+            // (26_10_30_01) 과거 담당 이력 금액도 calcTotalPayAmount와 같은 규칙(남은 시간 10시간 이상이면 하루 인정)으로 계산
+            // 예전엔 자투리 시간을 전부 OT(시간당 1만원)로만 쳐서 3일 12시간 근무가 3일+OT12시간(495,000원)으로 나와
+            // 총 간병비(4일 500,000원)와 금액이 달랐음
             const totalPay = (h.pay && h.startDate && h.endDate) ? (() => {
-              const [sh=8,sm=0]=(h.startTime||'08:00').split(':').map(Number);
-              const [eh=8,em=0]=(h.endTime||'08:00').split(':').map(Number);
-              const sMs=new Date(h.startDate).getTime()+(sh*60+sm)*60000;
-              const eMs=new Date(h.endDate).getTime()+(eh*60+em)*60000;
-              const min=Math.round((eMs-sMs)/60000);
-              if(min<=0) return '';
-              const days=Math.floor(min/1440);
-              const otH=Math.floor((min%1440)/60);
-              const hpAmt=holidayPremiumSum(holidayPremiumBlocks({startDate:h.startDate,startTime:h.startTime,endDate:h.endDate,endTime:h.endTime}));
-              const pay=Number(h.pay)*days+otH*10000+hpAmt;
-              return pay>0?pay.toLocaleString()+'원'+(hpAmt>0?' (명절할증 '+hpAmt.toLocaleString()+'원 포함)':''):'';
+              const vw={pay:h.pay,startDate:h.startDate,startTime:h.startTime,endDate:h.endDate,endTime:h.endTime};
+              const pay=calcTotalPayAmount(vw);
+              if(!(pay>0)) return '';
+              const hpAmt=holidayPremiumSum(holidayPremiumBlocks(vw));
+              return pay.toLocaleString()+'원'+(hpAmt>0?' (명절할증 '+hpAmt.toLocaleString()+'원 포함)':'');
             })() : '';
             return `<div style="background:var(--surface2);border:1px solid ${isActive?'var(--teal)':'var(--border)'};border-radius:var(--rsm);padding:8px 12px;font-size:12px">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
