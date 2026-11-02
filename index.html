@@ -12490,6 +12490,14 @@ function calcHistFinalMergeInfo(h, dateStr) {
   return { week: weekEntry.week, base: sp.base, hp: sp.hp, otHour: calcWorkDaysOt(v).otHour };
 }
 
+// (26_11_02_03) 대시보드 급여 카드용 OT 안내 줄 — OT가 이 지급건에 포함됐을 때만 표시
+// 예: "⏱️ OT 3시간 +30,000원 포함 (10시간 미만 자투리 · 시간당 10,000원)"
+function calOtNoteHtml(w) {
+  const wo = calcWorkDaysOt(w);
+  if(!(wo.otHour > 0)) return '';
+  return '<div style="font-size:11px;font-weight:700;color:#0E7490;margin-top:2px">⏱️ OT ' + wo.otHour + '시간 +' + (wo.otHour * 10000).toLocaleString() + '원 포함 (10시간 미만 자투리 · 시간당 10,000원)</div>';
+}
+
 function calcTotalPay(cg) {
   if(!cg.pay || !cg.startDate || !cg.endDate) return '';
   const payPerDay = Number(cg.pay);
@@ -13177,6 +13185,7 @@ function showCalDetail(dateStr, collectOnly) {
         cgName: cg.name, ptName: pt ? pt.name : (histFallback ? (histFallback.patientName||'') : '') });
       var amountStr = (cardAmount || hpSp.hp || ovx.ov) ?'<div style="font-size:15px;font-weight:900;color:'+bdColor+';margin-top:4px">' + ovx.amountHtml + '</div>' : '';
       amountStr += calHpSplitNoteHtml(hpSp.hp);
+      if(p.label === '단기 급여' || isMerged) amountStr += calOtNoteHtml(cg); // (26_11_02_03) OT 포함 안내
       var bankHtml = bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + bankStr + '</div>' : '';
       var expenseHtml = '';
       if(pt) {
@@ -13392,6 +13401,7 @@ function showCalDetail(dateStr, collectOnly) {
       + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + ovx.amountHtml + '</div>'
       + '<div style="font-size:11px;color:var(--gray);margin-top:2px">총 급여 ' + totalOwed.toLocaleString() + '원 − 기지급 ' + alreadyPaid.toLocaleString() + '원' + (fSp.hp > 0 ? ' − 명절할증 ' + fSp.hp.toLocaleString() + '원' : '') + '</div>'
       + calHpSplitNoteHtml(fSp.hp)
+      + calOtNoteHtml(cg)
       + ovx.noteHtml
       + bankHtml
       + reserveStr
@@ -13494,6 +13504,7 @@ function showCalDetail(dateStr, collectOnly) {
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ' (' + (h.patientName||'') + ')</div>'
         + '<div style="font-size:15px;font-weight:900;color:' + stColor + ';margin-top:4px">' + ovx.amountHtml + (isEstimate && !ovx.ov ?' <span style="font-size:11px;font-weight:700">(추정)</span>':'') + '</div>'
         + calHpSplitNoteHtml(hSp.hp)
+        + calOtNoteHtml(vcgHf)
         + ovx.noteHtml
         + (isSettled
             ? '<div style="font-size:11px;color:var(--green);font-weight:700;margin-top:2px">지급 완료로 처리된 건이에요</div>'
@@ -13589,6 +13600,7 @@ function showCalDetail(dateStr, collectOnly) {
           + '<div style="font-size:14px;font-weight:700">' + cg.name + ' (' + (h.patientName||'') + ')</div>'
           + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + ovx.amountHtml + '</div>'
           + calHpSplitNoteHtml(vSp.hp)
+          + ((vp.label === '단기 급여' || vIsMerged) ? calOtNoteHtml(virtualCg) : '')
           + (vIsMerged ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + vp.label + ' ' + vpBase.amount.toLocaleString() + '원 + 마감 정산' + (vMerge.otHour > 0 ? '(OT ' + vMerge.otHour + '시간)' : '') + ' ' + vMerge.base.toLocaleString() + '원</div>' : '')
           + ovx.noteHtml
           + '<div style="font-size:11px;color:var(--gray);margin-top:2px">간병인이 이후 다른 환자로 재배정되어 현재 상태와는 어긋나 있어요</div>'
@@ -14317,6 +14329,7 @@ function buildExpenseMemo(cg, pt, payEntry) {
     const lastWeek  = lastWeekEntry ? lastWeekEntry.week + 1 : 1; // 마지막으로 완료된 주차의 "다음" 주차 (그 주급이 이미 나갔으므로 최종정산은 그 다음 주차분)
     const isReplace = pt.status !== '종료'; // 환자가 계속 매칭 상태면 다른 간병인으로 교체된 것
     reasonLabel = lastWeek + '주차 주급_' + (isReplace ? '교체' : '퇴실');
+    { const _wo = calcWorkDaysOt(cg); if(_wo.otHour > 0) reasonLabel += ', OT ' + _wo.otHour + '시간 포함'; } // (26_11_02_03)
     hpDaysMemo = holidayFinalPartPremium(cg).days;
   } else {
     // 정규 N주차 주급
@@ -14395,6 +14408,7 @@ function buildExpenseMemoFromHistory(cg, h, payEntry) {
     const lastWeek  = lastWeekEntry ? lastWeekEntry.week + 1 : 1;
     const isReplace = !!(pt && pt.status !== '종료');
     reasonLabel = lastWeek + '주차 주급_' + (isReplace ? '교체' : '퇴실');
+    { const _wo = calcWorkDaysOt(virtualCg); if(_wo.otHour > 0) reasonLabel += ', OT ' + _wo.otHour + '시간 포함'; } // (26_11_02_03)
     hpDaysMemo = holidayFinalPartPremium(virtualCg).days;
   } else {
     // 정규 N주차 주급(이력복구)
