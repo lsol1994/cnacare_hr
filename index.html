@@ -2383,7 +2383,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_02_02';
+const APP_BUILD = '26_11_02_03';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -9785,7 +9785,7 @@ const MANUAL_SECTIONS = [
 </ul>
 <div class="manual-sub-title">급여 지급일과 금액 계산 규칙</div>
 <ul>
-<li><b>단기 급여(6일 이하 근무)</b> — 마감일에 한 번에 지급합니다.</li>
+<li><b>단기 급여(6일 이하 근무)</b> — 마감일에 한 번에 지급합니다. OT(10시간 미만 자투리)도 단기 급여 카드에 포함되며(지출내용에 "OT n시간 포함" 표시), 따로 최종 정산 카드가 생기지 않습니다. 명절할증만 별도 카드입니다.</li>
 <li><b>주급(7일 이상 근무)</b> — 시작일로부터 7일 뒤가 1주차 주급일이고, 이후 매주 같은 요일에 "일급 × 7일"을 지급합니다. 예: 6/8(월) 시작 → 6/15 1주차, 6/22 2주차…</li>
 <li><b>최종 정산(근무 마감)</b> — 근무가 끝나면 총 급여에서 이미 지급한 주급을 뺀 나머지를 마감일에 지급합니다. 마지막 주급일이 마감일과 딱 맞고 남는 금액이 없으면 그 주급 카드에 "(근무 마감)"으로 표시됩니다.</li>
 <li><b>퇴실일 = 주급일이면 한 건으로 지급</b> — 퇴실일(주말·공휴일 조정 후)이 정규 주급일과 같은 날이면, OT·자투리 정산분을 그날 주급과 합쳐 "💰 최종 정산 (근무 마감)" 카드 한 장으로 지급합니다. 카드 아래에 "n주차 주급 ○원 + 마감 정산(OT n시간) ○원" 내역이 나오고, 지출내용에는 "(n주차 주급_퇴실, OT n시간 포함)"으로 적힙니다. 예: 10/16 10:00 ~ 10/23 11:38 근무 → 예전에는 "1주차 주급 875,000원"과 "최종 정산 10,000원" 두 건이었지만, 이제는 "최종 정산 7일 885,000원" 한 건입니다. 명절할증은 이때도 별도 카드로 남습니다.</li>
@@ -12462,6 +12462,34 @@ function buildMergedFinalMemo(cg, ptName, hospital, isReplace, week, amount) {
   return `${ptName||''}_${hospital||''} 간병인(${cg.name||''}) 간병비 지급\n${fmtMD(toLocalDateStr(wkStart), cg.startTime)} ~ ${fmtMD(cg.endDate, cg.endTime)} 총 ${days}일 ${Number(amount||0).toLocaleString()}원(${reason})`;
 }
 
+// (26_11_02_03) 이력(assignHistory) 기준 최종정산 금액 — 캘린더 "이력에서 복구된 최종 정산"용
+// 기록된 settleAmount는 근무시간 수정 때 총액 차이만 더해지는 방식이라, 6일 이하 단기(단기 급여에 OT까지 이미 포함)나
+// 마지막 주급에 이미 들어간 금액이 한 번 더 "최종 정산"으로 따로 뜰 수 있었음 (예: 5일 근무 퇴실 → 단기 급여 + OT 카드 따로).
+// 그래서 지금 근무기간 기준으로 다시 계산한 "총 급여 − 정규 지급(단기·주급)" 를 상한으로 둔다.
+// (선지급은 이력에 없어서 기록값이 더 작으면 기록값 유지 — 선지급 차감분 보존)
+function histFinalSettle(h) {
+  const v = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
+  const cap = Math.max(0, calcTotalPayAmount(v) - calcPayDates(v).reduce(function(sum,p){ return sum + (p.amount||0); }, 0));
+  if(typeof h.settleAmount !== 'number') return { settle: cap, isEstimate: true }; // 예전 이력: 추정치
+  // 기록 당시의 명절할증분을 빼고 현재 명절기간 기준 할증분으로 다시 더함 (명절기간 수정·삭제 소급)
+  const rec = Math.max(0, h.settleAmount - (Number(h.settleHolidayPremium)||0) + holidayFinalPartPremium(v).amount);
+  return { settle: Math.min(rec, cap), isEstimate: false };
+}
+// (26_11_02_03) 이력 근무건: 퇴실일(주말·공휴일 조정 후) = 이력 N주차 주급일이면 최종정산 기본급(OT·자투리)을 그 주급 카드에 합침
+function calcHistFinalMergeInfo(h, dateStr) {
+  if(!h || !h.endDate || !h.pay) return null;
+  const rawEnd = parseLocalDate(h.endDate);
+  if(!rawEnd || toLocalDateStr(adjustPayDateToMonday(rawEnd)) !== dateStr) return null;
+  const v = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
+  const weekEntry = calcPayDates(v).filter(function(p){ return p.week && p.date === dateStr; }).sort(function(a,b){ return b.week - a.week; })[0];
+  if(!weekEntry) return null;
+  const settle = histFinalSettle(h).settle;
+  if(settle <= 0) return null;
+  const sp = calHpSplit(settle, holidayFinalPartPremium(v).amount);
+  if(sp.base <= 0) return null;
+  return { week: weekEntry.week, base: sp.base, hp: sp.hp, otHour: calcWorkDaysOt(v).otHour };
+}
+
 function calcTotalPay(cg) {
   if(!cg.pay || !cg.startDate || !cg.endDate) return '';
   const payPerDay = Number(cg.pay);
@@ -13403,22 +13431,9 @@ function showCalDetail(dateStr, collectOnly) {
       // (예전엔 여기서 return 해서 지급 끝난 건이 대시보드에서 통째로 사라졌음)
       const isSettled = h.settled === true;
       if(!h.endDate) return;
-      let settleAmount = h.settleAmount;
-      let isEstimate = false;
-      if(typeof settleAmount !== 'number') {
-        // settleAmount가 기록되지 않은 예전 이력: 아카이브된 값만으로 최대한 추정
-        // (당시 선지급/차감 내역까지는 복원할 수 없어 추정치임을 함께 표시)
-        const virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
-        const totalOwed = calcTotalPayAmount(virtualCg);
-        const alreadyPaidRegular = calcPayDates(virtualCg).reduce(function(sum,p){ return sum + (p.amount||0); }, 0);
-        settleAmount = Math.max(0, totalOwed - alreadyPaidRegular);
-        isEstimate = true;
-      } else {
-        // 기록 당시의 명절할증분을 빼고 현재 명절기간 기준 할증분으로 다시 더함
-        // (명절기간을 나중에 등록/수정/삭제해도 소급 반영되도록 — 예전 이력은 할증분 0원으로 간주)
-        const vcgHp = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
-        settleAmount = Math.max(0, settleAmount - (Number(h.settleHolidayPremium)||0) + holidayFinalPartPremium(vcgHp).amount);
-      }
+      const _hfs = histFinalSettle(h); // (26_11_02_03) 계산 로직은 histFinalSettle()로 이동 + 단기·주급에 이미 들어간 OT 이중 표시 방지
+      let settleAmount = _hfs.settle;
+      let isEstimate = _hfs.isEstimate;
       if(settleAmount <= 0) return;
       const rawEndDate = parseLocalDate(h.endDate);
       if(!rawEndDate) return;
@@ -13447,6 +13462,8 @@ function showCalDetail(dateStr, collectOnly) {
       const vcgHf = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
       const hfHist = holidayFinalPartPremium(vcgHf);
       const hSp = calHpSplit(settleAmount, hfHist.amount);
+      // (26_11_02_03) 퇴실일 = 이력 주급일이면 OT·자투리는 아래 "이력에서 복구된 N주차 주급" 카드에 합침 (명절할증 카드만 따로)
+      const hMergedIntoWeek = !isSettled && !!calcHistFinalMergeInfo(h, dateStr);
       const estimateNote = isEstimate
         ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚠️ 예전 데이터라 선지급/차감 내역까지는 반영 못한 추정 금액이에요 — 지급 전 확인해주세요</div>'
         : '';
@@ -13468,7 +13485,7 @@ function showCalDetail(dateStr, collectOnly) {
       }
       const stColor = isSettled ? 'var(--green)' : 'var(--amber)';
       const stBg = isSettled ? 'var(--green-lt)' : 'var(--amber-lt)';
-      payEvents.push({ time: '', html:
+      if(!hMergedIntoWeek && hSp.base > 0) payEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid ' + stColor + ';margin-bottom:8px;background:' + stBg + ';border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
         + '<span style="font-size:11px;font-weight:700;color:' + stColor + '">' + (isSettled ? '✅ 최종 정산 (정산 완료)' : '💰 최종 정산 (이력에서 복구됨)') + '</span>'
@@ -13537,9 +13554,21 @@ function showCalDetail(dateStr, collectOnly) {
         // (26_09_30_07) 명절할증은 별도 카드로 분리
         var vSp = calHpSplit(vp.amount, vp.holidayPremium);
         var vpBase = vSp.hp > 0 ? Object.assign({}, vp, { amount: vSp.base, hpSeparate: true }) : vp;
+        // (26_11_02_03) 퇴실일 = 이 주급일이면 이력 최종정산(OT·자투리) 기본급을 이 카드에 합쳐 한 건으로 (명절할증은 별도)
+        var vMerge = (vp.week && h.settled !== true) ? calcHistFinalMergeInfo(h, dateStr) : null;
+        var vIsMerged = !!(vMerge && vMerge.week === vp.week);
+        var vCardAmount = vpBase.amount + (vIsMerged ? vMerge.base : 0);
+        var vMemo;
+        if(vIsMerged) {
+          var vPtRec = patients.find(function(x){ return String(x.id) === String(h.patientId); });
+          var vReplace = !!(vPtRec && vPtRec.status !== '종료');
+          vMemo = buildMergedFinalMemo(Object.assign({ name: cg.name }, virtualCg), h.patientName || '', h.hospital || '', vReplace, vp.week, vCardAmount);
+        } else {
+          vMemo = buildExpenseMemoFromHistory(cg, h, vpBase);
+        }
         // (26_10_14_09) 대시보드 직접 수정값 적용
-        var ovx = payOvCard({ cgId: cg.id, startDate: h.startDate, date: vp.date, label: vp.label, amount: vpBase.amount,
-          memo: buildExpenseMemoFromHistory(cg, h, vpBase), cgName: cg.name, ptName: h.patientName || '' });
+        var ovx = payOvCard({ cgId: cg.id, startDate: h.startDate, date: vp.date, label: vp.label, amount: vCardAmount,
+          memo: vMemo, cgName: cg.name, ptName: h.patientName || '' });
         var expenseMsg = ovx.memo;
         if(expenseMsg) {
           _calExpenseMsgs.push(expenseMsg);
@@ -13554,12 +13583,13 @@ function showCalDetail(dateStr, collectOnly) {
         payEvents.push({ time: '', html:
           '<div style="padding:10px 12px;border-left:3px solid var(--amber);margin-bottom:8px;background:var(--amber-lt);border-radius:0 var(--rsm) var(--rsm) 0">'
           + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
-          + '<span style="font-size:11px;font-weight:700;color:var(--amber)">💰 ' + vp.label + (vp.isReserve?' [주말·공휴일 조정]':'') + ' (이력에서 복구됨)</span>'
+          + '<span style="font-size:11px;font-weight:700;color:var(--amber)">💰 ' + (vIsMerged ? '최종 정산 (근무 마감)' : vp.label) + (vp.isReserve?' [주말·공휴일 조정]':'') + ' (이력에서 복구됨)</span>'
           + unpaidToggleHtml(cg.id, vp.date, vp.label, ovx.amount, { key: 'H|' + cg.id + '|' + vp.date + '|' + vp.label + '|' + h.startDate, ptName: h.patientName || '' })
           + '</div>'
           + '<div style="font-size:14px;font-weight:700">' + cg.name + ' (' + (h.patientName||'') + ')</div>'
           + '<div style="font-size:15px;font-weight:900;color:var(--amber);margin-top:4px">' + ovx.amountHtml + '</div>'
           + calHpSplitNoteHtml(vSp.hp)
+          + (vIsMerged ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + vp.label + ' ' + vpBase.amount.toLocaleString() + '원 + 마감 정산' + (vMerge.otHour > 0 ? '(OT ' + vMerge.otHour + '시간)' : '') + ' ' + vMerge.base.toLocaleString() + '원</div>' : '')
           + ovx.noteHtml
           + '<div style="font-size:11px;color:var(--gray);margin-top:2px">간병인이 이후 다른 환자로 재배정되어 현재 상태와는 어긋나 있어요</div>'
           + '<div style="font-size:11px;color:var(--amber);margin-top:2px">⚠️ 선지급/차감 내역은 반영 안 된 금액이에요 — 실제 지급 여부는 별도로 확인해주세요</div>'
@@ -14275,6 +14305,7 @@ function buildExpenseMemo(cg, pt, payEntry) {
     totalDays  = Math.round((parseLocalDate(rangeEnd) - parseLocalDate(rangeStart)) / 86400000);
     const isEarlyEnd = !!(cg.earlyEndSnapshot || cg.earlyEndPatientId);
     reasonLabel = isEarlyEnd ? '퇴실' : (pt.endReason || '환자 퇴원');
+    { const _wo = calcWorkDaysOt(cg); if(_wo.otHour > 0) reasonLabel += ', OT ' + _wo.otHour + '시간 포함'; } // (26_11_02_03) 단기 급여에 OT 포함 표시
   } else if(/^최종/.test(payEntry.label || '')) {
     // 최종 정산: 마지막으로 완료된 주차 끝 ~ 실제 마감일
     const allDates = calcPayDates(cg).filter(d=>d.week);
@@ -14351,6 +14382,7 @@ function buildExpenseMemoFromHistory(cg, h, payEntry) {
     rangeEnd   = h.endDate;   rangeEndTime   = h.endTime;
     totalDays  = Math.round((parseLocalDate(rangeEnd) - parseLocalDate(rangeStart)) / 86400000);
     reasonLabel = (pt && pt.endReason) ? pt.endReason : '퇴실';
+    { const _wo = calcWorkDaysOt(h); if(_wo.otHour > 0) reasonLabel += ', OT ' + _wo.otHour + '시간 포함'; } // (26_11_02_03) 단기 급여에 OT 포함 표시
   } else if(/^최종/.test(payEntry.label || '')) {
     // 최종 정산(이력복구): 이력에 남은 기간으로 마지막 완료 주차를 다시 계산
     const virtualCg = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
