@@ -2054,6 +2054,8 @@ function defaultHolidays() {
 if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays();
 // 급여 미지급 체크 목록 — 해제되기 전까지 원래 지급일과 무관하게 매일 대시보드에 노출됨
 if(!Array.isArray(cfg.unpaidPayments)) cfg.unpaidPayments = [];
+// (26_11_02_01) 직접 해제한 미지급 키 목록 — 이 키는 다시 자동 미지급 체크하지 않음
+cfg.unpaidDismissed = hrUnpaidArr(cfg.unpaidDismissed);
 // (26_10_14_09) 대시보드 급여 카드 직접 수정 + 메모 목록 — 환자·간병인 레코드와 완전히 분리
 if(!Array.isArray(cfg.payOverrides)) cfg.payOverrides = (cfg.payOverrides && typeof cfg.payOverrides === 'object') ? Object.values(cfg.payOverrides) : [];
 // 명절 할증 기간 목록 (명절 할증 메뉴에서 등록) — Firebase가 배열을 객체로 돌려주는 경우까지 정규화
@@ -2379,7 +2381,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_10_30_02';
+const APP_BUILD = '26_11_02_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3088,6 +3090,7 @@ function attachFirebaseListener() {
         cfg = d.cfg;
         if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays(); // 예전 cfg 호환
         if(!Array.isArray(cfg.unpaidPayments)) cfg.unpaidPayments = []; // 예전 cfg 호환
+        cfg.unpaidDismissed = hrUnpaidArr(cfg.unpaidDismissed); // (26_11_02_01) 자동 미지급 제외 목록
         if(!Array.isArray(cfg.payOverrides)) cfg.payOverrides = (cfg.payOverrides && typeof cfg.payOverrides === 'object') ? Object.values(cfg.payOverrides) : []; // (26_10_14_09) 급여 카드 수정
         normalizeHolidayPremiums(cfg); // 명절 할증 (예전 cfg 호환 + Firebase 배열 정규화)
       }
@@ -12147,7 +12150,10 @@ function hrExpRefreshRegistered(force) {
       var changed = JSON.stringify(next) !== JSON.stringify(_hrExpReg);
       _hrExpReg = next;
       _hrExpRegLoadedAt = Date.now();
-      if(changed) refreshCalendarIfOpen();
+      // (26_11_02_01) 재무 목록을 정상으로 읽었을 때만 미지급 자동 체크·해제 (읽기 실패 시엔 손대지 않음)
+      var autoChanged = false;
+      try { autoChanged = hrUnpaidAutoSync(); } catch(e2) { console.warn('미지급 자동 체크 실패:', e2); }
+      if(changed || autoChanged) refreshCalendarIfOpen();
       return changed;
     } catch(e) {
       console.warn('지출결의서 등록 목록 읽기 실패:', e);
@@ -12610,6 +12616,88 @@ function findOwnAssignHistoryByDates(cg) {
   }) || null;
 }
 
+// ── (26_11_02_01) 미지급 자동 체크·자동 해제 (재무관리 지출결의서 연동) ──
+// · 자동 체크: 지급일 다음날부터, 지출결의서 상태가 '지급완료'가 아닌(미등록·대기·승인·반려) 급여 카드를 미지급으로 추가
+//   - 적용 시작 지급일 HR_UNPAID_AUTO_FROM 이후만, 최근 HR_UNPAID_AUTO_WINDOW일만 훑음(오래된 건 쏟아짐 방지·속도)
+//   - 직접 해제한 키(cfg.unpaidDismissed)는 다시 체크하지 않음
+// · 자동 해제: 재무관리에서 같은 hrKey 지출결의서가 '지급완료'면 미지급 목록에서 뺌(수동 체크 건 포함)
+// · 재무 목록을 정상으로 읽은 직후(hrExpRefreshRegistered 성공)에만 실행됨
+var HR_UNPAID_AUTO_FROM = '2026-11-02';
+var HR_UNPAID_AUTO_WINDOW = 31;
+var HR_UNPAID_DISMISS_KEEP = 120; // 제외 기록은 원래 지급일 기준 120일 지나면 정리
+function hrUnpaidArr(v) {
+  if(Array.isArray(v)) return v.filter(Boolean);
+  if(v && typeof v === 'object') return Object.values(v).filter(Boolean);
+  return [];
+}
+function hrUnpaidAddDays(dateStr, n) {
+  var d = parseLocalDate(dateStr); if(!d) return dateStr;
+  d.setDate(d.getDate() + n);
+  return toLocalDateStr(d);
+}
+function hrUnpaidAutoSync() {
+  var today = todayStr();
+  var list = hrUnpaidArr(cfg.unpaidPayments);
+  var dismissed = hrUnpaidArr(cfg.unpaidDismissed);
+  // Firebase가 배열을 객체로 돌려준 경우에도 이후 코드가 배열로 다루게 정규화(저장은 안 함)
+  if(!Array.isArray(cfg.unpaidPayments)) cfg.unpaidPayments = list;
+  if(!Array.isArray(cfg.unpaidDismissed)) cfg.unpaidDismissed = dismissed;
+  var keyOf = function(u){ return u.key || payUnpaidKey(u.cgId, u.origDate, u.label); };
+  var isPaid = function(k){ var r = _hrExpReg[k]; return !!(r && r.status === '지급완료'); };
+  var changed = false;
+
+  // 1) 자동 해제 — 지급완료된 건
+  var released = [];
+  var kept = list.filter(function(u){
+    if(isPaid(keyOf(u))) { released.push(u); return false; }
+    return true;
+  });
+  if(released.length) changed = true;
+
+  // 2) 오래된 제외 기록 정리
+  var dCut = hrUnpaidAddDays(today, -HR_UNPAID_DISMISS_KEEP);
+  var dismissedKept = dismissed.filter(function(x){ return !x.origDate || x.origDate >= dCut; });
+  if(dismissedKept.length !== dismissed.length) changed = true;
+
+  // 3) 자동 체크 — 지급일 다음날부터(= 어제까지의 지급일)
+  var have = {}; kept.forEach(function(u){ have[keyOf(u)] = true; });
+  var skip = {}; dismissedKept.forEach(function(x){ skip[x.key] = true; });
+  var from = HR_UNPAID_AUTO_FROM;
+  var winFrom = hrUnpaidAddDays(today, -HR_UNPAID_AUTO_WINDOW);
+  if(winFrom > from) from = winFrom;
+  var added = [];
+  for(var d = from; d < today; d = hrUnpaidAddDays(d, 1)) {
+    var sink = hrExpCollectForDate(d);
+    Object.keys(sink).forEach(function(k){
+      var p = sink[k];
+      if(!p || p.date !== d) return;
+      if(!(Number(p.amount) > 0)) return;            // 차감 등으로 0원인 건은 지급할 게 없음
+      if(have[k] || skip[k] || isPaid(k)) return;
+      have[k] = true;
+      var bankStr = (p.bankRaw || p.account)
+        ? ((p.bankRaw||'') + ' ' + (p.account||'') + (p.holder ? ' (' + p.holder + ')' : '')).trim() : '';
+      added.push({
+        id: genId(), key: k, cgId: String(p.cgId), cgName: p.cgName || '', ptStr: p.ptName ? ' (' + p.ptName + ')' : '',
+        origDate: d, label: p.label || '', amount: Number(p.amount) || 0, bankStr: bankStr,
+        markedAt: today, auto: true
+      });
+    });
+  }
+  if(added.length) changed = true;
+
+  if(!changed) return false;
+  cfg.unpaidPayments = kept.concat(added);
+  cfg.unpaidDismissed = dismissedKept;
+  markCfgEdited();
+  save();
+  if(released.length || added.length) {
+    toast((added.length ? '⚠️ 지출결의서 지급완료가 안 된 ' + added.length + '건을 미지급으로 자동 체크했어요' : '')
+      + (added.length && released.length ? ' · ' : '')
+      + (released.length ? '✅ 지급완료된 ' + released.length + '건 미지급 자동 해제' : ''));
+  }
+  return true;
+}
+
 // ── 급여 미지급 체크 ──
 // calcPayDates() 등은 값을 저장하지 않고 매번 다시 계산하는 방식이라, "이 특정 지급건은
 // 아직 안 나갔다"는 상태를 저장할 곳이 따로 없었음. 새 컬렉션을 만들지 않고 cfg(협회 설정)
@@ -12642,6 +12730,8 @@ function markPayUnpaid(cgId, date, label, amount, keyOverride, ptNameOverride) {
     origDate: date, label: label || '', amount: Number(amount) || 0, bankStr: bankStr,
     markedAt: todayStr()
   });
+  // (26_11_02_01) 직접 다시 체크하면 '자동 체크 제외' 기록은 지움
+  cfg.unpaidDismissed = hrUnpaidArr(cfg.unpaidDismissed).filter(function(x){ return x.key !== key; });
   markCfgEdited();
   save();
   refreshCalendarIfOpen();
@@ -12652,7 +12742,12 @@ function releasePayUnpaid(id) {
   if(!cfg.unpaidPayments) return;
   var idx = cfg.unpaidPayments.findIndex(function(u){ return String(u.id) === String(id); });
   if(idx === -1) return;
+  var rel = cfg.unpaidPayments[idx];
   cfg.unpaidPayments.splice(idx, 1);
+  // (26_11_02_01) 직접 해제한 건은 지출결의서가 없어도 다시 자동 미지급 체크하지 않게 기억
+  var relKey = rel.key || payUnpaidKey(rel.cgId, rel.origDate, rel.label);
+  cfg.unpaidDismissed = hrUnpaidArr(cfg.unpaidDismissed).filter(function(x){ return x.key !== relKey; });
+  cfg.unpaidDismissed.push({ key: relKey, origDate: rel.origDate || '', at: todayStr() });
   markCfgEdited();
   save();
   refreshCalendarIfOpen();
@@ -12666,7 +12761,7 @@ function unpaidToggleHtml(cgId, date, label, amount, opt) {
   var oKey = opt && opt.key ? String(opt.key) : '';
   var u = oKey ? ((cfg.unpaidPayments || []).find(function(x){ return x.key === oKey; }) || null) : findUnpaidPay(cgId, date, label);
   if(u) {
-    return '<span title="등록일: ' + u.markedAt + '" style="font-size:10px;font-weight:700;color:#fff;background:var(--red);padding:2px 7px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayUnpaid(\'' + u.id + '\')">⚠️ 미지급</span>';
+    return '<span title="등록일: ' + u.markedAt + (u.auto ? ' (지출결의서 미지급완료로 자동 체크)' : '') + '" style="font-size:10px;font-weight:700;color:#fff;background:var(--red);padding:2px 7px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayUnpaid(\'' + u.id + '\')">⚠️ 미지급' + (u.auto ? '(자동)' : '') + '</span>';
   }
   return '<span style="font-size:10px;font-weight:600;color:var(--red);border:1px solid var(--red);padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="markPayUnpaid(\'' + cgId + '\',\'' + date + '\',\'' + label + '\',' + (amount||0) + (oKey ? ',\'' + _jsq(oKey) + '\',\'' + _jsq(opt.ptName||'') + '\'' : '') + ')">미지급 체크</span>';
 }
@@ -13433,7 +13528,7 @@ function showCalDetail(dateStr, collectOnly) {
       unpaidReminderEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:#FEE2E2;border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
-        + '<span style="font-size:11px;font-weight:700;color:var(--red)">⚠️ 미지급 (원래 지급일: ' + u.origDate + ')</span>'
+        + '<span style="font-size:11px;font-weight:700;color:var(--red)">⚠️ 미지급' + (u.auto ? '(자동)' : '') + ' (원래 지급일: ' + u.origDate + ')</span>'
         + '<span style="font-size:10px;font-weight:600;color:var(--red);border:1px solid var(--red);padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayUnpaid(\'' + u.id + '\')">해제</span>'
         + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + (u.cgName||'') + (u.ptStr||'') + '</div>'
