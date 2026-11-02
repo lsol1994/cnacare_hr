@@ -2383,7 +2383,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_02_03';
+const APP_BUILD = '26_11_02_04';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -12111,7 +12111,14 @@ function hrExpBtnHtml(payload) {
   if(reg) {
     return '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center;color:var(--green);border-color:var(--green)" onclick="hrExpShowRegistered(\'' + k + '\')">✅ 지출결의서 등록됨' + (reg.status ? ' · ' + reg.status : '') + '</button>';
   }
+  // (26_11_02_04) 보류 중인 건은 지출결의서 등록 막음 — 보류 해제해야 등록 버튼이 다시 살아남
+  if(findHeldPay(payload.hrKey)) {
+    return '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center;color:#7C3AED;border-color:#7C3AED;background:#F5F3FF;opacity:.85;cursor:not-allowed" onclick="hrExpHeldBlocked()">⏸ 보류 중 — 지출결의서 등록 불가</button>';
+  }
   return '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center;color:var(--teal);border-color:var(--teal)" onclick="hrExpOpen(\'' + k + '\')">📤 지출결의서 등록</button>';
+}
+function hrExpHeldBlocked() {
+  toast('⏸ 보류 중인 건은 지출결의서를 등록할 수 없어요. 보류 해제 후 등록해주세요', true);
 }
 function hrExpShowRegistered(k) {
   var key = decodeURIComponent(k);
@@ -12174,6 +12181,7 @@ function hrExpOpen(k) {
   var p = _hrExpSink[key];
   if(!p) { toast('지급 정보를 찾을 수 없어요. 대시보드를 새로 열어주세요', true); return; }
   if(_hrExpReg[key]) { hrExpShowRegistered(k); return; }
+  if(findHeldPay(key)) { hrExpHeldBlocked(); return; } // (26_11_02_04) 보류 건 등록 차단
   _hrExpModalPayload = p;
   var br = hrExpBankResolve(p.bankRaw);
   var bankField;
@@ -12257,6 +12265,7 @@ async function hrExpWrite(fdb, obj) {
 }
 async function hrExpSubmit() {
   var p = _hrExpModalPayload; if(!p) return;
+  if(findHeldPay(p.hrKey)) { hrExpClose(); hrExpHeldBlocked(); return; } // (26_11_02_04) 확인창 띄운 사이 보류된 경우
   var v = function(id){ var e = document.getElementById(id); return e ? String(e.value||'').trim() : ''; };
   var bankName = '', bankCode = '';
   var sel = document.getElementById('hrexp-bank-sel');
@@ -12289,7 +12298,7 @@ async function hrExpSubmit() {
 }
 // 보고 있는 날짜의 미등록 카드 목록 (은행이 애매한 건은 확인창에서 골라야 해서 제외)
 function hrExpBulkTargets() {
-  var all = Object.keys(_hrExpSink).map(function(k){ return _hrExpSink[k]; }).filter(function(p){ return p && !_hrExpReg[p.hrKey] && !findHeldPay(p.hrKey); }); // (26_11_02_02) 보류 건은 카드에서 따로 등록
+  var all = Object.keys(_hrExpSink).map(function(k){ return _hrExpSink[k]; }).filter(function(p){ return p && !_hrExpReg[p.hrKey] && !findHeldPay(p.hrKey); }); // (26_11_02_02) 보류 건 제외 (26_11_02_04: 보류 중엔 등록 자체 불가)
   var ok = [], needBank = [], bad = [];
   all.forEach(function(p) {
     var br = hrExpBankResolve(p.bankRaw);
@@ -12326,6 +12335,7 @@ async function hrExpBulk() {
   try {
     var fdb = await hrExpFinDb();
     for(var i = 0; i < t.ok.length; i++) {
+      if(findHeldPay(t.ok[i].hrKey)) continue; // (26_11_02_04) 확인 사이 보류된 건 건너뜀
       try { var r = await hrExpWrite(fdb, t.ok[i]); if(r === 'dup') dup++; else done++; }
       catch(e) { console.error('지출결의서 일괄 등록 실패:', t.ok[i].title, e); fail++; }
     }
