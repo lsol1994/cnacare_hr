@@ -2056,6 +2056,8 @@ if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays();
 if(!Array.isArray(cfg.unpaidPayments)) cfg.unpaidPayments = [];
 // (26_11_02_01) 직접 해제한 미지급 키 목록 — 이 키는 다시 자동 미지급 체크하지 않음
 cfg.unpaidDismissed = hrUnpaidArr(cfg.unpaidDismissed);
+// (26_11_02_02) 급여 보류 목록 — 업체 확인 등으로 일부러 지급을 미룬 건. 해제(또는 지급완료) 전까지 매일 표시
+cfg.heldPayments = hrUnpaidArr(cfg.heldPayments);
 // (26_10_14_09) 대시보드 급여 카드 직접 수정 + 메모 목록 — 환자·간병인 레코드와 완전히 분리
 if(!Array.isArray(cfg.payOverrides)) cfg.payOverrides = (cfg.payOverrides && typeof cfg.payOverrides === 'object') ? Object.values(cfg.payOverrides) : [];
 // 명절 할증 기간 목록 (명절 할증 메뉴에서 등록) — Firebase가 배열을 객체로 돌려주는 경우까지 정규화
@@ -2381,7 +2383,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_02_01';
+const APP_BUILD = '26_11_02_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3091,6 +3093,7 @@ function attachFirebaseListener() {
         if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays(); // 예전 cfg 호환
         if(!Array.isArray(cfg.unpaidPayments)) cfg.unpaidPayments = []; // 예전 cfg 호환
         cfg.unpaidDismissed = hrUnpaidArr(cfg.unpaidDismissed); // (26_11_02_01) 자동 미지급 제외 목록
+        cfg.heldPayments = hrUnpaidArr(cfg.heldPayments); // (26_11_02_02) 급여 보류 목록
         if(!Array.isArray(cfg.payOverrides)) cfg.payOverrides = (cfg.payOverrides && typeof cfg.payOverrides === 'object') ? Object.values(cfg.payOverrides) : []; // (26_10_14_09) 급여 카드 수정
         normalizeHolidayPremiums(cfg); // 명절 할증 (예전 cfg 호환 + Firebase 배열 정규화)
       }
@@ -12200,6 +12203,7 @@ function hrExpOpen(k) {
     + row('계좌번호' + (p.holder && p.holder !== p.cgName ? ' (예금주: ' + hrExpEsc(p.holder) + ')' : ''), '<input type="text" id="hrexp-account" value="' + hrExpEsc(p.account) + '">')
     + row('지출 내용', '<textarea id="hrexp-desc" rows="3" style="resize:vertical">' + hrExpEsc(p.desc) + '</textarea>')
     + (p.unpaidOrigDate ? '<div style="font-size:11px;color:var(--red);margin-bottom:8px">⚠️ 미지급 건 (원래 지급일: ' + p.unpaidOrigDate + ')</div>' : '')
+    + (p.heldOrigDate ? '<div style="font-size:11px;color:#7C3AED;margin-bottom:8px">⏸ 보류 건 (원래 지급일: ' + p.heldOrigDate + (p.heldMemo ? ' · 사유: ' + hrExpEsc(p.heldMemo) : '') + ')</div>' : '')
     + (!p.ptName ? '<div style="font-size:11px;color:var(--amber);margin-bottom:8px">⚠️ 환자명을 찾지 못했어요 — 제목에 환자명을 넣어야 재무관리 입금대조가 돼요</div>' : '')
     + '<div style="font-size:11px;color:var(--gray);margin-bottom:10px">계정과목 ' + HR_EXP_ACCT + ' · 업체 ' + HR_EXP_CLIENT + ' · 상태 대기 · 기안일자 오늘</div>'
     + '<div style="display:flex;gap:8px"><button class="btn" style="flex:1;justify-content:center" onclick="hrExpClose()">취소</button>'
@@ -12228,7 +12232,7 @@ function hrExpBuildDoc(p, ov) {
     bizno: '', acct: HR_EXP_ACCT, amount: Number(pick('amount', p.amount))||0, method: '계좌이체',
     bank: pick('bank', ''), bankCode: pick('bankCode', ''), account: pick('account', p.account),
     desc: pick('desc', p.desc), status: '대기',
-    note: 'HR 대시보드 등록' + (p.holder && p.holder !== p.cgName ? ' · 예금주 ' + p.holder : '') + (p.unpaidOrigDate ? ' · 미지급(원래 지급일 ' + p.unpaidOrigDate + ')' : ''),
+    note: 'HR 대시보드 등록' + (p.holder && p.holder !== p.cgName ? ' · 예금주 ' + p.holder : '') + (p.unpaidOrigDate ? ' · 미지급(원래 지급일 ' + p.unpaidOrigDate + ')' : '') + (p.heldOrigDate ? ' · 보류 해소(원래 지급일 ' + p.heldOrigDate + ')' : ''),
     careDays: Number(pick('careDays', p.careDays))||0, expectedRev: Number(pick('expectedRev', p.expectedRev))||0, client: HR_EXP_CLIENT,
     src: 'hr', hrKey: p.hrKey, hrKind: p.kind, hrCgId: p.cgId, hrRegAt: new Date().toISOString()
   };
@@ -12285,7 +12289,7 @@ async function hrExpSubmit() {
 }
 // 보고 있는 날짜의 미등록 카드 목록 (은행이 애매한 건은 확인창에서 골라야 해서 제외)
 function hrExpBulkTargets() {
-  var all = Object.keys(_hrExpSink).map(function(k){ return _hrExpSink[k]; }).filter(function(p){ return p && !_hrExpReg[p.hrKey]; });
+  var all = Object.keys(_hrExpSink).map(function(k){ return _hrExpSink[k]; }).filter(function(p){ return p && !_hrExpReg[p.hrKey] && !findHeldPay(p.hrKey); }); // (26_11_02_02) 보류 건은 카드에서 따로 등록
   var ok = [], needBank = [], bad = [];
   all.forEach(function(p) {
     var br = hrExpBankResolve(p.bankRaw);
@@ -12642,6 +12646,8 @@ function hrUnpaidAutoSync() {
   // Firebase가 배열을 객체로 돌려준 경우에도 이후 코드가 배열로 다루게 정규화(저장은 안 함)
   if(!Array.isArray(cfg.unpaidPayments)) cfg.unpaidPayments = list;
   if(!Array.isArray(cfg.unpaidDismissed)) cfg.unpaidDismissed = dismissed;
+  var held = hrUnpaidArr(cfg.heldPayments);
+  if(!Array.isArray(cfg.heldPayments)) cfg.heldPayments = held;
   var keyOf = function(u){ return u.key || payUnpaidKey(u.cgId, u.origDate, u.label); };
   var isPaid = function(k){ var r = _hrExpReg[k]; return !!(r && r.status === '지급완료'); };
   var changed = false;
@@ -12653,6 +12659,13 @@ function hrUnpaidAutoSync() {
     return true;
   });
   if(released.length) changed = true;
+  // (26_11_02_02) 보류도 지급완료되면 자동 해제
+  var heldReleased = [];
+  var heldKept = held.filter(function(u){
+    if(isPaid(keyOf(u))) { heldReleased.push(u); return false; }
+    return true;
+  });
+  if(heldReleased.length) changed = true;
 
   // 2) 오래된 제외 기록 정리
   var dCut = hrUnpaidAddDays(today, -HR_UNPAID_DISMISS_KEEP);
@@ -12662,6 +12675,7 @@ function hrUnpaidAutoSync() {
   // 3) 자동 체크 — 지급일 다음날부터(= 어제까지의 지급일)
   var have = {}; kept.forEach(function(u){ have[keyOf(u)] = true; });
   var skip = {}; dismissedKept.forEach(function(x){ skip[x.key] = true; });
+  heldKept.forEach(function(u){ skip[keyOf(u)] = true; }); // 보류 중인 건은 미지급으로 따로 안 찍음
   var from = HR_UNPAID_AUTO_FROM;
   var winFrom = hrUnpaidAddDays(today, -HR_UNPAID_AUTO_WINDOW);
   if(winFrom > from) from = winFrom;
@@ -12672,6 +12686,7 @@ function hrUnpaidAutoSync() {
       var p = sink[k];
       if(!p || p.date !== d) return;
       if(!(Number(p.amount) > 0)) return;            // 차감 등으로 0원인 건은 지급할 게 없음
+      if(p.hrSettled) return;                         // (26_11_02_02) HR에서 '정산 완료 처리'한 이력 카드는 이미 지급된 건
       if(have[k] || skip[k] || isPaid(k)) return;
       have[k] = true;
       var bankStr = (p.bankRaw || p.account)
@@ -12688,13 +12703,14 @@ function hrUnpaidAutoSync() {
   if(!changed) return false;
   cfg.unpaidPayments = kept.concat(added);
   cfg.unpaidDismissed = dismissedKept;
+  cfg.heldPayments = heldKept;
   markCfgEdited();
   save();
-  if(released.length || added.length) {
-    toast((added.length ? '⚠️ 지출결의서 지급완료가 안 된 ' + added.length + '건을 미지급으로 자동 체크했어요' : '')
-      + (added.length && released.length ? ' · ' : '')
-      + (released.length ? '✅ 지급완료된 ' + released.length + '건 미지급 자동 해제' : ''));
-  }
+  var msgs = [];
+  if(added.length) msgs.push('⚠️ 지출결의서 지급완료가 안 된 ' + added.length + '건을 미지급으로 자동 체크했어요');
+  if(released.length) msgs.push('✅ 지급완료된 ' + released.length + '건 미지급 자동 해제');
+  if(heldReleased.length) msgs.push('✅ 지급완료된 ' + heldReleased.length + '건 보류 자동 해제');
+  if(msgs.length) toast(msgs.join(' · '));
   return true;
 }
 
@@ -12754,10 +12770,65 @@ function releasePayUnpaid(id) {
   toast('✅ 미지급 해제했어요. 원래 지급일에만 표시돼요.');
 }
 
+// ── (26_11_02_02) 급여 보류 ──
+// 업체 확인 등 문제가 있어 일부러 지급을 미룬 건. 미지급과 같은 방식(cfg 블롭, 등록 시점 스냅샷)으로 저장하고
+// 해제 전까지 매일 대시보드 "⏸ 보류 알림"에 표시. 재무관리 지출결의서가 지급완료되면 자동 해제(hrUnpaidAutoSync).
+// 보류로 걸면 같은 건의 미지급 체크는 보류로 옮겨지고(중복 표시 방지), 보류 중엔 자동 미지급 체크·전체 등록 대상에서 빠짐.
+function findHeldPay(key) {
+  return hrUnpaidArr(cfg.heldPayments).find(function(u){ return u.key === key; }) || null;
+}
+function markPayHold(cgId, date, label, amount, keyOverride, ptNameOverride) {
+  cfg.heldPayments = hrUnpaidArr(cfg.heldPayments);
+  var key = keyOverride || payUnpaidKey(cgId, date, label);
+  if(cfg.heldPayments.some(function(u){ return u.key === key; })) return;
+  var cg = caregivers.find(function(c){ return String(c.id) === String(cgId); });
+  if(!cg) { toast('간병인 정보를 찾을 수 없어요', true); return; }
+  var memo = prompt('보류 사유를 적어주세요 (예: 업체 확인 필요)\n비워둬도 보류는 걸려요', '');
+  if(memo === null) return; // 취소
+  var pt = ptNameOverride ? null : resolveCalPt(cg);
+  var ptStr = ptNameOverride ? ' (' + ptNameOverride + ')' : (pt ? ' (' + pt.name + ')' : '');
+  var bankStr = (cg.bankName||cg.bankAccount)
+    ? ((cg.bankName||'') + ' ' + (cg.bankAccount||'') + (cg.bankHolder?' ('+cg.bankHolder+')':'')).trim()
+    : '';
+  cfg.heldPayments.push({
+    id: genId(), key: key, cgId: String(cgId), cgName: cg.name || '', ptStr: ptStr,
+    origDate: date, label: label || '', amount: Number(amount) || 0, bankStr: bankStr,
+    memo: String(memo).trim(), markedAt: todayStr()
+  });
+  // 같은 건이 미지급으로 걸려 있었으면 보류로 옮김 (해제 기록은 남기지 않음 — 보류 해제 후 미지급이면 다시 자동 체크돼야 함)
+  cfg.unpaidPayments = hrUnpaidArr(cfg.unpaidPayments).filter(function(u){ return (u.key || payUnpaidKey(u.cgId, u.origDate, u.label)) !== key; });
+  markCfgEdited();
+  save();
+  refreshCalendarIfOpen();
+  toast('⏸ 보류로 표시했어요. 해제하거나 지급완료될 때까지 매일 대시보드에 표시돼요.');
+}
+function releasePayHold(id) {
+  var list = hrUnpaidArr(cfg.heldPayments);
+  var idx = list.findIndex(function(u){ return String(u.id) === String(id); });
+  if(idx === -1) return;
+  list.splice(idx, 1);
+  cfg.heldPayments = list;
+  markCfgEdited();
+  save();
+  refreshCalendarIfOpen();
+  toast('▶ 보류 해제했어요. 지급일이 지났는데 지급완료가 아니면 미지급으로 자동 체크돼요.');
+}
+
 // 카드 상단 우측 구석에 작게 넣는 미지급 토글(뱃지/버튼). 미지급 상태면 빨간 알약 뱃지(클릭 시
 // 해제), 아니면 테두리만 있는 작은 버튼(클릭 시 등록)을 반환. 카드 헤더 줄(flex 컨테이너)의
 // 오른쪽 끝에 이어붙여 사용.
 function unpaidToggleHtml(cgId, date, label, amount, opt) {
+  // (26_11_02_02) 보류 토글을 미지급 토글 왼쪽에 함께 붙임. 보류 중이면 보류 뱃지만 표시
+  var hKey = opt && opt.key ? String(opt.key) : payUnpaidKey(cgId, date, label);
+  var hu = findHeldPay(hKey);
+  if(hu) {
+    return '<span title="보류일: ' + hu.markedAt + (hu.memo ? ' · 사유: ' + hrExpEsc(hu.memo) : '') + ' (누르면 해제)" style="font-size:10px;font-weight:700;color:#fff;background:#7C3AED;padding:2px 7px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayHold(\'' + hu.id + '\')">⏸ 보류</span>';
+  }
+  var oKey0 = opt && opt.key ? String(opt.key) : '';
+  var holdBtn = '<span style="font-size:10px;font-weight:600;color:#7C3AED;border:1px solid #7C3AED;padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="markPayHold(\'' + cgId + '\',\'' + date + '\',\'' + _jsq(label) + '\',' + (amount||0) + (oKey0 ? ',\'' + _jsq(oKey0) + '\',\'' + _jsq(opt.ptName||'') + '\'' : '') + ')">보류</span>';
+  return '<span style="display:inline-flex;gap:4px;align-items:center;flex-shrink:0">' + holdBtn + unpaidToggleHtmlBase(cgId, date, label, amount, opt) + '</span>';
+}
+function unpaidToggleHtmlBase(cgId, date, label, amount, opt) {
   var oKey = opt && opt.key ? String(opt.key) : '';
   var u = oKey ? ((cfg.unpaidPayments || []).find(function(x){ return x.key === oKey; }) || null) : findUnpaidPay(cgId, date, label);
   if(u) {
@@ -13413,7 +13484,7 @@ function showCalDetail(dateStr, collectOnly) {
         + estimateNote
         + bankHtml
         + expenseHtml
-        + hrExpBtnHtml(hrExpMake({ key: 'H|' + cg.id + '|' + dateStr + '|최종 정산|' + h.startDate, kind: 'pay', cg: cg, label: '최종 정산', date: dateStr, amount: ovx.amount, ptName: h.patientName || '', memo: expenseMsg }))
+        + hrExpBtnHtml(Object.assign(hrExpMake({ key: 'H|' + cg.id + '|' + dateStr + '|최종 정산|' + h.startDate, kind: 'pay', cg: cg, label: '최종 정산', date: dateStr, amount: ovx.amount, ptName: h.patientName || '', memo: expenseMsg }), { hrSettled: isSettled }))
         + ovx.btnHtml
         + (isSettled ? '' : '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="markAssignHistorySettled(\'' + cg.id + '\',\'' + h.patientId + '\',\'' + h.startDate + '\')">✅ 정산 완료 처리</button>')
         + '</div>' });
@@ -13424,8 +13495,8 @@ function showCalDetail(dateStr, collectOnly) {
           whoStr: cg.name + ' (' + (h.patientName||'') + ')', bankHtml: bankHtml, unpaid: false,
           note: '<div style="font-size:11px;color:var(--gray);margin-top:2px">이력에서 복구된 최종 정산의 명절할증분이에요' + (isSettled ? ' · <b style="color:var(--green)">✅ 정산 완료</b>' : '') + '</div>',
           memo: buildHolidayExpenseMemo(h.patientName, h.hospital, cg.name, hfhBlocks, hfHist.days, hSp.hp, '최종 정산'),
-          hrBtn: hrExpBtnHtml(hrExpMake({ key: 'H|' + cg.id + '|' + dateStr + '|최종 정산 명절할증|' + h.startDate, kind: 'holiday', cg: cg, label: '최종 정산 명절할증', date: dateStr, amount: hSp.hp, ptName: h.patientName || '',
-            memo: buildHolidayExpenseMemo(h.patientName, h.hospital, cg.name, hfhBlocks, hfHist.days, hSp.hp, '최종 정산') }))
+          hrBtn: hrExpBtnHtml(Object.assign(hrExpMake({ key: 'H|' + cg.id + '|' + dateStr + '|최종 정산 명절할증|' + h.startDate, kind: 'holiday', cg: cg, label: '최종 정산 명절할증', date: dateStr, amount: hSp.hp, ptName: h.patientName || '',
+            memo: buildHolidayExpenseMemo(h.patientName, h.hospital, cg.name, hfhBlocks, hfHist.days, hSp.hp, '최종 정산') }), { hrSettled: isSettled }))
         }) });
       }
     });
@@ -13529,11 +13600,40 @@ function showCalDetail(dateStr, collectOnly) {
         '<div style="padding:10px 12px;border-left:3px solid var(--red);margin-bottom:8px;background:#FEE2E2;border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
         + '<span style="font-size:11px;font-weight:700;color:var(--red)">⚠️ 미지급' + (u.auto ? '(자동)' : '') + ' (원래 지급일: ' + u.origDate + ')</span>'
-        + '<span style="font-size:10px;font-weight:600;color:var(--red);border:1px solid var(--red);padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayUnpaid(\'' + u.id + '\')">해제</span>'
+        + '<span style="display:inline-flex;gap:4px;flex-shrink:0">'
+        + '<span style="font-size:10px;font-weight:600;color:#7C3AED;border:1px solid #7C3AED;padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap" onclick="markPayHold(\'' + _jsq(u.cgId) + '\',\'' + u.origDate + '\',\'' + _jsq(u.label||'') + '\',' + (Number(u.amount)||0) + ',\'' + _jsq(uKey) + '\',\'' + _jsq(String(u.ptStr||'').replace(/^\s*\(|\)\s*$/g, '').trim()) + '\')">보류</span>'
+        + '<span style="font-size:10px;font-weight:600;color:var(--red);border:1px solid var(--red);padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap" onclick="releasePayUnpaid(\'' + u.id + '\')">해제</span>'
+        + '</span>'
         + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + (u.cgName||'') + (u.ptStr||'') + '</div>'
         + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (u.label||'') + '</div>'
         + (u.amount ? '<div style="font-size:15px;font-weight:900;color:var(--red);margin-top:4px">' + Number(u.amount).toLocaleString() + '원</div>' : '')
+        + bankHtml
+        + hrExpBtnHtml(up)
+        + '</div>' });
+    });
+  }
+  // ── (26_11_02_02) 보류 알림: 오늘 날짜라면, 해제 안 된 보류 건을 매일 노출 (원래 지급일 당일은 카드 뱃지로 표시) ──
+  var heldReminderEvents = [];
+  if(dateStr === todayStr() && !collectOnly) {
+    var hrHeldSinks = {};
+    hrUnpaidArr(cfg.heldPayments).forEach(function(u) {
+      if(u.origDate === dateStr) return;
+      var bankHtml = u.bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + u.bankStr + '</div>' : '';
+      if(!hrHeldSinks[u.origDate]) hrHeldSinks[u.origDate] = hrExpCollectForDate(u.origDate);
+      var uKey = u.key || payUnpaidKey(u.cgId, u.origDate, u.label);
+      var up = hrHeldSinks[u.origDate][uKey] ? Object.assign({}, hrHeldSinks[u.origDate][uKey]) : hrExpFromUnpaid(Object.assign({}, u, { key: uKey }));
+      if(up) { up.payDate = dateStr; up.heldOrigDate = u.origDate; up.heldMemo = u.memo || ''; }
+      heldReminderEvents.push({ time: '', html:
+        '<div style="padding:10px 12px;border-left:3px solid #7C3AED;margin-bottom:8px;background:#EDE9FE;border-radius:0 var(--rsm) var(--rsm) 0">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
+        + '<span style="font-size:11px;font-weight:700;color:#7C3AED">⏸ 보류 (원래 지급일: ' + u.origDate + ' · 보류일 ' + (u.markedAt||'') + ')</span>'
+        + '<span style="font-size:10px;font-weight:600;color:#7C3AED;border:1px solid #7C3AED;padding:1px 6px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayHold(\'' + u.id + '\')">보류 해제</span>'
+        + '</div>'
+        + '<div style="font-size:14px;font-weight:700">' + (u.cgName||'') + (u.ptStr||'') + '</div>'
+        + '<div style="font-size:11px;color:var(--gray);margin-top:2px">' + (u.label||'') + '</div>'
+        + (u.memo ? '<div style="font-size:12px;color:#5B21B6;margin-top:3px">📝 ' + hrExpEsc(u.memo) + '</div>' : '')
+        + (u.amount ? '<div style="font-size:15px;font-weight:900;color:#7C3AED;margin-top:4px">' + Number(u.amount).toLocaleString() + '원</div>' : '')
         + bankHtml
         + hrExpBtnHtml(up)
         + '</div>' });
@@ -13559,6 +13659,7 @@ function showCalDetail(dateStr, collectOnly) {
 
   var sectionsHtml = (collectOnly ? '' : hrExpBulkBarHtml()) // (26_10_12_01) 이 날짜 미등록 지급건 전체 등록
     + sectionHtml('⚠️ 미지급 알림', unpaidReminderEvents)
+    + sectionHtml('⏸ 보류 알림', heldReminderEvents)
     + sectionHtml('▶ 간병 시작', startEvents)
     + sectionHtml('■ 간병 마감', endEvents)
     + sectionHtml('🔀 교체', swapEvents)
@@ -13567,7 +13668,7 @@ function showCalDetail(dateStr, collectOnly) {
 
   if(collectOnly) return;
   hrExpRefreshRegistered(); // 재무관리 등록 여부 갱신(2분 간격) — 바뀌면 다시 그림
-  bodyEl.innerHTML = (unpaidReminderEvents.length + startEvents.length + endEvents.length + swapEvents.length + onsiteCancelEvents.length + payEvents.length) > 0
+  bodyEl.innerHTML = (unpaidReminderEvents.length + heldReminderEvents.length + startEvents.length + endEvents.length + swapEvents.length + onsiteCancelEvents.length + payEvents.length) > 0
     ? sectionsHtml
     : '<div style="padding:2rem;text-align:center;color:var(--gray);font-size:13px">이날 일정이 없어요 😊</div>';
 }
