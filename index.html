@@ -2383,7 +2383,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_02_04';
+const APP_BUILD = '26_11_03_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -12713,6 +12713,28 @@ function hrUnpaidAutoSync() {
   });
   if(heldReleased.length) changed = true;
 
+  // (26_11_03_01) 자동 체크·유령 정리는 서버 최신본을 받은 게 확실할 때만 — 오래 안 켠 기기가 동기화 전의
+  // 낡은 로컬 데이터(이미 끝난 근무·바뀐 배정)로 급여 카드를 계산해서 지급완료 건을 다른 이름(주급 등)으로 미지급 찍던 문제
+  var autoBlocked = (typeof autoProcessBlocked === 'function') ? autoProcessBlocked() : '';
+  if(autoBlocked) {
+    if(!changed) return false;
+    cfg.unpaidPayments = kept; cfg.heldPayments = heldKept;
+    markCfgEdited(); save();
+    if(released.length) toast('✅ 지급완료된 ' + released.length + '건 미지급 자동 해제');
+    return true;
+  }
+  // (26_11_03_01) 유령 자동 미지급 정리 — 자동 체크(auto)된 건인데 지금 데이터로 그 지급일을 다시 계산하면
+  // 해당 카드(키)가 더 이상 안 나오면(낡은 데이터로 잘못 찍혔거나, 배정·정산 방식이 바뀐 건) 미지급에서 뺌
+  var sinkCache = {};
+  var sinkFor = function(d){ if(!sinkCache[d]) sinkCache[d] = hrExpCollectForDate(d) || {}; return sinkCache[d]; };
+  var ghosts = [];
+  kept = kept.filter(function(u){
+    if(!u.auto || !u.origDate) return true;
+    if(sinkFor(u.origDate)[keyOf(u)]) return true;
+    ghosts.push(u); return false;
+  });
+  if(ghosts.length) changed = true;
+
   // 2) 오래된 제외 기록 정리
   var dCut = hrUnpaidAddDays(today, -HR_UNPAID_DISMISS_KEEP);
   var dismissedKept = dismissed.filter(function(x){ return !x.origDate || x.origDate >= dCut; });
@@ -12727,7 +12749,7 @@ function hrUnpaidAutoSync() {
   if(winFrom > from) from = winFrom;
   var added = [];
   for(var d = from; d < today; d = hrUnpaidAddDays(d, 1)) {
-    var sink = hrExpCollectForDate(d);
+    var sink = sinkFor(d);
     Object.keys(sink).forEach(function(k){
       var p = sink[k];
       if(!p || p.date !== d) return;
@@ -12755,6 +12777,7 @@ function hrUnpaidAutoSync() {
   var msgs = [];
   if(added.length) msgs.push('⚠️ 지출결의서 지급완료가 안 된 ' + added.length + '건을 미지급으로 자동 체크했어요');
   if(released.length) msgs.push('✅ 지급완료된 ' + released.length + '건 미지급 자동 해제');
+  if(ghosts.length) msgs.push('🧹 지금 데이터엔 없는 자동 미지급 ' + ghosts.length + '건 정리');
   if(heldReleased.length) msgs.push('✅ 지급완료된 ' + heldReleased.length + '건 보류 자동 해제');
   if(msgs.length) toast(msgs.join(' · '));
   return true;
