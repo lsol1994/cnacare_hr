@@ -2390,7 +2390,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_05_01';
+const APP_BUILD = '26_11_05_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -12141,11 +12141,33 @@ function hrExpMake(o) {
   };
 }
 // 카드에 붙는 버튼 (이미 등록된 건은 '등록됨' 표시)
+// (26_11_05_02) 같은 지급건인데 키 모양이 바뀌는 문제 대응 — 등록할 땐 현재 근무건 카드(cgId|지급일|라벨)였는데,
+// 간병인이 재배정되면 그 카드가 이력 카드(H|cgId|지급일|라벨|시작일)로 바뀌어 키가 달라짐. 그래서 재무에 지급완료로
+// 있는데도 '미등록'으로 보이고 미지급 자동 체크·중복 등록 위험이 생겼음. 키의 핵심(cgId|지급일|라벨)이 같고
+// 금액도 같으면(재무 금액을 알 때) 같은 건으로 봄.
+function hrExpKeyCore(k) {
+  k = String(k || '');
+  if(k.indexOf('H|') === 0) { var parts = k.split('|'); if(parts.length >= 5) return parts.slice(1, parts.length - 1).join('|'); }
+  return k;
+}
+function hrExpRegFor(k, amount) {
+  k = String(k || '');
+  if(_hrExpReg[k]) return _hrExpReg[k];
+  var core = hrExpKeyCore(k), amt = Math.round(Number(amount) || 0), best = null;
+  Object.keys(_hrExpReg).forEach(function(kk) {
+    if(kk === k || hrExpKeyCore(kk) !== core) return;
+    var r = _hrExpReg[kk]; if(!r) return;
+    var ra = Math.round(Number(r.amount) || 0);
+    if(amt > 0 && ra > 0 && ra !== amt) return; // 금액이 다르면 다른 건으로 봄
+    if(!best || (r.status === '지급완료' && best.status !== '지급완료')) best = r;
+  });
+  return best;
+}
 function hrExpBtnHtml(payload) {
   if(!payload) return '';
   _hrExpSink[payload.hrKey] = payload;
   var k = encodeURIComponent(payload.hrKey);
-  var reg = _hrExpReg[payload.hrKey];
+  var reg = hrExpRegFor(payload.hrKey, payload.amount);
   if(reg) {
     return '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center;color:var(--green);border-color:var(--green)" onclick="hrExpShowRegistered(\'' + k + '\')">✅ 지출결의서 등록됨' + (reg.status ? ' · ' + reg.status : '') + '</button>';
   }
@@ -12160,7 +12182,7 @@ function hrExpHeldBlocked() {
 }
 function hrExpShowRegistered(k) {
   var key = decodeURIComponent(k);
-  var reg = _hrExpReg[key];
+  var reg = hrExpRegFor(key, _hrExpSink[key] && _hrExpSink[key].amount);
   toast('이미 재무관리에 등록된 건이에요' + (reg && reg.status ? ' (' + reg.status + ')' : '') + ' — 수정은 재무관리 지출결의서에서 해주세요');
 }
 
@@ -12194,7 +12216,7 @@ function hrExpRefreshRegistered(force) {
       var fdb = await hrExpFinDb();
       var snap = await fdb.collection(HR_EXP_COL).where('src', '==', 'hr').get();
       var next = {};
-      snap.forEach(function(d) { var x = d.data(); if(x && x.hrKey) next[x.hrKey] = { id: x.id, status: x.status || '' }; });
+      snap.forEach(function(d) { var x = d.data(); if(x && x.hrKey) next[x.hrKey] = { id: x.id, status: x.status || '', amount: Number(x.amount) || 0 }; });
       var changed = JSON.stringify(next) !== JSON.stringify(_hrExpReg);
       _hrExpReg = next;
       _hrExpRegLoadedAt = Date.now();
@@ -12218,7 +12240,7 @@ function hrExpOpen(k) {
   var key = decodeURIComponent(k);
   var p = _hrExpSink[key];
   if(!p) { toast('지급 정보를 찾을 수 없어요. 대시보드를 새로 열어주세요', true); return; }
-  if(_hrExpReg[key]) { hrExpShowRegistered(k); return; }
+  if(hrExpRegFor(key, p.amount)) { hrExpShowRegistered(k); return; }
   if(findHeldPay(key)) { hrExpHeldBlocked(); return; } // (26_11_02_04) 보류 건 등록 차단
   _hrExpModalPayload = p;
   var br = hrExpBankResolve(p.bankRaw);
@@ -12289,7 +12311,7 @@ async function hrExpWrite(fdb, obj) {
   var dup = await fdb.collection(HR_EXP_COL).where('hrKey', '==', obj.hrKey).limit(1).get();
   if(!dup.empty) {
     var dx = dup.docs[0].data();
-    _hrExpReg[obj.hrKey] = { id: dx.id, status: dx.status || '' };
+    _hrExpReg[obj.hrKey] = { id: dx.id, status: dx.status || '', amount: Number(dx.amount) || 0 };
     return 'dup';
   }
   // 재무관리 id는 숫자 — 재무관리 화면의 새 id(최대값+1)와 겹치지 않게 시간 기반 숫자 사용.
@@ -12298,7 +12320,7 @@ async function hrExpWrite(fdb, obj) {
   _hrExpLastId = id;
   obj.id = id;
   await fdb.doc(HR_EXP_COL + '/' + String(id)).set(obj);
-  _hrExpReg[obj.hrKey] = { id: id, status: '대기' };
+  _hrExpReg[obj.hrKey] = { id: id, status: '대기', amount: Number(obj.amount) || 0 };
   return 'ok';
 }
 async function hrExpSubmit() {
@@ -12336,7 +12358,7 @@ async function hrExpSubmit() {
 }
 // 보고 있는 날짜의 미등록 카드 목록 (은행이 애매한 건은 확인창에서 골라야 해서 제외)
 function hrExpBulkTargets() {
-  var all = Object.keys(_hrExpSink).map(function(k){ return _hrExpSink[k]; }).filter(function(p){ return p && !_hrExpReg[p.hrKey] && !findHeldPay(p.hrKey); }); // (26_11_02_02) 보류 건 제외 (26_11_02_04: 보류 중엔 등록 자체 불가)
+  var all = Object.keys(_hrExpSink).map(function(k){ return _hrExpSink[k]; }).filter(function(p){ return p && !hrExpRegFor(p.hrKey, p.amount) && !findHeldPay(p.hrKey); }); // (26_11_02_02) 보류 건 제외 (26_11_02_04: 보류 중엔 등록 자체 불가)
   var ok = [], needBank = [], bad = [];
   all.forEach(function(p) {
     var br = hrExpBankResolve(p.bankRaw);
@@ -12733,20 +12755,21 @@ function hrUnpaidAutoSync() {
   var held = hrUnpaidArr(cfg.heldPayments);
   if(!Array.isArray(cfg.heldPayments)) cfg.heldPayments = held;
   var keyOf = function(u){ return u.key || payUnpaidKey(u.cgId, u.origDate, u.label); };
-  var isPaid = function(k){ var r = _hrExpReg[k]; return !!(r && r.status === '지급완료'); };
+  // (26_11_05_02) 키 모양이 바뀐 같은 건(현재 카드 ↔ 이력 카드)도 지급완료로 인식
+  var isPaid = function(k, amt){ var r = hrExpRegFor(k, amt); return !!(r && r.status === '지급완료'); };
   var changed = false;
 
   // 1) 자동 해제 — 지급완료된 건
   var released = [];
   var kept = list.filter(function(u){
-    if(isPaid(keyOf(u))) { released.push(u); return false; }
+    if(isPaid(keyOf(u), u.amount)) { released.push(u); return false; }
     return true;
   });
   if(released.length) changed = true;
   // (26_11_02_02) 보류도 지급완료되면 자동 해제
   var heldReleased = [];
   var heldKept = held.filter(function(u){
-    if(isPaid(keyOf(u))) { heldReleased.push(u); return false; }
+    if(isPaid(keyOf(u), u.amount)) { heldReleased.push(u); return false; }
     return true;
   });
   if(heldReleased.length) changed = true;
@@ -12793,7 +12816,7 @@ function hrUnpaidAutoSync() {
       if(!p || p.date !== d) return;
       if(!(Number(p.amount) > 0)) return;            // 차감 등으로 0원인 건은 지급할 게 없음
       if(p.hrSettled) return;                         // (26_11_02_02) HR에서 '정산 완료 처리'한 이력 카드는 이미 지급된 건
-      if(have[k] || skip[k] || isPaid(k)) return;
+      if(have[k] || skip[k] || isPaid(k, p.amount)) return;
       have[k] = true;
       var bankStr = (p.bankRaw || p.account)
         ? ((p.bankRaw||'') + ' ' + (p.account||'') + (p.holder ? ' (' + p.holder + ')' : '')).trim() : '';
