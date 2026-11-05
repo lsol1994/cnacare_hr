@@ -874,6 +874,13 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         </div>
         <div class="field"><label>금액 (일급, 원)</label><input type="number" id="p-pay" placeholder="130000"></div>
       </div>
+      <div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;margin-bottom:.875rem">
+        <label class="ck-wrap" style="font-weight:700"><input type="checkbox" id="p-commute" onchange="toggleCommuteFields('p')"> 🕘 출퇴근 근무 <span style="font-size:10px;font-weight:400;color:var(--gray)">(체크하면 간병일지·간병사실확인서가 출퇴근 시간으로 작성돼요)</span></label>
+        <div id="p-commute-fields" class="g2" style="display:none;margin-top:8px">
+          <div class="field" style="margin-bottom:0"><label>출근 시간</label><input type="time" id="p-commute-in" value="09:00"></div>
+          <div class="field" style="margin-bottom:0"><label>퇴근 시간</label><input type="time" id="p-commute-out" value="18:00"></div>
+        </div>
+      </div>
       <div class="field"><label>요청사항 <span style="font-size:10px;font-weight:400;color:var(--gray)">(환자·업체 전달사항)</span></label>
         <textarea id="p-request" placeholder="예: 깔끔한 여자 간병사, 5일 병실 입실 예정" oninput="updateNPPreview()"></textarea>
       </div>
@@ -2383,7 +2390,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_03_01';
+const APP_BUILD = '26_11_05_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3854,6 +3861,7 @@ function getFormPatient() {
     duration: getDuration(),
     pay: document.getElementById('p-pay').value,
     request: document.getElementById('p-request').value.trim(),
+    ...readCommuteForm('p'),
     memo: document.getElementById('p-memo')?.value.trim() || '',
     status: '모집중', recruited: false,
     createdAt: new Date().toLocaleString('ko-KR'),
@@ -3904,6 +3912,7 @@ function doCopy(text) {
 function registerPatient() {
   const p = getFormPatient();
   if(!p.name||!p.hospital||!p.diagnosis) { toast('이름, 병원, 병증은 필수입니다',true); return; }
+  if(p.commute && !ptCommuteInfo(p)) { toast('출퇴근 근무는 출근·퇴근 시간을 서로 다르게 입력해주세요',true); return; }
   p._ts = Date.now(); // 동기화 충돌 해결(최신 우선)을 위한 저장 시각
   patients.unshift(p);
   _newLocalPtIds.add(String(p.id)); // Firebase 저장 전까지 신규로 보호
@@ -3922,6 +3931,11 @@ function registerPatient() {
   const ptMemoEl = document.getElementById('p-memo'); if(ptMemoEl) ptMemoEl.value='';
   const ptHospWarnEl = document.getElementById('p-hospital-warn'); if(ptHospWarnEl) ptHospWarnEl.style.display='none';
   const cgGenderAnyEl = document.getElementById('p-cg-gender-any'); if(cgGenderAnyEl) cgGenderAnyEl.checked=true;
+  // (26_11_05_01) 출퇴근 근무 칸 초기화
+  const cmEl = document.getElementById('p-commute'); if(cmEl) cmEl.checked=false;
+  const cmIn = document.getElementById('p-commute-in'); if(cmIn) cmIn.value='09:00';
+  const cmOut = document.getElementById('p-commute-out'); if(cmOut) cmOut.value='18:00';
+  toggleCommuteFields('p');
   // 업체 메시지 자동입력란도 저장 후 공란으로
   const vendorPasteEl = document.getElementById('vendor-paste-text'); if(vendorPasteEl) vendorPasteEl.value='';
 }
@@ -3984,6 +3998,7 @@ function ptRowHTML(p) {
       <span>💊 ${p.diagnosis}</span>
       ${p.contact ? `<span>📞 <b>${formatPhone(p.contact)}</b></span>` : ''}
       ${p.recruitHistory && p.recruitHistory.length ? `<span class="badge b-amber" style="font-size:10px">🔄 교체(${p.recruitHistory.length}회)</span>` : ''}
+      ${p.commute ? `<span class="badge b-blue" style="font-size:10px">🕘 출퇴근 ${p.commuteIn||''}~${p.commuteOut||''}</span>` : ''}
     </div>
     ${p.memo ? `<div style="font-size:11px;color:var(--teal);background:var(--teal-lt);border-radius:var(--rsm);padding:5px 10px;margin-bottom:6px;white-space:pre-wrap;line-height:1.5">📝 ${p.memo}</div>` : ''}
     <!-- 시작일/마감일 한눈에 -->
@@ -4184,7 +4199,8 @@ function openPatient(id) {
          ['병원',p.hospital],['가까운 역',p.station||'—'],
          ['시작일',p.startDate+' '+p.startTime],
          ['병증',p.diagnosis],['수술',p.surgery],
-         ['기간',p.duration],['시급',p.pay?Number(p.pay).toLocaleString()+'원':'협의']
+         ['기간',p.duration],['시급',p.pay?Number(p.pay).toLocaleString()+'원':'협의'],
+         ...(p.commute ? [['근무형태','🕘 출퇴근 '+(p.commuteIn||'')+'~'+(p.commuteOut||'')]] : [])
       ].map(([k,v])=>`<div style="background:var(--surface2);border-radius:var(--rsm);padding:8px 10px">
         <div style="font-size:10px;color:var(--gray);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px">${k}</div>
         <div style="font-size:13px;font-weight:600">${v||'—'}</div>
@@ -4417,6 +4433,14 @@ function editPatient(id) {
         <input type="number" id="ep-pay" value="${p.pay||''}">
       </div>
     </div>
+    <div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;margin-bottom:.875rem">
+      <label class="ck-wrap" style="font-weight:700"><input type="checkbox" id="ep-commute" ${p.commute?'checked':''} onchange="toggleCommuteFields('ep')"> 🕘 출퇴근 근무 <span style="font-size:10px;font-weight:400;color:var(--gray)">(매칭된 간병인 간병일지·간병사실확인서에 적용)</span></label>
+      <div id="ep-commute-fields" class="g2" style="display:${p.commute?'':'none'};margin-top:8px">
+        <div class="field" style="margin-bottom:0"><label>출근 시간</label><input type="time" id="ep-commute-in" value="${p.commuteIn||'09:00'}"></div>
+        <div class="field" style="margin-bottom:0"><label>퇴근 시간</label><input type="time" id="ep-commute-out" value="${p.commuteOut||'18:00'}"></div>
+      </div>
+      <div style="font-size:11px;color:var(--gray);margin-top:6px;line-height:1.6">자동 생성된 간병일지는 출퇴근 시간으로 다시 맞춰지고, 담당자가 직접 고친 날은 그대로 둬요.</div>
+    </div>
     <!-- 종료일/시간 독립 입력 -->
     <div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;margin-bottom:.875rem">
       <div style="font-size:11px;font-weight:700;color:var(--gray);margin-bottom:8px">📅 실제 종료일 / 시간 <span style="font-size:10px;font-weight:400">(입력 시 기간 자동 재계산)</span></div>
@@ -4508,6 +4532,9 @@ function savePatientEdit(id) {
   if(!p) return;
   const name = document.getElementById('ep-name').value.trim();
   if(!name){ toast('이름은 필수입니다',true); return; }
+  // (26_11_05_01) 출퇴근 시간 검증은 값을 바꾸기 전에
+  const _cmForm = readCommuteForm('ep');
+  if(_cmForm.commute && !ptCommuteInfo(_cmForm)) { toast('출퇴근 근무는 출근·퇴근 시간을 서로 다르게 입력해주세요',true); return; }
   // (26_10_19_04) 종료된 환자의 종료일을 미래로 바꾸는 경우 확인 (값을 바꾸기 전에 확인)
   if(p.status === '종료' && !confirmEndedFutureEdit(p.name + ' 님(환자)',
       document.getElementById('ep-endDate')?.value || '', document.getElementById('ep-endTime')?.value || p.startTime || '',
@@ -4533,6 +4560,10 @@ function savePatientEdit(id) {
   p.duration  = document.getElementById('ep-duration').value.trim();
   p.pay       = document.getElementById('ep-pay').value;
   p.request   = document.getElementById('ep-request').value.trim();
+  // (26_11_05_01) 출퇴근 근무 — 바뀌면 이 환자를 담당했던 간병인 전원의 간병일지를 다시 맞춤
+  const _cmBefore = commuteKey(p);
+  applyCommuteToPatient(p, _cmForm);
+  const _cmChanged = commuteKey(p) !== _cmBefore;
 
   // (26_10_07_04) 수정 전 종료일시 — 종료된 환자의 종료일시를 고치면 마지막 담당 간병인 근무건도 같이 바꾸기 위해
   const _oldPtEndDate = p.endDate || '';
@@ -4658,6 +4689,12 @@ function savePatientEdit(id) {
     if(_syncedCg) { refreshCalendarIfOpen(); toast(`✅ 환자 정보 수정 + ${_syncedCg.name} 님 종료일시도 같이 변경됐어요`); }
   }
   refreshDateSensitiveReportLogs(p); // 이미 저장된 매칭/종료보고가 있으면 방금 수정한 날짜로 다시 최신화
+  if(_cmChanged) {
+    const _n = resyncCommuteAttendance(p.id);
+    toast(p.commute
+      ? `🕘 출퇴근 근무(${p.commuteIn}~${p.commuteOut}) 적용 — 간병일지 ${_n}건 맞췄어요`
+      : `출퇴근 근무 해제 — 간병일지 ${_n}건을 24시간 기준으로 되돌렸어요`);
+  }
   markPtEdited(id); // Firebase 덮어쓰기 방지 (10초)
   save();
   renderPatients();
@@ -7841,7 +7878,8 @@ function convertExtendData() {
 //   같은 간병인이면 새 카드에 바로 연결(근무이력·배상보험은 재배정과 같은 순서로 처리 → 보험은 해지 없이 이어감).
 // 완전히 종료됐다가 다시 오는 경우는 이 기능이 아니라 환자 정보를 새로 등록함.
 const REENTRY_COPY_FIELDS = ['name','age','gender','contact','hospital','station','room','diagnosis','surgery',
-  'height','weight','cgGender','diaper','move','extra','pay','request','memo'];
+  'height','weight','cgGender','diaper','move','extra','pay','request','memo',
+  'commute','commuteIn','commuteOut']; // (26_11_05_01) 출퇴근 근무도 재입실 건에 이어감
 
 function reEntryNextPt(p) {
   return (p && p.reEntryTo) ? patients.find(x => String(x.id) === String(p.reEntryTo)) || null : null;
@@ -15210,6 +15248,7 @@ function autoFillAttendance(cgId) {
   // 라이브(현재) 배정 구간만 채움 — 기존 20여 곳의 호출부(저장/종료/재배정 직후 동기화)는
   // 전부 "지금 막 바뀐 라이브 값"에 반응하는 것이므로 동작을 그대로 유지한다.
   return fillAttendancePeriod(cgId, {
+    patientId: cg.patientId ? String(cg.patientId) : '',
     startDate: cg.startDate, endDate: cg.endDate, startTime: cg.startTime, endTime: cg.endTime
   });
 }
@@ -15242,6 +15281,8 @@ function fillAttendancePeriod(cgId, period) {
   const cur = parseLocalDate(period.startDate);
   if(!cur) return 0;
   const cg = { startDate: period.startDate, startTime: period.startTime, endDate: period.endDate, endTime: period.endTime };
+  // (26_11_05_01) 출퇴근 근무 환자면 매일 출근~퇴근시각으로 (첫날=실제 시작시각, 마지막날=실제 마감시각)
+  const cm = period.patientId ? ptCommuteInfo(patients.find(p=>String(p.id)===String(period.patientId))) : null;
 
   while(true) {
     const dateStr = toLocalDateStr(cur);
@@ -15257,9 +15298,10 @@ function fillAttendancePeriod(cgId, period) {
     );
 
     if(!existing) {
-      const inTime  = isFirst ? (cg.startTime || '') : '00:00';
-      const outTime = isLast ? (cg.endTime || '23:59') : '23:59';
-      const outDate = isLast ? (cg.endDate || dateStr) : dateStr;
+      let inTime  = isFirst ? (cg.startTime || '') : '00:00';
+      let outTime = isLast ? (cg.endTime || '23:59') : '23:59';
+      let outDate = isLast ? (cg.endDate || dateStr) : dateStr;
+      if(cm) { const w = commuteDayTimes(cm, cg, dateStr, isFirst, isLast); inTime = w.inTime; outDate = w.outDate; outTime = w.outTime; }
       const newRec = {
         id:      genId(),
         cgId:    String(cgId),
@@ -15269,11 +15311,30 @@ function fillAttendancePeriod(cgId, period) {
         outTime,
         auto:    true
       };
+      if(cm) newRec.commute = true;
       attendance.push(newRec);
       markAttendEdited(newRec.id);
       added++;
+    } else if(cm && existing.auto === true) {
+      // (26_11_05_01) 출퇴근 근무: 자동 기록은 출퇴근 시각으로 맞춤 (수기 기록은 아래 else로 가서 보호됨)
+      const w = commuteDayTimes(cm, cg, dateStr, isFirst, isLast);
+      if(existing.inTime !== w.inTime || (existing.outDate||'') !== w.outDate || existing.outTime !== w.outTime || existing.commute !== true) {
+        existing.inTime = w.inTime; existing.outDate = w.outDate; existing.outTime = w.outTime; existing.commute = true;
+        markAttendEdited(existing.id);
+        added++;
+      }
     } else {
       const isManual = existing.auto !== true; // 수기 체크인/수정 기록(auto가 true가 아닌 모든 경우)은 보호
+      // (26_11_05_01) 출퇴근 근무가 해제된 환자: 출퇴근으로 자동 생성됐던 기록을 기존(24시간) 기준으로 되돌림
+      if(!isManual && existing.commute === true) {
+        if(!isFirst) existing.inTime = '00:00';
+        else if(cg.startTime) existing.inTime = cg.startTime;
+        existing.outDate = isLast ? (cg.endDate || dateStr) : dateStr;
+        existing.outTime = isLast ? (cg.endTime || '23:59') : '23:59';
+        delete existing.commute;
+        markAttendEdited(existing.id);
+        added++;
+      }
       // 시작일: 간병 시작시간과 항상 동기화 (변경 감지 포함)
       if(isFirst && !isManual && cg.startTime && existing.inTime !== cg.startTime) {
         existing.inTime = cg.startTime;
@@ -18521,6 +18582,61 @@ function downloadSelectedJournals() {
   toast('✅ 간병일지 통합본 .'+_journalFmt+' '+ptCount+'건 다운로드 완료');
 }
 
+// ─── 출퇴근 근무 (26_11_05_01) ───
+// 환자에 commute(출퇴근 여부)·commuteIn·commuteOut(HH:MM)을 저장. 출퇴근 근무면 매칭된 간병인의
+// 간병일지를 매일 출근~퇴근시각으로 만들고, 간병사실확인서 "간병 시간"도 출퇴근 시각으로 표시.
+// 퇴근시각이 출근시각보다 이르면(야간 출퇴근) 퇴근일은 다음 날로 기록.
+const _HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+function ptCommuteInfo(pt) {
+  if(!pt || !pt.commute) return null;
+  const i = pt.commuteIn || '', o = pt.commuteOut || '';
+  if(!_HHMM.test(i) || !_HHMM.test(o) || i === o) return null;
+  return { in: i, out: o, overnight: o < i };
+}
+function commuteKey(pt) {
+  return pt && pt.commute ? `${pt.commuteIn||''}~${pt.commuteOut||''}` : '';
+}
+function readCommuteForm(prefix) {
+  const on = !!document.getElementById(prefix+'-commute')?.checked;
+  return {
+    commute: on,
+    commuteIn: on ? (document.getElementById(prefix+'-commute-in')?.value || '') : '',
+    commuteOut: on ? (document.getElementById(prefix+'-commute-out')?.value || '') : ''
+  };
+}
+function applyCommuteToPatient(p, v) {
+  if(v.commute) { p.commute = true; p.commuteIn = v.commuteIn; p.commuteOut = v.commuteOut; }
+  else { delete p.commute; delete p.commuteIn; delete p.commuteOut; }
+}
+function toggleCommuteFields(prefix) {
+  const on = !!document.getElementById(prefix+'-commute')?.checked;
+  const box = document.getElementById(prefix+'-commute-fields');
+  if(box) box.style.display = on ? '' : 'none';
+}
+// 하루치 출퇴근 기록 시각 — 첫날 출근은 실제 간병 시작시각, 마지막날 퇴근은 실제 마감일시
+function commuteDayTimes(cm, cg, dateStr, isFirst, isLast) {
+  const inTime = (isFirst && cg.startTime) ? cg.startTime : cm.in;
+  if(isLast) return { inTime, outDate: cg.endDate || dateStr, outTime: cg.endTime || cm.out };
+  let outDate = dateStr;
+  if(cm.overnight) { const d = parseLocalDate(dateStr); d.setDate(d.getDate()+1); outDate = toLocalDateStr(d); }
+  return { inTime, outDate, outTime: cm.out };
+}
+function careHoursStr(pt) {
+  const cm = ptCommuteInfo(pt);
+  return cm ? `출퇴근 ${cm.in} ~ ${cm.out}${cm.overnight ? ' (익일)' : ''}` : '24시간 상주';
+}
+// 출퇴근 설정이 바뀐 환자를 담당했던 간병인 전원(현재 + 과거 이력)의 간병일지를 다시 맞춤
+function resyncCommuteAttendance(patientId) {
+  let n = 0;
+  getPeriodsForPatient(patientId).forEach(p => {
+    n += fillAttendancePeriod(String(p.cg.id), {
+      patientId: String(p.patientId), startDate: p.startDate, endDate: p.endDate, startTime: p.startTime, endTime: p.endTime
+    });
+  });
+  refreshCalendarIfOpen();
+  return n;
+}
+
 // ─── 간병사실확인서 ───
 
 function korDateFull(dateStr) {
@@ -18632,7 +18748,7 @@ function openCertPreview(cgId, periodStartDate) {
       <table class="cert-tbl">
         <tr><td class="cl">간병 장소</td><td colspan="3">${certField(careLoc, '간병 장소 입력')}</td></tr>
         <tr><td class="cl">간병 기간</td><td colspan="3">${certField(periodStr, '간병 기간 입력')}</td></tr>
-        <tr><td class="cl">간병 시간</td><td colspan="3">${certField('24시간 상주', '간병 시간 입력')}</td></tr>
+        <tr><td class="cl">간병 시간</td><td colspan="3">${certField(careHoursStr(pt), '간병 시간 입력')}</td></tr>
         <tr><td class="cl">간병인 성명</td><td colspan="3">${certField(cg.name, '간병인 성명 입력')}</td></tr>
         <tr><td class="cl">간병인 연락처</td><td colspan="3">${certField(formatPhone(cg.phone||''), '간병인 연락처 입력')}</td></tr>
       </table>
