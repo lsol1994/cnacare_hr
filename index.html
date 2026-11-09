@@ -2390,7 +2390,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_05_02';
+const APP_BUILD = '26_11_09_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3091,12 +3091,13 @@ function attachFirebaseListener() {
       // 그대로 덮어써지는 문제가 있었음)
       const fbCfgTs = Number((d.cfg && d.cfg._ts) || 0);
       const localCfgTs = Number(cfg._ts || 0);
+      const mergedGapDone = mergeInsGapDone(cfg.insGapDone, d.cfg.insGapDone); // (26_11_09_01) 확인완료는 건별로 합침
       if(isCfgEditProtected()) {
         // 로컬 방어 유지 — cfg 그대로 둠
       } else if(localCfgTs && fbCfgTs && localCfgTs > fbCfgTs) {
         // 로컬이 더 최근 — cfg 그대로 둠
       } else {
-        cfg = d.cfg;
+        cfg = Object.assign({}, d.cfg); // (26_11_09_01) 복사본 — 아래 합친 확인완료가 Firebase 값과 다르면 재전송되도록
         if(!Array.isArray(cfg.holidays)) cfg.holidays = defaultHolidays(); // 예전 cfg 호환
         if(!Array.isArray(cfg.unpaidPayments)) cfg.unpaidPayments = []; // 예전 cfg 호환
         cfg.unpaidDismissed = hrUnpaidArr(cfg.unpaidDismissed); // (26_11_02_01) 자동 미지급 제외 목록
@@ -3104,6 +3105,7 @@ function attachFirebaseListener() {
         if(!Array.isArray(cfg.payOverrides)) cfg.payOverrides = (cfg.payOverrides && typeof cfg.payOverrides === 'object') ? Object.values(cfg.payOverrides) : []; // (26_10_14_09) 급여 카드 수정
         normalizeHolidayPremiums(cfg); // 명절 할증 (예전 cfg 호환 + Firebase 배열 정규화)
       }
+      if(Object.keys(mergedGapDone).length || cfg.insGapDone) cfg.insGapDone = mergedGapDone;
       localStorage.setItem('cnc_cfg', JSON.stringify(cfg));
     }
     if(fbMemos.length > 0) {
@@ -16073,7 +16075,25 @@ function insGapKey(cgId, pid, s) {
   return (String(cgId) + '_' + String(pid || 'X') + '_' + String(s || 'X')).replace(/[.#$\[\]\/\s]/g, '_');
 }
 function insGapArg(k) { return encodeURIComponent(k).replace(/'/g, '%27'); }
-function insGetGapDone(k) { return (cfg.insGapDone && typeof cfg.insGapDone === 'object' && cfg.insGapDone[k]) || null; }
+function insGetGapDone(k) { const d = (cfg.insGapDone && typeof cfg.insGapDone === 'object' && cfg.insGapDone[k]) || null; return (d && !d.del) ? d : null; }
+// (26_11_09_01) 미가입(누락) 확인완료가 통째로 사라지던 문제 수정
+// cfg는 동기화 때 "더 최근에 저장한 쪽"이 통째로 이겨서, 확인완료 전에 열어둔(낡은 cfg를 가진) 기기가
+// 설정을 한 번 저장하면 insGapDone 전체가 빈 값으로 덮어써졌음.
+// → 동기화할 때 insGapDone만은 양쪽을 건별로 합침(같은 건이면 _t가 더 최근인 쪽).
+//   되돌리기는 지우지 않고 {del:true} 표시를 남겨서, 합칠 때 되살아나지 않게 함.
+function mergeInsGapDone(a, b) {
+  const out = {};
+  [a, b].forEach(m => {
+    if(!m || typeof m !== 'object') return;
+    Object.keys(m).forEach(k => {
+      const v = m[k];
+      if(!v || typeof v !== 'object') return;
+      const cur = out[k];
+      if(!cur || Number(v._t || 0) > Number(cur._t || 0)) out[k] = v;
+    });
+  });
+  return out;
+}
 
 // 시작=마감(0시간) 근무건 = 근무 없이 취소된 건 (getPatientCgHistory의 cancelled 판정과 동일 기준)
 function insPeriodIsCancel(p) {
@@ -16294,7 +16314,7 @@ function insSetGapDone(entries, memo) {
   if(!cfg.insGapDone || typeof cfg.insGapDone !== 'object') cfg.insGapDone = {};
   const at = todayStr() + ' ' + new Date().toTimeString().slice(0, 5);
   entries.forEach(e => {
-    cfg.insGapDone[e.key] = { at, memo: String(memo || '').trim().slice(0, 100), cg: e.cg.name || '', pt: e.ptName || '', s: e.p.startDate || '' };
+    cfg.insGapDone[e.key] = { _t: Date.now(), at, memo: String(memo || '').trim().slice(0, 100), cg: e.cg.name || '', pt: e.ptName || '', s: e.p.startDate || '' };
   });
   markCfgEdited(); save(); renderInsurance();
 }
@@ -16323,7 +16343,7 @@ function undoInsGapDone(keyArg) {
   const d = insGetGapDone(k);
   if(!d) return;
   if(!confirm(`${d.cg || ''} — ${d.pt || ''} (${d.s || ''} 시작)\n확인완료를 되돌려서 다시 미가입(누락)으로 표시할까요?`)) return;
-  delete cfg.insGapDone[k];
+  cfg.insGapDone[k] = { del: true, _t: Date.now() }; // (26_11_09_01) 삭제 대신 되돌림 표시 — 다른 기기와 합칠 때 되살아나지 않게
   markCfgEdited(); save(); renderInsurance();
   toast('미가입(누락)으로 되돌렸어요');
 }
