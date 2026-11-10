@@ -2067,6 +2067,8 @@ cfg.unpaidDismissed = hrUnpaidArr(cfg.unpaidDismissed);
 cfg.heldPayments = hrUnpaidArr(cfg.heldPayments);
 // (26_10_14_09) 대시보드 급여 카드 직접 수정 + 메모 목록 — 환자·간병인 레코드와 완전히 분리
 if(!Array.isArray(cfg.payOverrides)) cfg.payOverrides = (cfg.payOverrides && typeof cfg.payOverrides === 'object') ? Object.values(cfg.payOverrides) : [];
+// (26_11_10_01) 급여 수정·보류·미지급·자동체크 제외 목록의 "마지막으로 본 상태" — 저장할 때 이것과 비교해서 건별 수정시각·삭제 표시를 남김
+let _cfgListSnap = null; // 아래 건별 병합 함수 정의 뒤에서 채움
 // 명절 할증 기간 목록 (명절 할증 메뉴에서 등록) — Firebase가 배열을 객체로 돌려주는 경우까지 정규화
 function normalizeHolidayPremiums(c) {
   let arr = c.holidayPremiums;
@@ -2168,7 +2170,133 @@ function markRoomsEdited() {
 function isRoomsEditProtected() { return _roomsEditedAt && (Date.now() - _roomsEditedAt) < EDIT_PROTECT_MS; }
 
 let _cfgEditedAt = 0;
-function markCfgEdited() { _cfgEditedAt = Date.now(); cfg._ts = Date.now(); }
+function markCfgEdited() {
+  _cfgEditedAt = Date.now(); cfg._ts = Date.now();
+  try { cfgListsStamp(); } catch(e) { console.warn('설정 목록 수정시각 기록 실패:', e); }
+}
+
+// ── (26_11_10_01) 급여 수정·보류·미지급 목록이 동기화 때 통째로 되돌아가던 문제 수정 ──
+// cfg는 동기화 때 "더 최근에 저장한 쪽"이 통째로 이겨서, 낡은 cfg를 들고 있던 기기가 설정을 한 번 저장하면
+// 그 사이 다른 기기에서 한 급여 수정(payOverrides)·보류 해제(heldPayments)·미지급 체크/해제가 통째로 사라지거나
+// 되살아났음 (예: 0원으로 수정하고 보류 해제한 최종 정산이 다음 날 250,000원 보류로 다시 뜸).
+// → 이 네 목록은 동기화할 때 건별로 합침.
+//   · 같은 건(key)이 양쪽에 있으면 수정시각(_t)이 더 최근인 쪽
+//   · 지운 건은 cfg.listTomb에 삭제 표시({l:목록, k:key, t:지운 시각})를 남겨서, 합칠 때 되살아나지 않게 함
+//   · 내 기기에만 있고 서버엔 없는 건은, 이 버전부터 만들거나 고친 건(_t 있음)만 되살림
+//   · 수정시각·삭제 표시는 markCfgEdited()에서 직전 상태(_cfgListSnap)와 비교해 자동으로 남김
+//     (목록을 바꾸는 코드마다 따로 넣지 않아도 되게)
+const CFG_SYNC_LISTS = [['unpaidPayments','u'], ['heldPayments','h'], ['unpaidDismissed','d'], ['payOverrides','o']];
+const CFG_TOMB_KEEP_MS = 180 * 24 * 60 * 60 * 1000; // 삭제 표시 보관 기간
+function cfgListArr(c, name) {
+  return hrUnpaidArr(c && c[name]).filter(function(u){ return u && typeof u === 'object'; });
+}
+function cfgListKey(u) {
+  if(!u || typeof u !== 'object') return '';
+  if(u.key) return String(u.key);
+  return (u.cgId != null && u.origDate) ? payUnpaidKey(u.cgId, u.origDate, u.label) : '';
+}
+// 건별 수정시각 — _t가 없는 예전 건은 id(만든 시각)와 날짜 필드로 추정
+function cfgItemT(u) {
+  var t = Number((u && u._t) || 0);
+  if(t) return t;
+  var best = 0;
+  var id = Number((u && u.id) || 0);
+  if(id > 1500000000000 && id < 4102444800000) best = id;
+  ['updatedAt', 'at', 'markedAt', 'createdAt'].forEach(function(f){
+    var v = u && u[f];
+    if(!v) return;
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v));
+    if(!m) return;
+    var ms = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();
+    if(ms > best) best = ms;
+  });
+  return best;
+}
+function cfgItemJson(u) {
+  var o = {}; Object.keys(u).forEach(function(k){ if(k !== '_t') o[k] = u[k]; });
+  return JSON.stringify(o);
+}
+function cfgTombArr(c) {
+  return hrUnpaidArr(c && c.listTomb).filter(function(x){ return x && typeof x === 'object' && x.l && x.k; });
+}
+function cfgTombClean(list) {
+  var cut = Date.now() - CFG_TOMB_KEEP_MS, m = {};
+  list.forEach(function(x){
+    var t = Number(x.t || 0); if(t < cut) return;
+    var id = x.l + '\n' + x.k;
+    if(!m[id] || t > m[id].t) m[id] = { l: x.l, k: String(x.k), t: t };
+  });
+  return Object.keys(m).sort().map(function(id){ return m[id]; });
+}
+function cfgListSnapshot(c) {
+  var snap = {};
+  CFG_SYNC_LISTS.forEach(function(def){
+    var m = {};
+    cfgListArr(c, def[0]).forEach(function(u){ var k = cfgListKey(u); if(k) m[k] = cfgItemJson(u); });
+    snap[def[0]] = m;
+  });
+  return snap;
+}
+// 저장 직전: 새로 생기거나 내용이 바뀐 건엔 수정시각, 없어진 건엔 삭제 표시
+function cfgListsStamp() {
+  var now = Date.now();
+  var snap = _cfgListSnap || {};
+  var tombs = cfgTombArr(cfg), tombChanged = false;
+  CFG_SYNC_LISTS.forEach(function(def){
+    var name = def[0], code = def[1], prev = snap[name] || {}, seen = {};
+    cfgListArr(cfg, name).forEach(function(u){
+      var k = cfgListKey(u); if(!k) return;
+      seen[k] = true;
+      if(prev[k] === undefined || prev[k] !== cfgItemJson(u)) u._t = now;
+    });
+    Object.keys(prev).forEach(function(k){
+      if(seen[k]) return;
+      tombs.push({ l: code, k: k, t: now }); tombChanged = true;
+    });
+  });
+  if(tombChanged) cfg.listTomb = cfgTombClean(tombs);
+  _cfgListSnap = cfgListSnapshot(cfg);
+}
+// 동기화: 내 것(a)과 서버 것(b)을 건별로 합침 (수정시각이 같으면 서버 쪽 — 불필요한 재전송 방지)
+function mergeCfgSyncLists(a, b) {
+  var tombs = cfgTombClean(cfgTombArr(a).concat(cfgTombArr(b)));
+  var tombT = {};
+  tombs.forEach(function(x){ tombT[x.l + '\n' + x.k] = x.t; });
+  var lists = {};
+  CFG_SYNC_LISTS.forEach(function(def){
+    var name = def[0], code = def[1], m = {}, inFb = {}, noKey = [];
+    [a, b].forEach(function(c, side){
+      cfgListArr(c, name).forEach(function(u){
+        var k = cfgListKey(u);
+        if(!k) { if(side === 1) noKey.push(u); return; }
+        if(side === 1) inFb[k] = true;
+        var cur = m[k];
+        if(!cur || cfgItemT(u) >= cfgItemT(cur)) m[k] = u;
+      });
+    });
+    var out = Object.keys(m).filter(function(k){
+      // 내 기기에만 있는 예전 건(_t 없음)은 서버를 따름 — 이 기능 전에 다른 기기에서 지운 건을
+      // 오래 안 켠 기기가 되살리지 않게. (이 버전부터 만들거나 고친 건은 _t가 있어서 보호됨)
+      if(!inFb[k] && !Number(m[k]._t || 0)) return false;
+      var tt = tombT[code + '\n' + k];
+      return !(tt && tt >= cfgItemT(m[k])); // 지운 뒤에 다시 만든 건(수정시각이 더 최근)은 살림
+    }).map(function(k){ return m[k]; });
+    out.sort(function(x, y){
+      var d = (Number(x.id) || 0) - (Number(y.id) || 0);
+      if(d) return d;
+      var kx = cfgListKey(x), ky = cfgListKey(y);
+      return kx < ky ? -1 : (kx > ky ? 1 : 0);
+    });
+    lists[name] = noKey.concat(out);
+  });
+  return { lists: lists, tombs: tombs };
+}
+function applyCfgSyncLists(merged) {
+  CFG_SYNC_LISTS.forEach(function(def){ cfg[def[0]] = merged.lists[def[0]]; });
+  if(merged.tombs.length || cfg.listTomb) cfg.listTomb = merged.tombs;
+  _cfgListSnap = cfgListSnapshot(cfg);
+}
+_cfgListSnap = cfgListSnapshot(cfg); // 시작 시점 상태 기억
 function isCfgEditProtected() { return _cfgEditedAt && (Date.now() - _cfgEditedAt) < EDIT_PROTECT_MS; }
 
 function markEdited(collection, id) {
@@ -2390,7 +2518,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_09_01';
+const APP_BUILD = '26_11_10_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -3092,6 +3220,7 @@ function attachFirebaseListener() {
       const fbCfgTs = Number((d.cfg && d.cfg._ts) || 0);
       const localCfgTs = Number(cfg._ts || 0);
       const mergedGapDone = mergeInsGapDone(cfg.insGapDone, d.cfg.insGapDone); // (26_11_09_01) 확인완료는 건별로 합침
+      const mergedCfgLists = mergeCfgSyncLists(cfg, d.cfg); // (26_11_10_01) 급여 수정·보류·미지급 목록도 건별로 합침
       if(isCfgEditProtected()) {
         // 로컬 방어 유지 — cfg 그대로 둠
       } else if(localCfgTs && fbCfgTs && localCfgTs > fbCfgTs) {
@@ -3106,6 +3235,7 @@ function attachFirebaseListener() {
         normalizeHolidayPremiums(cfg); // 명절 할증 (예전 cfg 호환 + Firebase 배열 정규화)
       }
       if(Object.keys(mergedGapDone).length || cfg.insGapDone) cfg.insGapDone = mergedGapDone;
+      applyCfgSyncLists(mergedCfgLists); // (26_11_10_01) 어느 쪽이 이기든 네 목록은 합친 결과로 — 서버 값과 다르면 아래 재전송 점검에서 다시 올라감
       localStorage.setItem('cnc_cfg', JSON.stringify(cfg));
     }
     if(fbMemos.length > 0) {
