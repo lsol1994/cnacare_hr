@@ -2522,7 +2522,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_10_02';
+const APP_BUILD = '26_11_11_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -7703,6 +7703,16 @@ function extractKoreanName(name) {
   return n.includes('/') ? n.split('/').pop().trim() : n;
 }
 
+// (26_11_11_01) 간병인 병합 시 지워지는 레코드 id를 유지 레코드에 남겨둠 — 재무관리 지출결의서의 hrKey는
+// 등록 당시 간병인 id로 되어 있어서, 병합 후엔 같은 지급건인데 키가 달라 '미등록'·미지급(자동)으로 잡히던 문제
+function hrRecordMergedCgId(keepCg, delCg) {
+  if(!keepCg || !delCg) return;
+  var ids = Array.isArray(keepCg.mergedCgIds) ? keepCg.mergedCgIds.map(String) : [];
+  [String(delCg.id)].concat(Array.isArray(delCg.mergedCgIds) ? delCg.mergedCgIds.map(String) : []).forEach(function(id){
+    if(id && id !== String(keepCg.id) && ids.indexOf(id) < 0) ids.push(id);
+  });
+  keepCg.mergedCgIds = ids;
+}
 function mergeAllDuplicateCg() {
   const groups = {};
   caregivers.forEach(cg => {
@@ -7749,6 +7759,7 @@ function mergeAllDuplicateCg() {
         const pt = patients.find(p=>String(p.id)===String(cg.patientId));
         if(pt && pt.status !== '종료') { pt.caregiverName = keepCg.name; markPtEdited(pt.id); }
       }
+      hrRecordMergedCgId(keepCg, cg); // (26_11_11_01) 지출결의서 키(옛 id) 연결용
       addDeletedCgId(String(cg.id));
       totalDeleted++;
     });
@@ -7878,6 +7889,8 @@ function mergeDuplicateCg(name) {
       );
       if(!dup) keepCg.assignHistory.push(h);
     });
+
+    hrRecordMergedCgId(keepCg, cg); // (26_11_11_01) 지출결의서 키(옛 id) 연결용
 
     // 삭제 레코드가 연결한 환자 caregiverName → 유지 레코드 이름으로 이전
     if(cg.patientId) {
@@ -12332,10 +12345,42 @@ function hrExpMake(o) {
 // 간병인이 재배정되면 그 카드가 이력 카드(H|cgId|지급일|라벨|시작일)로 바뀌어 키가 달라짐. 그래서 재무에 지급완료로
 // 있는데도 '미등록'으로 보이고 미지급 자동 체크·중복 등록 위험이 생겼음. 키의 핵심(cgId|지급일|라벨)이 같고
 // 금액도 같으면(재무 금액을 알 때) 같은 건으로 봄.
+// (26_11_11_01) 병합으로 없어진 옛 간병인 id → 유지된 간병인 id
+// (26_11_11_02) 이미 병합된 간병인(mergedCgIds 없이 병합된 옛 데이터)도 연결 — 재무 지출결의서에 등록된 간병인 id가
+// 지금 간병인 목록에 없으면(병합·삭제로 사라진 id) 수취인 이름(한국어 이름 기준)이 같은 간병인이 딱 1명일 때만 그 사람으로 봄.
+// 같은 이름이 2명 이상(동명이인)이면 연결하지 않음. 화면 판정용 계산이라 간병인 데이터는 바꾸지 않음.
+var _hrCgAliasSrc = null, _hrCgAliasLen = -1, _hrCgAliasReg = null, _hrCgAliasMap = {};
+function hrCgIdAlias(id) {
+  var cgs = (typeof caregivers !== 'undefined' && caregivers) || [];
+  var reg = (typeof _hrExpReg !== 'undefined' && _hrExpReg) || {};
+  if(_hrCgAliasSrc !== cgs || _hrCgAliasLen !== cgs.length || _hrCgAliasReg !== reg) {
+    _hrCgAliasSrc = cgs; _hrCgAliasLen = cgs.length; _hrCgAliasReg = reg; _hrCgAliasMap = {};
+    var live = {}, byName = {};
+    cgs.forEach(function(c){
+      live[String(c.id)] = true;
+      var nm = extractKoreanName(c.name);
+      if(nm) (byName[nm] = byName[nm] || []).push(String(c.id));
+    });
+    cgs.forEach(function(c){
+      (Array.isArray(c.mergedCgIds) ? c.mergedCgIds : []).forEach(function(o){ _hrCgAliasMap[String(o)] = String(c.id); });
+    });
+    Object.keys(reg).forEach(function(kk){
+      var r = reg[kk] || {};
+      var raw = String(kk);
+      if(raw.indexOf('H|') === 0) raw = raw.slice(2);
+      var oldId = String(r.cgId || raw.split('|')[0] || '');
+      if(!oldId || live[oldId] || _hrCgAliasMap[oldId]) return;
+      var cands = byName[extractKoreanName(r.payee || '')] || [];
+      if(cands.length === 1) _hrCgAliasMap[oldId] = cands[0];
+    });
+  }
+  return _hrCgAliasMap[String(id)] || String(id);
+}
 function hrExpKeyCore(k) {
   k = String(k || '');
-  if(k.indexOf('H|') === 0) { var parts = k.split('|'); if(parts.length >= 5) return parts.slice(1, parts.length - 1).join('|'); }
-  return k;
+  if(k.indexOf('H|') === 0) { var parts = k.split('|'); if(parts.length >= 5) k = parts.slice(1, parts.length - 1).join('|'); }
+  var i = k.indexOf('|');
+  return i > 0 ? hrCgIdAlias(k.slice(0, i)) + k.slice(i) : k;
 }
 function hrExpRegFor(k, amount) {
   k = String(k || '');
@@ -12403,7 +12448,7 @@ function hrExpRefreshRegistered(force) {
       var fdb = await hrExpFinDb();
       var snap = await fdb.collection(HR_EXP_COL).where('src', '==', 'hr').get();
       var next = {};
-      snap.forEach(function(d) { var x = d.data(); if(x && x.hrKey) next[x.hrKey] = { id: x.id, status: x.status || '', amount: Number(x.amount) || 0 }; });
+      snap.forEach(function(d) { var x = d.data(); if(x && x.hrKey) next[x.hrKey] = { id: x.id, status: x.status || '', amount: Number(x.amount) || 0, cgId: String(x.hrCgId || ''), payee: x.payee || '' }; });
       var changed = JSON.stringify(next) !== JSON.stringify(_hrExpReg);
       _hrExpReg = next;
       _hrExpRegLoadedAt = Date.now();
