@@ -2522,7 +2522,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_11_02';
+const APP_BUILD = '26_11_13_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -12493,7 +12493,7 @@ function hrExpOpen(k) {
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:15px;font-weight:800">📤 지출결의서 등록 <span style="font-size:11px;font-weight:700;color:var(--teal)">' + kindLabel + '</span></div><button class="btn btn-sm" onclick="hrExpClose()">✕</button></div>'
     + row('제목', '<input type="text" id="hrexp-title" value="' + hrExpEsc(p.title) + '">')
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
-    + row('지급일자', '<input type="date" id="hrexp-paydate" value="' + hrExpEsc(p.payDate || p.date) + '">')
+    + row('지급일자', '<input type="date" id="hrexp-paydate" value="' + hrExpEsc(hrExpFinPayDate(p.payDate || p.date)) + '">' + (hrExpFinPayDate(p.payDate || p.date) !== (p.payDate || p.date) ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">카드 날짜 ' + hrExpEsc(p.payDate || p.date) + ' → 다음 영업일 지급</div>' : ''))
     + row('지급금액(원)', '<input type="number" id="hrexp-amount" value="' + p.amount + '" oninput="hrExpRecalc()">')
     + row('간병일수' + (dayLocked ? ' (0 고정)' : ''), '<input type="number" id="hrexp-days" value="' + p.careDays + '" min="0" oninput="hrExpRecalc()"' + (dayLocked ? ' readonly style="background:var(--surface2)"' : '') + '>')
     + row('예상매출액(원)', '<input type="number" id="hrexp-rev" value="' + p.expectedRev + '" style="font-weight:700">')
@@ -12523,12 +12523,22 @@ function hrExpClose() {
   var el = document.getElementById('hrexp-mo');
   if(el) el.remove();
 }
+// (26_11_13_01) 2026-11-16 카드부터 간병비는 당일이 아니라 다음 영업일에 지급 — 재무관리 지출결의서 지급일자만 바꿈
+// 대시보드 캘린더·카드 날짜·hrKey(중복 방지 키)는 그대로 카드 날짜를 씀. 다음날이 주말·공휴일이면 그다음 영업일로 넘김(금 → 월)
+const HR_EXP_NEXTDAY_FROM = '2026-11-16';
+function hrExpFinPayDate(cardDate) {
+  var s = String(cardDate || '');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(s) || s < HR_EXP_NEXTDAY_FROM) return s;
+  var d = parseLocalDate(s);
+  d.setDate(d.getDate() + 1);
+  return toLocalDateStr(adjustPayDateToMonday(d));
+}
 // 지출결의서 문서 만들기 (재무관리 saveExp와 같은 필드) — ov: 확인창에서 고친 값
 function hrExpBuildDoc(p, ov) {
   ov = ov || {};
   var pick = function(k, d){ return (ov[k] !== undefined) ? ov[k] : d; };
   return {
-    draftDate: todayStr(), payDate: pick('payDate', p.payDate || p.date), title: pick('title', p.title), payee: pick('payee', p.cgName),
+    draftDate: todayStr(), payDate: pick('payDate', hrExpFinPayDate(p.payDate || p.date)), title: pick('title', p.title), payee: pick('payee', p.cgName),
     bizno: '', acct: HR_EXP_ACCT, amount: Number(pick('amount', p.amount))||0, method: '계좌이체',
     bank: pick('bank', ''), bankCode: pick('bankCode', ''), account: pick('account', p.account),
     desc: pick('desc', p.desc), status: '대기',
@@ -12617,7 +12627,7 @@ async function hrExpBulk() {
   }
   var sum = t.ok.reduce(function(a, o){ return a + (Number(o.amount)||0); }, 0);
   var msg = '재무관리 지출결의서에 ' + t.ok.length + '건 (합계 ' + sum.toLocaleString() + '원)을 대기 상태로 등록할까요?\n\n'
-    + t.ok.map(function(o){ return '· ' + o.title + ' / ' + o.payee + ' ' + Number(o.amount).toLocaleString() + '원'; }).join('\n');
+    + t.ok.map(function(o){ return '· ' + o.title + ' / ' + o.payee + ' ' + Number(o.amount).toLocaleString() + '원 (지급일 ' + o.payDate + ')'; }).join('\n');
   if(t.needBank.length) msg += '\n\n※ 은행 선택이 필요한 ' + t.needBank.length + '건은 제외 (카드에서 따로 등록): ' + t.needBank.map(function(p){ return p.cgName + '(' + p.bankRaw + ')'; }).join(', ');
   if(t.bad.length) msg += '\n\n※ 환자·지출내용 정보가 부족한 ' + t.bad.length + '건은 제외 (카드에서 따로 등록)';
   if(!confirm(msg)) return;
