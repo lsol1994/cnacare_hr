@@ -1702,12 +1702,13 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
   <div class="card">
     <div class="card-hd"><span class="dot"></span>📁 파일 업로드 / 엑셀 다운로드</div>
 
-    <div class="card-hd" style="font-size:12px;margin-bottom:.5rem"><span class="dot"></span>📤 파일 업로드 (CSV / 엑셀)</div>
+    <div class="card-hd" style="font-size:12px;margin-bottom:.5rem"><span class="dot"></span>📤 파일 업로드 (CSV / 엑셀 / PDF)</div>
     <p style="font-size:12px;color:var(--gray);margin-bottom:1rem;line-height:1.7">
       CSV 또는 엑셀 파일을 올려주세요.<br>
       <strong>CSV</strong>: 스프레드시트에서 파일 → 다운로드 → CSV 로 받은 파일<br>
       <strong>엑셀(.xlsx/.xls)</strong>: 엑셀 파일 직접 업로드 가능<br>
-      <strong>환자관리</strong> / <strong>간병인관리</strong> 시트를 자동 인식해서 등록해요 (중복 제외).
+      <strong>환자관리</strong> / <strong>간병인관리</strong> 시트를 자동 인식해서 등록해요 (중복 제외).<br>
+      <strong>PDF</strong>: 은행 입금확인증을 올리면 <strong>간병인별 이체확인증</strong>으로 나눠줘요 (실제지급일_이름(금액원).pdf)
     </p>
     <div id="csv-dropzone"
       style="border:2px dashed var(--border);border-radius:var(--r);padding:1.5rem;text-align:center;
@@ -1718,8 +1719,8 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
       </svg>
       <p style="font-size:13px;font-weight:600;color:var(--gray);margin-bottom:3px">파일을 여기에 끌어다 놓거나 클릭해서 선택</p>
-      <p style="font-size:11px;color:var(--gray-lt)">CSV (.csv) · 엑셀 (.xlsx, .xls) 모두 지원</p>
-      <input type="file" id="csv-file-input" accept=".csv,.xlsx,.xls" multiple style="display:none" onchange="uploadCSV(this.files)">
+      <p style="font-size:11px;color:var(--gray-lt)">CSV (.csv) · 엑셀 (.xlsx, .xls) · 입금확인증 PDF (.pdf) 지원 · 같이 올려도 돼요</p>
+      <input type="file" id="csv-file-input" accept=".csv,.xlsx,.xls,.pdf,application/pdf" multiple style="display:none" onchange="uploadCSV(this.files)">
     </div>
     <div id="csv-result" style="display:none;background:var(--green-lt);border:1px solid rgba(45,138,78,.2);border-radius:var(--rsm);padding:.875rem 1rem;font-size:13px;color:var(--green);line-height:1.8"></div>
     <div id="csv-error" style="display:none;background:var(--red-lt);border:1px solid rgba(184,50,50,.2);border-radius:var(--rsm);padding:.875rem 1rem;font-size:13px;color:var(--red);line-height:1.8"></div>
@@ -1776,14 +1777,6 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
         <button class="btn btn-teal btn-sm" style="width:100%;justify-content:center" onclick="openCertSelect()">
           <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>생성
         </button>
-      </div>
-      <div style="background:var(--surface2);border-radius:var(--rsm);padding:12px 14px">
-        <div style="font-size:12px;font-weight:700;color:var(--black);margin-bottom:8px">🧾 간병인 이체확인증</div>
-        <input type="file" id="paycert-file" accept="application/pdf,.pdf" multiple style="display:none" onchange="payCertOnFile(this)">
-        <button class="btn btn-teal btn-sm" style="width:100%;justify-content:center" onclick="document.getElementById('paycert-file').click()">
-          <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>입금확인증 PDF 올리기
-        </button>
-        <div style="font-size:10px;color:var(--gray);margin-top:6px;line-height:1.5">은행 입금확인증을 올리면 간병인별 PDF로 나눠줘요</div>
       </div>
     </div>
   </div>
@@ -10242,7 +10235,7 @@ const MANUAL_SECTIONS = [
 <li><b>간병일지 다운로드</b> — "📒 간병일지"의 .xlsx/.csv 버튼으로 환자를 골라(여러 명 가능) 출퇴근 기록을 파일로 받습니다.</li>
 <li><b>📝 간병일지 서식</b> — 씨앤에이케어 종이 양식 그대로 환자·간병인 조합을 골라 미리보기 후 인쇄합니다.</li>
 <li><b>📝 간병사실확인서</b> — "생성"으로 환자·간병인 조합을 골라 확인서를 만듭니다. 미리보기에서 점선 밑줄 값은 인쇄 전에 직접 고칠 수 있습니다.</li>
-<li><b>🧾 간병인 이체확인증</b> — 은행 인터넷뱅킹에서 받은 입금확인증 PDF(한 장 = 이체 1건, 여러 장 한 파일도 OK)를 "입금확인증 PDF 올리기"로 올리면, 입금계좌로 간병인을 찾아 <b>실제지급일_이름(금액원).pdf</b>로 나눕니다. 같은 날 같은 간병인 건은 한 파일로 합쳐집니다. 수취인성명이 잘리거나 예금주가 달라도 계좌번호로 찾고, 대시보드 급여 카드와 금액·날짜가 맞는지도 함께 표시합니다. 못 찾은 건은 빨간 테두리로 표시되니 간병인을 직접 골라주세요. 건별 미리보기·인쇄·PDF 다운로드, 전체 ZIP 다운로드가 됩니다.</li>
+<li><b>🧾 간병인 이체확인증</b> (파일 업로드에 PDF) — 은행 인터넷뱅킹에서 받은 입금확인증 PDF(한 장 = 이체 1건, 여러 장 한 파일도 OK)를 위 "📤 파일 업로드"에 올리면(CSV·엑셀과 같이 올려도 됨), 입금계좌로 간병인을 찾아 <b>실제지급일_이름(금액원).pdf</b>로 나눕니다. 같은 날 같은 간병인 건은 한 파일로 합쳐집니다. 수취인성명이 잘리거나 예금주가 달라도 계좌번호로 찾고, 대시보드 급여 카드와 금액·날짜가 맞는지도 함께 표시합니다. 못 찾은 건은 빨간 테두리로 표시되니 간병인을 직접 골라주세요. 건별 미리보기·인쇄·PDF 다운로드, 전체 ZIP 다운로드가 됩니다.</li>
 </ul>
 <div class="manual-sub-title">JSON 백업 / 복원</div>
 <p class="manual-p">"JSON 백업"으로 앱 전체 데이터를 파일로 내려받아 안전하게 보관할 수 있고, "JSON 불러오기"로 백업 파일을 다시 복원할 수 있습니다. "전체 초기화"는 모든 데이터를 지우는 되돌릴 수 없는 작업이므로 각별히 주의해야 합니다.</p>
@@ -10540,7 +10533,7 @@ const QNA_ITEMS_RAW = [
 
   // 설정
   { cat:'settings', q:'명절기간에 급여를 더 주는 건 어떻게 처리하나요?', a:'설정 → "명절 할증"에서 명절 이름·시작일시·종료일시(업체 기준 14:00, 수정 가능)·1일 할증료(기본 20,000원)를 등록하면, 그 기간에 근무한 모든 간병인의 주급·단기 급여·최종 정산에 자동으로 더해집니다. 명절 당일 기준시각(예: 14:00)에 근무 중이면 그 날 1일 할증이고, 그 시각이 속한 주차 주급(단기는 단기 급여)에 들어가요(업체 문자 그대로 9/24 14:00~9/26 14:00 등록 → 9/24·9/25·9/26 14:00에 근무 중인지로 판정 = 최대 3일, 종료일 당일 포함. 8/21 16:00 시작 근무라면 9/24·9/25분은 9/25 주급, 9/26분은 다음 주급). 시각 없이 날짜만 등록된 예전 명절은 기존처럼 근무 시작 날짜 기준으로 계산돼요. 10시간 미만 자투리(OT)는 할증이 없습니다. 이미 지난 주급에도 소급 반영되고, "내역 저장"으로 계산 결과를 명절별로 보관할 수 있어요. 협회 수수료 공제는 현재 보류(0원)입니다.', keywords:['명절할증','명절기간','할증료','주급','소급반영'] },
-  { cat:'settings', q:'환자가 간병인 이체확인증(입금확인증)을 달라고 해요. 간병인별로 나눌 수 있나요?', a:'설정 → 파일 업로드 / 엑셀 다운로드의 "🧾 간병인 이체확인증" 칸에서 "입금확인증 PDF 올리기"로 은행에서 받은 PDF를 올리세요. 입금계좌로 간병인을 찾아 "11.06_WU ZHUSHUN,오죽순(20,000원).pdf"처럼 실제 지급일·이름·금액으로 나눠줘요. 같은 날 같은 간병인 건은 한 파일로 합쳐지고, 건별 미리보기·인쇄·PDF 다운로드와 전체 ZIP 다운로드가 돼요. PDF는 서버에 올라가지 않고 이 컴퓨터 안에서만 처리돼요.', keywords:['이체확인증','입금확인증','간병인별','PDF분리','실제지급일'] },
+  { cat:'settings', q:'환자가 간병인 이체확인증(입금확인증)을 달라고 해요. 간병인별로 나눌 수 있나요?', a:'설정 → 파일 업로드 / 엑셀 다운로드의 "📤 파일 업로드"에 은행에서 받은 입금확인증 PDF를 올리거나 끌어다 놓으세요(CSV·엑셀과 같이 올려도 돼요). 입금계좌로 간병인을 찾아 "11.06_WU ZHUSHUN,오죽순(20,000원).pdf"처럼 실제 지급일·이름·금액으로 나눠줘요. 같은 날 같은 간병인 건은 한 파일로 합쳐지고, 건별 미리보기·인쇄·PDF 다운로드와 전체 ZIP 다운로드가 돼요. PDF는 서버에 올라가지 않고 이 컴퓨터 안에서만 처리돼요.', keywords:['이체확인증','입금확인증','간병인별','PDF분리','실제지급일'] },
   { cat:'settings', q:'간병사실확인서나 간병일지 서식은 어디서 출력하나요?', a:'설정 → 파일 업로드 / 엑셀 다운로드의 "📒 간병일지" 칸에서 "📝 간병일지 서식", "📝 간병사실확인서" 칸에서 "생성"을 누르고 환자·간병인 조합을 고르면 미리보기가 뜹니다. 점선 밑줄 값은 인쇄 전에 직접 고칠 수 있어요. 확인자란은 설정의 "확인서 담당자 성명"이 자동으로 채워집니다.', keywords:['간병사실확인서','간병일지서식','인쇄','미리보기','확인서담당자'] },
   { cat:'settings', q:'매뉴얼 파일은 어떻게 올리고 받나요?', a:'매뉴얼 화면 맨 위 "매뉴얼 파일" 칸에서 "파일 업로드"(최대 15MB, PDF·Word·한글·PPT·엑셀)로 올리면 모든 기기에서 "다운로드"로 받을 수 있어요. 새 버전이 나오면 "새 파일로 교체"를 누르세요.', keywords:['매뉴얼파일','업로드','다운로드','새파일교체','15MB'] },
   { cat:'settings', q:'공휴일 목록은 왜 등록해야 하나요?', a:'공휴일 목록을 "YYYY-MM-DD 공휴일명" 형식으로 등록해두면, 급여지급일이 주말·공휴일과 겹칠 때 다음 월요일로 자동 조정됩니다. 연도가 바뀌면 이 목록을 갱신해주세요.', keywords:['공휴일목록','급여지급일','자동조정','연도갱신','협회정보'] },
@@ -18981,7 +18974,7 @@ function resyncCommuteAttendance(patientId) {
 }
 
 // ─── 간병인 이체확인증 (26_11_16_01) ───
-// 설정 → 파일 업로드 칸 → 🧾 간병인 이체확인증: 은행 인터넷뱅킹 "입금확인증" PDF(한 페이지 = 이체 1건)를 올리면
+// 설정 → 📤 파일 업로드(CSV/엑셀과 같은 칸, uploadCSV에서 PDF만 넘겨받음): 은행 인터넷뱅킹 "입금확인증" PDF(한 페이지 = 이체 1건)를 올리면
 // 페이지마다 거래일시·입금계좌·입금금액·고객관리성명·수취인성명을 읽어서 간병인별로 나눈 PDF를 만들어 줌.
 // · 간병인 찾기: 입금계좌 숫자 = 간병인 정보 계좌번호(bankAccount) → 없으면 이름(고객관리성명 한글 / 수취인성명 영문 앞부분)으로.
 //   수취인성명은 영문이 잘리거나(PIAO ZHENA) 예금주가 다른 사람(LYUSHUNJI → 김옥화)일 수 있어서 이름은 보조로만 씀.
@@ -19625,7 +19618,13 @@ function csvDrop(e) {
 
 function uploadCSV(files) {
   if(!files||!files.length) return;
-  Array.from(files).forEach(file=>{
+  // (26_11_16_01) PDF는 간병인 이체확인증(은행 입금확인증) 분류로 보냄 — CSV/엑셀과 같이 올려도 각각 처리
+  const all = Array.from(files);
+  const pdfs = all.filter(f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+  if(pdfs.length) payCertOnFile({ files: pdfs, value: '' });
+  files = all.filter(f => pdfs.indexOf(f) < 0);
+  if(!files.length) return;
+  files.forEach(file=>{
     const ext = file.name.split('.').pop().toLowerCase();
     if(ext === 'xlsx' || ext === 'xls') {
       // 엑셀 파일 처리
