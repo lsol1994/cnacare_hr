@@ -2592,7 +2592,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_16_07';
+const APP_BUILD = '26_11_16_08';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -10289,7 +10289,7 @@ const MANUAL_SECTIONS = [
 <li><b>간병일지 다운로드</b> — "📒 간병일지"의 .xlsx/.csv 버튼으로 환자를 골라(여러 명 가능) 출퇴근 기록을 파일로 받습니다.</li>
 <li><b>📝 간병일지 서식</b> — 씨앤에이케어 종이 양식 그대로 환자·간병인 조합을 골라 미리보기 후 인쇄합니다.</li>
 <li><b>📝 간병사실확인서</b> — "생성"으로 환자·간병인 조합을 골라 확인서를 만듭니다. 미리보기에서 점선 밑줄 값은 인쇄 전에 직접 고칠 수 있습니다.</li>
-<li><b>🧾 간병인 이체확인증</b> (파일 업로드에 PDF) — 은행 인터넷뱅킹에서 받은 입금확인증 PDF(한 장 = 이체 1건, 여러 장 한 파일도 OK)를 위 "📤 파일 업로드"에 올리면(CSV·엑셀과 같이 올려도 됨), 입금계좌로 간병인을 찾아 <b>실제지급일_이름(금액원).pdf</b>로 나눕니다. 같은 날 같은 간병인 건은 한 파일로 합쳐집니다. 수취인성명이 잘리거나 예금주가 달라도 계좌번호로 찾고, 재무관리 지출결의서와 금액·지급일이 맞는지도 함께 표시합니다(재무를 못 읽으면 대시보드 급여 카드로 대조). 간병인 정보로 못 찾은 이체는 지출결의서 계좌로 간병인을 찾아줍니다. 간병인을 못 찾았거나·이름으로만 찾았거나·지출결의서 지급일/금액과 다른 건은 맨 위 <b>⚠️ 확인 필요</b>에 따로 모이고, 간병인을 고치거나 "✓ 확인함"을 눌러야 이체확인증(미리보기·다운로드·ZIP)에 들어갑니다. 못 읽은 장은 지급일·금액·간병인을 직접 넣어 확인합니다. 확인된 이체확인증은 회사 DB에 자동 저장되고, "📥 자료 다운로드"의 간병일지 아래 <b>🗂 이체확인증 보관함</b>에서 이름·날짜·월로 찾고, ▸를 눌러 이체 내역(시각·은행·수취인·금액·간병인 찾은 방법·지출결의서 대조 결과)과 PDF를 펼쳐 볼 수 있으며, 다시 받거나(선택 ZIP 가능) 삭제할 수 있습니다. 같은 입금확인증을 다시 올려도 중복 저장되지 않습니다. 건별 미리보기·인쇄·PDF 다운로드, 전체 ZIP 다운로드가 됩니다.</li>
+<li><b>🧾 간병인 이체확인증</b> (파일 업로드에 PDF) — 은행 인터넷뱅킹에서 받은 입금확인증 PDF(한 장 = 이체 1건, 여러 장 한 파일도 OK)를 위 "📤 파일 업로드"에 올리면(CSV·엑셀과 같이 올려도 됨), 입금계좌로 간병인을 찾아 <b>실제지급일_이름(금액원).pdf</b>로 나눕니다. 같은 날 같은 간병인 건은 한 파일로 합쳐집니다. 수취인성명이 잘리거나 예금주가 달라도 계좌번호로 찾고, 재무관리 지출결의서와 금액·지급일이 맞는지도 함께 표시합니다(재무를 못 읽으면 대시보드 급여 카드로 대조). 간병인 정보로 못 찾은 이체는 지출결의서 계좌로 간병인을 찾아줍니다. 간병인을 못 찾았거나·이름으로만 찾았거나·지출결의서 지급일/금액과 다른 건은 맨 위 <b>⚠️ 확인 필요</b>에 따로 모이고, 간병인을 고치거나 "✓ 확인함"을 눌러야 이체확인증(미리보기·다운로드·ZIP)에 들어갑니다. 못 읽은 장은 지급일·금액·간병인을 직접 넣어 확인합니다. 업체(유바이오젠)·협회 직원처럼 간병인이 아닌 이체는 "🚫 간병인 아님 — 목록에서 빼기"로 빼면 이체확인증·보관함에 들어가지 않고, 맨 아래에서 되돌릴 수 있습니다. 확인된 이체확인증은 회사 DB에 자동 저장되고, "📥 자료 다운로드"의 간병일지 아래 <b>🗂 이체확인증 보관함</b>에서 이름·날짜·월로 찾고, ▸를 눌러 이체 내역(시각·은행·수취인·금액·간병인 찾은 방법·지출결의서 대조 결과)과 PDF를 펼쳐 볼 수 있으며, 다시 받거나(선택 ZIP 가능) 삭제할 수 있습니다. 같은 입금확인증을 다시 올려도 중복 저장되지 않습니다. 건별 미리보기·인쇄·PDF 다운로드, 전체 ZIP 다운로드가 됩니다.</li>
 </ul>
 <div class="manual-sub-title">JSON 백업 / 복원</div>
 <p class="manual-p">"JSON 백업"으로 앱 전체 데이터를 파일로 내려받아 안전하게 보관할 수 있고, "JSON 불러오기"로 백업 파일을 다시 복원할 수 있습니다. "전체 초기화"는 모든 데이터를 지우는 되돌릴 수 없는 작업이므로 각별히 주의해야 합니다.</p>
@@ -19324,7 +19324,15 @@ function payCertRowReasons(r) {
   return out;
 }
 function payCertRowPending(r) { return !r.confirmed && payCertRowReasons(r).length > 0; }
-function payCertGroupPending(g) { return g.rows.some(function(i){ return payCertRowPending(_payCert.rows[i]); }); }
+function payCertGroupPending(g) { return !payCertGroupSkip(g) && g.rows.some(function(i){ return payCertRowPending(_payCert.rows[i]); }); }
+// (26_11_16_08) 간병인이 아닌 이체(업체 유바이오젠·협회 직원 등) — "간병인 아님"으로 빼면 확인 필요·이체확인증·보관함 어디에도 안 들어감
+function payCertGroupSkip(g) { return g.rows.length > 0 && g.rows.every(function(i){ return _payCert.rows[i].skip; }); }
+function payCertSkip(gi, on) {
+  var g = _payCert.groups[gi]; if(!g) return;
+  g.rows.forEach(function(i){ _payCert.rows[i].skip = !!on; });
+  payCertRerender();
+  toast(on ? '간병인 아님으로 뺐어요 (맨 아래에서 되돌릴 수 있어요)' : '다시 확인 목록에 넣었어요');
+}
 
 function payCertRowNote(r) {
   var bits = [];
@@ -19363,14 +19371,16 @@ function payCertPendingCardHtml(g, gi) {
       + '<div style="display:flex;gap:6px">'
       + '<button class="btn btn-sm" style="flex:1;justify-content:center" onclick="openPayCertPreview(' + gi + ',true)">원본 보기</button>'
       + '<button class="btn btn-teal btn-sm" style="flex:1;justify-content:center" onclick="payCertFixUnread(' + gi + ')">✓ 수정하고 확인</button>'
-      + '</div>';
+      + '</div>'
+      + '<button class="btn btn-sm" style="width:100%;justify-content:center;margin-top:6px;color:var(--gray)" onclick="payCertSkip(' + gi + ',true)" title="업체·협회 직원 등 간병인이 아닌 이체">🚫 간병인 아님 — 목록에서 빼기</button>';
   } else {
     html += '<select style="width:100%;font-size:12px;margin-bottom:6px" onchange="payCertAssign(' + gi + ',this.value)">'
       + '<option value="">' + (g.cg ? '간병인 바꾸기... (지금: ' + payCertEsc(g.cg.name) + ')' : '간병인 직접 선택...') + '</option>' + payCertCgOptions('') + '</select>'
       + '<div style="display:flex;gap:6px">'
       + '<button class="btn btn-sm" style="flex:1;justify-content:center" onclick="openPayCertPreview(' + gi + ',true)">원본 보기</button>'
       + '<button class="btn btn-teal btn-sm" style="flex:1;justify-content:center"' + (g.cg ? '' : ' disabled title="간병인을 먼저 골라주세요"') + ' onclick="payCertConfirm(' + gi + ')">✓ 확인함</button>'
-      + '</div>';
+      + '</div>'
+      + '<button class="btn btn-sm" style="width:100%;justify-content:center;margin-top:6px;color:var(--gray)" onclick="payCertSkip(' + gi + ',true)" title="업체·협회 직원 등 간병인이 아닌 이체">🚫 간병인 아님 — 목록에서 빼기</button>';
   }
   return html + '</div>';
 }
@@ -19416,11 +19426,12 @@ function renderPayCertList(query) {
   if(!el) return;
   var q = String(query || '').trim().toLowerCase();
   var gs = _payCert.groups;
-  var pend = [], ready = [];
-  gs.forEach(function(g, gi){ (payCertGroupPending(g) ? pend : ready).push(gi); });
+  var pend = [], ready = [], skip = [];
+  gs.forEach(function(g, gi){ (payCertGroupSkip(g) ? skip : payCertGroupPending(g) ? pend : ready).push(gi); });
   var sum = document.getElementById('paycert-summary');
   if(sum) sum.innerHTML = '총 <b>' + _payCert.rows.length + '</b>장 → 이체확인증 <b style="color:var(--teal)">' + ready.length + '</b>개'
-    + (pend.length ? ' · <b style="color:var(--red)">확인 필요 ' + pend.length + '개</b> (고치거나 "확인함"을 눌러야 이체확인증에 들어가요)' : ' · 확인 필요 없음');
+    + (pend.length ? ' · <b style="color:var(--red)">확인 필요 ' + pend.length + '개</b> (고치거나 "확인함"을 눌러야 이체확인증에 들어가요)' : ' · 확인 필요 없음')
+    + (skip.length ? ' · <span style="color:var(--gray)">간병인 아님 ' + skip.length + '개 제외</span>' : '');
   var hit = function(gi){ return !q || gs[gi].fileName.toLowerCase().indexOf(q) >= 0; };
   var html = '';
   var pv = pend.filter(hit), rv = ready.filter(hit);
@@ -19431,6 +19442,13 @@ function renderPayCertList(query) {
   html += '<div style="font-size:12px;font-weight:700;color:var(--teal);margin:' + (pend.length ? '12px' : '2px') + ' 0 6px">🧾 이체확인증 ' + ready.length + '개</div>';
   html += rv.map(function(gi){ return payCertReadyCardHtml(gs[gi], gi); }).join('')
     || '<p style="font-size:12px;color:var(--gray);text-align:center;padding:12px 0">' + (ready.length ? '검색 결과가 없어요' : '아직 없어요 — 위 확인 필요 건을 확인해 주세요') + '</p>';
+  if(skip.length) {
+    html += '<div style="font-size:12px;font-weight:700;color:var(--gray);margin:12px 0 6px">🚫 간병인 아님 (제외) ' + skip.length + '개</div>';
+    html += skip.filter(hit).map(function(gi){ var g = gs[gi], r0 = _payCert.rows[g.rows[0]];
+      return '<div style="display:flex;gap:8px;align-items:center;border:1px dashed var(--border);border-radius:var(--rsm);padding:6px 10px;margin-bottom:6px;font-size:12px;color:var(--gray)">'
+        + '<div style="flex:1;min-width:0;word-break:break-all">' + payCertEsc((r0.date ? payCertMMDD(r0.date) + ' ' : '') + (r0.custName || r0.payee || g.name || '')) + (r0.amount ? ' · ' + r0.amount.toLocaleString('ko-KR') + '원' : '') + (g.rows.length > 1 ? ' · ' + g.rows.length + '장' : '') + '</div>'
+        + '<button class="btn btn-sm" onclick="payCertSkip(' + gi + ',false)">되돌리기</button></div>'; }).join('');
+  }
   el.innerHTML = html;
   var zb = document.getElementById('paycert-zip-btn');
   if(zb) { zb.disabled = !ready.length; zb.textContent = '전체 ZIP 다운로드 (' + ready.length + '개)'; }
@@ -19496,14 +19514,14 @@ function payCertSaveBlob(blob, name) {
 }
 async function payCertDownloadOne(gi) {
   var g = _payCert.groups[gi]; if(!g) return;
-  if(payCertGroupPending(g)) { toast('확인 필요 건이에요 — 고치거나 "확인함"을 눌러주세요', true); return; }
+  if(payCertGroupPending(g) || payCertGroupSkip(g)) { toast('확인 필요 건이에요 — 고치거나 "확인함"을 눌러주세요', true); return; }
   try { payCertSaveBlob(new Blob([await payCertGroupBytes(g)], { type: 'application/pdf' }), g.fileName); }
   catch(e) { console.error(e); toast('PDF를 만들지 못했어요', true); }
 }
 async function payCertDownloadZip() {
   // (26_11_16_02) 확인 필요 건은 빼고 확인된 이체확인증만 담음
-  var ready = _payCert.groups.filter(function(g){ return !payCertGroupPending(g); });
-  var pend = _payCert.groups.length - ready.length;
+  var ready = _payCert.groups.filter(function(g){ return !payCertGroupPending(g) && !payCertGroupSkip(g); });
+  var pend = _payCert.groups.filter(function(g){ return payCertGroupPending(g); }).length;
   if(!ready.length) { toast('받을 이체확인증이 없어요 — 확인 필요 건을 먼저 확인해 주세요', true); return; }
   if(pend && !confirm('확인 필요 ' + pend + '개는 빼고 이체확인증 ' + ready.length + '개만 받을게요. 계속할까요?')) return;
   try {
@@ -19549,7 +19567,7 @@ async function openPayCertPreview(gi, rawView) {
 }
 async function payCertPrintPreview() {
   var g = _payCert.groups[_payCert.previewIdx]; if(!g) return;
-  if(payCertGroupPending(g)) { toast('확인 필요 건이에요 — 고치거나 "확인함"을 눌러주세요', true); return; }
+  if(payCertGroupPending(g) || payCertGroupSkip(g)) { toast('확인 필요 건이에요 — 고치거나 "확인함"을 눌러주세요', true); return; }
   try {
     var url = URL.createObjectURL(new Blob([await payCertGroupBytes(g)], { type: 'application/pdf' }));
     var fr = document.getElementById('paycert-print-frame');
@@ -19596,12 +19614,12 @@ function payCertSyncSaved() {
   var gen = _payCert.saveGen, mine = _payCert;
   _payCertSaveChain = _payCertSaveChain.then(async function() {
     if(mine !== _payCert || gen !== _payCert.saveGen) return;   // 그 사이 다시 바뀌었으면 최신 것만 처리
-    if(!db) { _payCert.groups.forEach(function(g){ if(!payCertGroupPending(g)) g.saveState = 'offline'; }); payCertRenderSoon(); return; }
+    if(!db) { _payCert.groups.forEach(function(g){ if(!payCertGroupPending(g) && !payCertGroupSkip(g)) g.saveState = 'offline'; }); payCertRenderSoon(); return; }
     var user = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) || null;
     var keepIds = {}, changed = false;
     for(var gi = 0; gi < _payCert.groups.length; gi++) {
       var g = _payCert.groups[gi];
-      if(payCertGroupPending(g)) continue;
+      if(payCertGroupPending(g) || payCertGroupSkip(g)) continue; // 확인 필요·간병인 아님은 저장 안 함(예전에 저장됐으면 아래에서 지움)
       var id = await payCertGroupId(g);
       keepIds[id] = 1;
       if(g.savedId === id && g.saveState === 'saved') continue;
