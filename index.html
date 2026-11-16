@@ -19553,7 +19553,7 @@ async function openPayCertBox() {
     var v = snap.val() || {};
     _payCertBox.list = Object.keys(v).map(function(k){ return v[k]; }).filter(Boolean)
       .sort(function(a, b){ return (b.date || '').localeCompare(a.date || '') || String(a.cgName || '').localeCompare(String(b.cgName || ''), 'ko'); });
-    _payCertBox.sel = {}; _payCertBox.open = {}; _payCertBox.live = {}; _payCertBox.daySink = {}; _payCertBox.liveGen++;
+    _payCertBox.sel = {}; _payCertBox.open = {}; _payCertBox.live = {}; _payCertBox.daySink = {};
     var months = {}; _payCertBox.list.forEach(function(m){ if(m.date) months[m.date.slice(0, 7)] = 1; });
     var ms = document.getElementById('paycert-box-month');
     ms.innerHTML = '<option value="">전체 기간</option>' + Object.keys(months).sort().reverse().map(function(m){ return '<option value="' + m + '">' + m.slice(0, 4) + '년 ' + Number(m.slice(5)) + '월</option>'; }).join('');
@@ -19619,46 +19619,53 @@ function payCertBoxDayCards(ds) {
   }
   return _payCertBox.daySink[ds];
 }
-function payCertBoxCardsNear(date) {
-  var out = {}, d = parseLocalDate(date);
-  if(!d || isNaN(d)) return [];
-  d.setDate(d.getDate() - 21);
-  for(var k = 0; k <= 21; k++) {
-    payCertBoxDayCards(toLocalDateStr(d)).forEach(function(p){ if(p && p.hrKey) out[p.hrKey] = p; });
-    d.setDate(d.getDate() + 1);
-  }
-  return Object.keys(out).map(function(k){ return out[k]; });
-}
-function payCertBoxComputeLive(x) {
+function payCertBoxCgOf(x) {
   var cgs = (typeof caregivers !== 'undefined' && caregivers) || [];
   if(!x.cgId || !x.date || !cgs.length) return null;
   var alias = function(id){ return (typeof hrCgIdAlias === 'function') ? String(hrCgIdAlias(id)) : String(id); };
   var want = alias(x.cgId);
-  var cg = cgs.find(function(c){ return String(c.id) === String(x.cgId); }) || cgs.find(function(c){ return alias(c.id) === want; });
-  if(!cg) return null;
-  var rows = (x.rows || []).map(function(r){ return { cg: cg, amount: Number(r.amount) || 0, date: r.date || x.date, account: r.acc6 || '' }; });
-  // 저장된 계좌는 끝 6자리라서 카드 계좌도 끝 6자리로 맞춰서 비교
-  var cards = payCertBoxCardsNear(x.date).map(function(p){ return Object.assign({}, p, { account: payCertDigits(p.account).slice(-6) }); });
-  payCertCheckDash(rows, cards);
-  return rows.map(function(r){ return r.dash; });
+  return cgs.find(function(c){ return String(c.id) === String(x.cgId); }) || cgs.find(function(c){ return alias(c.id) === want; }) || null;
 }
-function payCertBoxLive(x) {
-  if(!Object.prototype.hasOwnProperty.call(_payCertBox.live, x.id)) {
-    var v = null;
-    try { v = payCertBoxComputeLive(x); } catch(e) { console.warn('[이체확인증] 대시보드 대조 실패', e); v = null; }
-    _payCertBox.live[x.id] = v;
-  }
-  return _payCertBox.live[x.id];
-}
-// 보관함 열 때 전체를 뒤에서 몇 건씩 대조 (화면 멈춤 방지) → 끝나면 다시 그림
+// 보관함 전체를 "한 번에" 대조 — 업로드 때처럼 대시보드 카드 1장은 이체 1건에만 매칭(같은 금액을 여러 날 받은 경우 카드 중복 사용 방지)
+// 이체 건은 지급일 순으로 처리해서 앞선 이체가 가까운 카드를 먼저 가져감. 날짜별 카드 모으기만 뒤에서 조금씩(화면 멈춤 방지)
 function payCertBoxLiveAll() {
-  var gen = _payCertBox.liveGen, list = _payCertBox.list.slice(), i = 0;
+  var gen = ++_payCertBox.liveGen, list = _payCertBox.list.slice();
+  _payCertBox.live = {};
+  var days = {}, need = [];
+  list.forEach(function(x){
+    if(!payCertBoxCgOf(x)) return;
+    var d = parseLocalDate(x.date); if(!d || isNaN(d)) return;
+    d.setDate(d.getDate() - 21);
+    for(var k = 0; k <= 21; k++) { var ds = toLocalDateStr(d); if(!days[ds]) { days[ds] = 1; need.push(ds); } d.setDate(d.getDate() + 1); }
+  });
+  var i = 0;
   (function step() {
     if(gen !== _payCertBox.liveGen) return;
     var t0 = Date.now();
-    while(i < list.length && Date.now() - t0 < 40) payCertBoxLive(list[i++]);
-    if(i < list.length) setTimeout(step, 0);
-    else if(document.getElementById('paycert-box-overlay').classList.contains('open')) renderPayCertBox();
+    while(i < need.length && Date.now() - t0 < 40) payCertBoxDayCards(need[i++]);
+    if(i < need.length) { setTimeout(step, 0); return; }
+    try {
+      var cardMap = {};
+      need.forEach(function(ds){ payCertBoxDayCards(ds).forEach(function(p){ if(p && p.hrKey) cardMap[p.hrKey] = p; }); });
+      // 저장된 계좌는 끝 6자리라서 카드 계좌도 끝 6자리로 맞춰서 비교
+      var cards = Object.keys(cardMap).map(function(k){ return Object.assign({}, cardMap[k], { account: payCertDigits(cardMap[k].account).slice(-6) }); });
+      var all = [];
+      list.forEach(function(x){
+        var cg = payCertBoxCgOf(x);
+        if(!cg) { _payCertBox.live[x.id] = null; return; }
+        _payCertBox.live[x.id] = [];
+        (x.rows || []).forEach(function(r, ri){
+          all.push({ id: x.id, ri: ri, cg: cg, amount: Number(r.amount) || 0, date: r.date || x.date, time: r.time || '', account: r.acc6 || '' });
+        });
+      });
+      all.sort(function(a, b){ return (a.date + ' ' + a.time).localeCompare(b.date + ' ' + b.time); });
+      payCertCheckDash(all, cards);
+      all.forEach(function(r){ _payCertBox.live[r.id][r.ri] = r.dash; });
+    } catch(e) {
+      console.warn('[이체확인증] 대시보드 대조 실패', e);
+      list.forEach(function(x){ _payCertBox.live[x.id] = null; }); // 실패하면 저장 당시 기준으로 표시
+    }
+    if(document.getElementById('paycert-box-overlay').classList.contains('open')) renderPayCertBox();
   })();
 }
 // 한 줄의 대조 결과 — 지금 대시보드(계산됐으면) 우선, 아니면 저장 당시 기록
@@ -19796,7 +19803,7 @@ async function payCertBoxDelete(id) {
     await db.ref(PAYCERT_DB).update(u);
     _payCertBox.list = _payCertBox.list.filter(function(m){ return m.id !== id; });
     delete _payCertBox.sel[id];
-    renderPayCertBox(); toast('삭제했어요');
+    renderPayCertBox(); payCertBoxLiveAll(); toast('삭제했어요');
   } catch(e) { console.warn(e); toast('삭제하지 못했어요', true); }
 }
 
