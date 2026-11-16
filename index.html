@@ -1869,10 +1869,14 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       <button class="btn btn-icon" onclick="closeOverlay('paycert-box-overlay')"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <p style="font-size:12px;color:var(--gray);margin-bottom:.5rem;line-height:1.6">입금확인증을 올려서 확인된 이체확인증이 회사 DB에 저장돼요. 다른 PC에서도 여기서 다시 받을 수 있어요.</p>
-    <div style="display:flex;gap:6px;margin-bottom:8px">
-      <input type="text" id="paycert-box-search" placeholder="이름·날짜·은행 검색 (예: 11.10, 김옥화)" oninput="renderPayCertBox()"
-        style="flex:1;padding:7px 10px;font-size:12px;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface);color:var(--black)">
-      <select id="paycert-box-month" onchange="renderPayCertBox()" style="font-size:12px"><option value="">전체 기간</option></select>
+    <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+      <select id="paycert-box-cg" onchange="renderPayCertBox()" style="flex:2;min-width:160px;font-size:13px;padding:7px 8px" title="간병인별로 보기"><option value="">👤 간병인 전체</option></select>
+      <select id="paycert-box-month" onchange="renderPayCertBox()" style="flex:1;min-width:110px;font-size:13px;padding:7px 8px"><option value="">전체 기간</option></select>
+    </div>
+    <div style="position:relative;margin-bottom:8px">
+      <input type="text" id="paycert-box-search" placeholder="🔍 간병인 이름·날짜·은행 검색 (예: 김옥화, 11.10)" oninput="renderPayCertBox()"
+        style="width:100%;box-sizing:border-box;padding:8px 30px 8px 10px;font-size:13px;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface);color:var(--black)">
+      <button onclick="var i=document.getElementById('paycert-box-search');i.value='';renderPayCertBox();i.focus()" title="지우기" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--gray-lt);font-size:14px">✕</button>
     </div>
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
       <div id="paycert-box-summary" style="flex:1;font-size:12px"></div>
@@ -2596,7 +2600,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_16_08';
+const APP_BUILD = '26_11_16_09';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -10293,7 +10297,7 @@ const MANUAL_SECTIONS = [
 <li><b>간병일지 다운로드</b> — "📒 간병일지"의 .xlsx/.csv 버튼으로 환자를 골라(여러 명 가능) 출퇴근 기록을 파일로 받습니다.</li>
 <li><b>📝 간병일지 서식</b> — 씨앤에이케어 종이 양식 그대로 환자·간병인 조합을 골라 미리보기 후 인쇄합니다.</li>
 <li><b>📝 간병사실확인서</b> — "생성"으로 환자·간병인 조합을 골라 확인서를 만듭니다. 미리보기에서 점선 밑줄 값은 인쇄 전에 직접 고칠 수 있습니다.</li>
-<li><b>🧾 간병인 이체확인증</b> (파일 업로드에 PDF) — 은행 인터넷뱅킹에서 받은 입금확인증 PDF(한 장 = 이체 1건, 여러 장 한 파일도 OK)를 위 "📤 파일 업로드"에 올리면(CSV·엑셀과 같이 올려도 됨), 입금계좌로 간병인을 찾아 <b>실제지급일_이름(금액원).pdf</b>로 나눕니다. 같은 날 같은 간병인 건은 한 파일로 합쳐집니다. 수취인성명이 잘리거나 예금주가 달라도 계좌번호로 찾고, 재무관리 지출결의서와 금액·지급일이 맞는지도 함께 표시합니다(재무를 못 읽으면 대시보드 급여 카드로 대조). 간병인 정보로 못 찾은 이체는 지출결의서 계좌로 간병인을 찾아줍니다. 간병인을 못 찾았거나·이름으로만 찾았거나·지출결의서 지급일/금액과 다른 건은 맨 위 <b>⚠️ 확인 필요</b>에 따로 모이고, 간병인을 고치거나 "✓ 확인함"을 눌러야 이체확인증(미리보기·다운로드·ZIP)에 들어갑니다. 못 읽은 장은 지급일·금액·간병인을 직접 넣어 확인합니다. 업체(유바이오젠)·협회 직원처럼 간병인이 아닌 이체는 "🚫 간병인 아님 — 목록에서 빼기"로 빼면 이체확인증·보관함에 들어가지 않고, 맨 아래에서 되돌릴 수 있습니다. 확인된 이체확인증은 회사 DB에 자동 저장되고, "📥 자료 다운로드"의 간병일지 아래 <b>🗂 이체확인증 보관함</b>에서 이름·날짜·월로 찾고(선택 삭제·전체 삭제도 가능 — "삭제"를 입력해야 지워짐), ▸를 눌러 이체 내역(시각·은행·수취인·금액·간병인 찾은 방법·지출결의서 대조 결과)과 PDF를 펼쳐 볼 수 있으며, 다시 받거나(선택 ZIP 가능) 삭제할 수 있습니다. 같은 입금확인증을 다시 올려도 중복 저장되지 않습니다. 건별 미리보기·인쇄·PDF 다운로드, 전체 ZIP 다운로드가 됩니다.</li>
+<li><b>🧾 간병인 이체확인증</b> (파일 업로드에 PDF) — 은행 인터넷뱅킹에서 받은 입금확인증 PDF(한 장 = 이체 1건, 여러 장 한 파일도 OK)를 위 "📤 파일 업로드"에 올리면(CSV·엑셀과 같이 올려도 됨), 입금계좌로 간병인을 찾아 <b>실제지급일_이름(금액원).pdf</b>로 나눕니다. 같은 날 같은 간병인 건은 한 파일로 합쳐집니다. 수취인성명이 잘리거나 예금주가 달라도 계좌번호로 찾고, 재무관리 지출결의서와 금액·지급일이 맞는지도 함께 표시합니다(재무를 못 읽으면 대시보드 급여 카드로 대조). 간병인 정보로 못 찾은 이체는 지출결의서 계좌로 간병인을 찾아줍니다. 간병인을 못 찾았거나·이름으로만 찾았거나·지출결의서 지급일/금액과 다른 건은 맨 위 <b>⚠️ 확인 필요</b>에 따로 모이고, 간병인을 고치거나 "✓ 확인함"을 눌러야 이체확인증(미리보기·다운로드·ZIP)에 들어갑니다. 못 읽은 장은 지급일·금액·간병인을 직접 넣어 확인합니다. 업체(유바이오젠)·협회 직원처럼 간병인이 아닌 이체는 "🚫 간병인 아님 — 목록에서 빼기"로 빼면 이체확인증·보관함에 들어가지 않고, 맨 아래에서 되돌릴 수 있습니다. 확인된 이체확인증은 회사 DB에 자동 저장되고, "📥 자료 다운로드"의 간병일지 아래 <b>🗂 이체확인증 보관함</b>에서 간병인 선택·이름·날짜·월로 찾고(선택 삭제·전체 삭제도 가능 — "삭제"를 입력해야 지워짐), ▸를 눌러 이체 내역(시각·은행·수취인·금액·간병인 찾은 방법·지출결의서 대조 결과)과 PDF를 펼쳐 볼 수 있으며, 다시 받거나(선택 ZIP 가능) 삭제할 수 있습니다. 같은 입금확인증을 다시 올려도 중복 저장되지 않습니다. 건별 미리보기·인쇄·PDF 다운로드, 전체 ZIP 다운로드가 됩니다.</li>
 </ul>
 <div class="manual-sub-title">JSON 백업 / 복원</div>
 <p class="manual-p">"JSON 백업"으로 앱 전체 데이터를 파일로 내려받아 안전하게 보관할 수 있고, "JSON 불러오기"로 백업 파일을 다시 복원할 수 있습니다. "전체 초기화"는 모든 데이터를 지우는 되돌릴 수 없는 작업이므로 각별히 주의해야 합니다.</p>
@@ -19676,6 +19680,13 @@ async function openPayCertBox() {
       .sort(function(a, b){ return (b.date || '').localeCompare(a.date || '') || String(a.cgName || '').localeCompare(String(b.cgName || ''), 'ko'); });
     _payCertBox.sel = {}; _payCertBox.open = {}; _payCertBox.live = {}; _payCertBox.daySink = {};
     var months = {}; _payCertBox.list.forEach(function(m){ if(m.date) months[m.date.slice(0, 7)] = 1; });
+    // (26_11_16_09) 간병인별 보기 — 보관된 이체확인증의 간병인 목록(건수)
+    var cgm = {};
+    _payCertBox.list.forEach(function(m){ var k = payCertBoxCgKey(m); if(!k) return; (cgm[k] = cgm[k] || { name: m.cgName || k, n: 0 }).n++; });
+    var cs = document.getElementById('paycert-box-cg');
+    if(cs) cs.innerHTML = '<option value="">👤 간병인 전체 (' + Object.keys(cgm).length + '명)</option>' + Object.keys(cgm)
+      .sort(function(a, b){ return String(cgm[a].name).localeCompare(String(cgm[b].name), 'ko'); })
+      .map(function(k){ return '<option value="' + payCertEsc(k) + '">' + payCertEsc(cgm[k].name) + ' (' + cgm[k].n + '건)</option>'; }).join('');
     var ms = document.getElementById('paycert-box-month');
     ms.innerHTML = '<option value="">전체 기간</option>' + Object.keys(months).sort().reverse().map(function(m){ return '<option value="' + m + '">' + m.slice(0, 4) + '년 ' + Number(m.slice(5)) + '월</option>'; }).join('');
     renderPayCertBox();
@@ -19685,11 +19696,18 @@ async function openPayCertBox() {
     el.innerHTML = '<p style="font-size:13px;color:var(--red);text-align:center;padding:20px 0">보관함을 불러오지 못했어요</p>';
   }
 }
+// 같은 간병인은 id로 묶음(병합된 옛 id 포함), id가 없으면 이름으로
+function payCertBoxCgKey(m) {
+  if(m.cgId) return 'id:' + ((typeof hrCgIdAlias === 'function') ? String(hrCgIdAlias(m.cgId)) : String(m.cgId));
+  return m.cgName ? 'nm:' + m.cgName : '';
+}
 function payCertBoxFiltered() {
   var q = String((document.getElementById('paycert-box-search') || {}).value || '').trim().toLowerCase();
   var m = (document.getElementById('paycert-box-month') || {}).value || '';
+  var cgk = (document.getElementById('paycert-box-cg') || {}).value || '';
   return _payCertBox.list.filter(function(x){
     if(m && String(x.date || '').slice(0, 7) !== m) return false;
+    if(cgk && payCertBoxCgKey(x) !== cgk) return false;
     if(!q) return true;
     var hay = [x.fileName, x.cgName, x.srcName].concat((x.rows || []).map(function(r){ return [r.payee, r.custName, r.bank].join(' '); })).join(' ').toLowerCase();
     return hay.indexOf(q) >= 0;
@@ -19699,7 +19717,9 @@ function renderPayCertBox() {
   var el = document.getElementById('paycert-box-list'); if(!el) return;
   var list = payCertBoxFiltered();
   var nSel = Object.keys(_payCertBox.sel).filter(function(k){ return _payCertBox.sel[k]; }).length;
-  document.getElementById('paycert-box-summary').innerHTML = '보관 <b>' + _payCertBox.list.length + '</b>건 · 표시 <b>' + list.length + '</b>건 · 선택 <b style="color:var(--teal)">' + nSel + '</b>건';
+  var sumAmt = list.reduce(function(t, x){ return t + (Number(x.amount) || 0); }, 0);
+  document.getElementById('paycert-box-summary').innerHTML = '보관 <b>' + _payCertBox.list.length + '</b>건 · 표시 <b>' + list.length + '</b>건'
+    + (list.length !== _payCertBox.list.length ? ' (합계 <b>' + sumAmt.toLocaleString('ko-KR') + '원</b>)' : '') + ' · 선택 <b style="color:var(--teal)">' + nSel + '</b>건';
   var zb = document.getElementById('paycert-box-zip'); if(zb) { zb.disabled = !nSel; zb.textContent = '선택 ZIP 다운로드 (' + nSel + '개)'; }
   var ds = document.getElementById('paycert-box-delsel'); if(ds) { ds.disabled = !nSel; ds.textContent = '선택 삭제 (' + nSel + '개)'; }
   var da = document.getElementById('paycert-box-delall'); if(da) { var nf = list.length, filt = nf !== _payCertBox.list.length; da.disabled = !nf; da.textContent = '🗑 ' + (filt ? '표시된 ' + nf + '개 전체 삭제' : '전체 삭제 (' + nf + '개)'); }
