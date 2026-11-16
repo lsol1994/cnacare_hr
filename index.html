@@ -2592,7 +2592,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_16_05';
+const APP_BUILD = '26_11_16_06';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -19310,7 +19310,8 @@ function payCertRowReasons(r) {
   var out = [];
   if(!r.ok) { out.push('이체 내용을 읽지 못했어요'); return out; }
   if(!r.cg) out.push('간병인을 찾지 못했어요');
-  else if(r.how === 'name') out.push('계좌번호가 간병인 정보와 달라 이름으로 찾았어요');
+  else if(r.how === 'name' && !(r.dash && r.dash.src === 'fin' && r.dash.state === 'ok' && r.dash.fin && r.dash.fin.acc === payCertDigits(r.account)))
+    out.push('계좌번호가 간병인 정보와 달라 이름으로 찾았어요');
   if(r.cg && r.dash) {
     if(r.dash.src === 'fin') {
       if(r.dash.state === 'none') out.push('재무 지출결의서에 같은 금액 지급건이 없어요');
@@ -19335,6 +19336,7 @@ function payCertRowNote(r) {
   else if(reasons.length && r.confirmed) bits.push('<span style="color:var(--teal)">✔ 직접 확인함' + (r.how === 'manual' ? ' (간병인 직접 선택)' : '') + '</span> <span style="color:var(--gray)">— ' + reasons.map(payCertEsc).join(' · ') + '</span>');
   else if(r.dash && r.dash.state === 'ok') bits.push('<span style="color:var(--green)">✅ ' + payCertSrcName(r.dash.src) + ' ' + payCertEsc(r.dash.label) + ' 일치</span>');
   if(r.how === 'fin') bits.push('<span style="color:var(--teal)">🔎 재무 지출결의서 계좌로 간병인을 찾았어요</span>');
+  if(r.how === 'name' && !reasons.length) bits.push('<span style="color:var(--gray)">ℹ️ 간병인 정보 계좌와 이체 계좌가 달라 이름으로 찾았어요 — 지출결의서 계좌·금액·지급일과는 일치 (간병인 정보 계좌 확인 필요)</span>');
   return bits.join('<br>');
 }
 
@@ -19776,11 +19778,22 @@ function payCertBoxRowDash(r, x, i) {
 }
 function payCertBoxRowDiffs(r, x, i) {
   var out = [], dd = payCertBoxRowDash(r, x, i).cur, payDate = r.date || x.date;
-  if(r.how === 'name') out.push('계좌번호가 간병인 정보와 달라 이름으로 찾음');
-  if(r.how === 'manual') out.push('간병인을 직접 선택함');
-  if(r.how === 'fin') out.push('재무 지출결의서 계좌로 간병인을 찾음');
+  // (26_11_16_06) 지급 대조가 일치하면 간병인 찾은 방법(이름·직접 선택·지출결의서 계좌)은 다른 내역이 아니라 참고 사항(payCertBoxRowNotes)
+  if(dd.state !== 'ok') {
+    if(r.how === 'name') out.push('계좌번호가 간병인 정보와 달라 이름으로 찾음');
+    if(r.how === 'manual') out.push('간병인을 직접 선택함');
+    if(r.how === 'fin') out.push('재무 지출결의서 계좌로 간병인을 찾음');
+  }
   if(dd.state === 'none') out.push(dd.src === 'fin' ? '재무 지출결의서에 같은 금액 지급건이 없음' : '대시보드에 같은 금액 급여 카드가 없음');
   else if(dd.state === 'diff') out.push((dd.src === 'fin' ? '지출결의서 지급일' : '대시보드 지급일') + (dd.exp ? '(' + payCertMMDD(dd.exp) + ')' : '') + '과 실제 이체일(' + payCertMMDD(payDate) + ')이 다름');
+  return out;
+}
+function payCertBoxRowNotes(r, x, i) {
+  var dd = payCertBoxRowDash(r, x, i).cur, out = [];
+  if(dd.state !== 'ok') return out;
+  if(r.how === 'name') out.push('간병인 정보 계좌와 이체 계좌가 달라 이름으로 찾음 — 간병인 정보 계좌 확인 필요');
+  if(r.how === 'manual') out.push('간병인을 직접 선택함');
+  if(r.how === 'fin') out.push('재무 지출결의서 계좌로 간병인을 찾음');
   return out;
 }
 function payCertBoxFlags(x) {
@@ -19805,7 +19818,7 @@ function payCertBoxDetailHtml(x) {
     + (x.srcName ? '<br>원본 파일: ' + payCertEsc(x.srcName) : '')
     + '<br><span style="font-size:10px">대조는 보관함을 열 때마다 <b>재무 지출결의서</b>(실제 지급일)로 다시 해요. 재무를 못 읽으면 대시보드 급여 카드로 해요. 지출결의서를 고쳤으면 닫았다 다시 열기</span></div>';
   var rows = rs.map(function(r, i) {
-    var rd = payCertBoxRowDash(r, x, i), diffs = payCertBoxRowDiffs(r, x, i);
+    var rd = payCertBoxRowDash(r, x, i), diffs = payCertBoxRowDiffs(r, x, i), notes = payCertBoxRowNotes(r, x, i);
     var dashOne = function(dd) {
       return dd.state === 'ok' ? '<span style="color:var(--green)">✅ 일치' + (dd.label ? ' (' + payCertEsc(dd.label) + ')' : '') + '</span>'
         : dd.state === 'diff' ? '<span style="color:var(--red)">지급일 다름' + (dd.exp ? ' — ' + (dd.src === 'fin' ? '지출결의서 ' : '대시보드 ') + payCertMMDD(dd.exp) : '') + (dd.label ? ' (' + payCertEsc(dd.label) + ')' : '') + '</span>'
@@ -19825,7 +19838,8 @@ function payCertBoxDetailHtml(x) {
       + '<td style="' + td + '">' + dashTxt + '</td>'
       + '</tr>'
       + (diffs.length ? '<tr><td></td><td colspan="6" style="padding:2px 6px 6px;border-bottom:1px solid var(--border);font-size:10px;color:var(--red)">⚠️ ' + diffs.map(payCertEsc).join(' · ')
-        + (r.confirmed ? ' <span style="color:var(--teal)">→ ✔ 직접 확인하고 저장함</span>' : '') + '</td></tr>' : '');
+        + (r.confirmed ? ' <span style="color:var(--teal)">→ ✔ 직접 확인하고 저장함</span>' : '') + '</td></tr>'
+        : (notes.length ? '<tr><td></td><td colspan="6" style="padding:2px 6px 6px;border-bottom:1px solid var(--border);font-size:10px;color:var(--gray)">ℹ️ ' + notes.map(payCertEsc).join(' · ') + '</td></tr>' : ''));
   }).join('');
   var table = rs.length
     ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>'
