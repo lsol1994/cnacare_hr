@@ -1879,6 +1879,10 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       <button class="btn btn-sm" onclick="payCertBoxSelectAll(true)">표시된 것 전체 선택</button>
       <button class="btn btn-sm" onclick="payCertBoxSelectAll(false)">선택 해제</button>
     </div>
+    <div style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:8px">
+      <button class="btn btn-sm" id="paycert-box-delsel" style="color:var(--red)" onclick="payCertBoxDeleteMany('sel')" disabled>선택 삭제 (0개)</button>
+      <button class="btn btn-sm" id="paycert-box-delall" style="color:var(--red)" onclick="payCertBoxDeleteMany('all')">🗑 전체 삭제</button>
+    </div>
     <div id="paycert-box-list" style="max-height:50vh;overflow-y:auto;margin-bottom:1rem"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-teal" id="paycert-box-zip" style="flex:1;justify-content:center" onclick="payCertBoxZip()" disabled>선택 ZIP 다운로드 (0개)</button>
@@ -10289,7 +10293,7 @@ const MANUAL_SECTIONS = [
 <li><b>간병일지 다운로드</b> — "📒 간병일지"의 .xlsx/.csv 버튼으로 환자를 골라(여러 명 가능) 출퇴근 기록을 파일로 받습니다.</li>
 <li><b>📝 간병일지 서식</b> — 씨앤에이케어 종이 양식 그대로 환자·간병인 조합을 골라 미리보기 후 인쇄합니다.</li>
 <li><b>📝 간병사실확인서</b> — "생성"으로 환자·간병인 조합을 골라 확인서를 만듭니다. 미리보기에서 점선 밑줄 값은 인쇄 전에 직접 고칠 수 있습니다.</li>
-<li><b>🧾 간병인 이체확인증</b> (파일 업로드에 PDF) — 은행 인터넷뱅킹에서 받은 입금확인증 PDF(한 장 = 이체 1건, 여러 장 한 파일도 OK)를 위 "📤 파일 업로드"에 올리면(CSV·엑셀과 같이 올려도 됨), 입금계좌로 간병인을 찾아 <b>실제지급일_이름(금액원).pdf</b>로 나눕니다. 같은 날 같은 간병인 건은 한 파일로 합쳐집니다. 수취인성명이 잘리거나 예금주가 달라도 계좌번호로 찾고, 재무관리 지출결의서와 금액·지급일이 맞는지도 함께 표시합니다(재무를 못 읽으면 대시보드 급여 카드로 대조). 간병인 정보로 못 찾은 이체는 지출결의서 계좌로 간병인을 찾아줍니다. 간병인을 못 찾았거나·이름으로만 찾았거나·지출결의서 지급일/금액과 다른 건은 맨 위 <b>⚠️ 확인 필요</b>에 따로 모이고, 간병인을 고치거나 "✓ 확인함"을 눌러야 이체확인증(미리보기·다운로드·ZIP)에 들어갑니다. 못 읽은 장은 지급일·금액·간병인을 직접 넣어 확인합니다. 업체(유바이오젠)·협회 직원처럼 간병인이 아닌 이체는 "🚫 간병인 아님 — 목록에서 빼기"로 빼면 이체확인증·보관함에 들어가지 않고, 맨 아래에서 되돌릴 수 있습니다. 확인된 이체확인증은 회사 DB에 자동 저장되고, "📥 자료 다운로드"의 간병일지 아래 <b>🗂 이체확인증 보관함</b>에서 이름·날짜·월로 찾고, ▸를 눌러 이체 내역(시각·은행·수취인·금액·간병인 찾은 방법·지출결의서 대조 결과)과 PDF를 펼쳐 볼 수 있으며, 다시 받거나(선택 ZIP 가능) 삭제할 수 있습니다. 같은 입금확인증을 다시 올려도 중복 저장되지 않습니다. 건별 미리보기·인쇄·PDF 다운로드, 전체 ZIP 다운로드가 됩니다.</li>
+<li><b>🧾 간병인 이체확인증</b> (파일 업로드에 PDF) — 은행 인터넷뱅킹에서 받은 입금확인증 PDF(한 장 = 이체 1건, 여러 장 한 파일도 OK)를 위 "📤 파일 업로드"에 올리면(CSV·엑셀과 같이 올려도 됨), 입금계좌로 간병인을 찾아 <b>실제지급일_이름(금액원).pdf</b>로 나눕니다. 같은 날 같은 간병인 건은 한 파일로 합쳐집니다. 수취인성명이 잘리거나 예금주가 달라도 계좌번호로 찾고, 재무관리 지출결의서와 금액·지급일이 맞는지도 함께 표시합니다(재무를 못 읽으면 대시보드 급여 카드로 대조). 간병인 정보로 못 찾은 이체는 지출결의서 계좌로 간병인을 찾아줍니다. 간병인을 못 찾았거나·이름으로만 찾았거나·지출결의서 지급일/금액과 다른 건은 맨 위 <b>⚠️ 확인 필요</b>에 따로 모이고, 간병인을 고치거나 "✓ 확인함"을 눌러야 이체확인증(미리보기·다운로드·ZIP)에 들어갑니다. 못 읽은 장은 지급일·금액·간병인을 직접 넣어 확인합니다. 업체(유바이오젠)·협회 직원처럼 간병인이 아닌 이체는 "🚫 간병인 아님 — 목록에서 빼기"로 빼면 이체확인증·보관함에 들어가지 않고, 맨 아래에서 되돌릴 수 있습니다. 확인된 이체확인증은 회사 DB에 자동 저장되고, "📥 자료 다운로드"의 간병일지 아래 <b>🗂 이체확인증 보관함</b>에서 이름·날짜·월로 찾고(선택 삭제·전체 삭제도 가능 — "삭제"를 입력해야 지워짐), ▸를 눌러 이체 내역(시각·은행·수취인·금액·간병인 찾은 방법·지출결의서 대조 결과)과 PDF를 펼쳐 볼 수 있으며, 다시 받거나(선택 ZIP 가능) 삭제할 수 있습니다. 같은 입금확인증을 다시 올려도 중복 저장되지 않습니다. 건별 미리보기·인쇄·PDF 다운로드, 전체 ZIP 다운로드가 됩니다.</li>
 </ul>
 <div class="manual-sub-title">JSON 백업 / 복원</div>
 <p class="manual-p">"JSON 백업"으로 앱 전체 데이터를 파일로 내려받아 안전하게 보관할 수 있고, "JSON 불러오기"로 백업 파일을 다시 복원할 수 있습니다. "전체 초기화"는 모든 데이터를 지우는 되돌릴 수 없는 작업이므로 각별히 주의해야 합니다.</p>
@@ -19697,6 +19701,8 @@ function renderPayCertBox() {
   var nSel = Object.keys(_payCertBox.sel).filter(function(k){ return _payCertBox.sel[k]; }).length;
   document.getElementById('paycert-box-summary').innerHTML = '보관 <b>' + _payCertBox.list.length + '</b>건 · 표시 <b>' + list.length + '</b>건 · 선택 <b style="color:var(--teal)">' + nSel + '</b>건';
   var zb = document.getElementById('paycert-box-zip'); if(zb) { zb.disabled = !nSel; zb.textContent = '선택 ZIP 다운로드 (' + nSel + '개)'; }
+  var ds = document.getElementById('paycert-box-delsel'); if(ds) { ds.disabled = !nSel; ds.textContent = '선택 삭제 (' + nSel + '개)'; }
+  var da = document.getElementById('paycert-box-delall'); if(da) { var nf = list.length, filt = nf !== _payCertBox.list.length; da.disabled = !nf; da.textContent = '🗑 ' + (filt ? '표시된 ' + nf + '개 전체 삭제' : '전체 삭제 (' + nf + '개)'); }
   if(!list.length) { el.innerHTML = '<p style="font-size:13px;color:var(--gray);text-align:center;padding:20px 0">' + (_payCertBox.list.length ? '조건에 맞는 이체확인증이 없어요' : '아직 저장된 이체확인증이 없어요 — 파일 업로드에 입금확인증 PDF를 올리면 확인된 건이 여기에 저장돼요') + '</p>'; return; }
   el.innerHTML = list.map(function(x) {
     var when = x.savedAt ? new Date(x.savedAt) : null;
@@ -19960,6 +19966,33 @@ async function payCertBoxDelete(id) {
     delete _payCertBox.sel[id];
     renderPayCertBox(); payCertBoxLiveAll(); toast('삭제했어요');
   } catch(e) { console.warn(e); toast('삭제하지 못했어요', true); }
+}
+
+// (26_11_16_08) 보관함 여러 건 삭제 — 'sel' 선택한 것 / 'all' 지금 표시된 것 전체(검색·월 필터 적용). 되돌릴 수 없어서 '삭제' 입력해야 진행
+async function payCertBoxDeleteMany(mode) {
+  if(!db) { toast('서버 연결 후 다시 해주세요', true); return; }
+  var targets = mode === 'sel'
+    ? _payCertBox.list.filter(function(x){ return _payCertBox.sel[x.id]; })
+    : payCertBoxFiltered();
+  if(!targets.length) return;
+  var filt = mode === 'all' && targets.length !== _payCertBox.list.length;
+  var what = mode === 'sel' ? '선택한 ' + targets.length + '개' : (filt ? '지금 표시된 ' + targets.length + '개' : '보관함 전체 ' + targets.length + '개');
+  var ans = prompt('보관함에서 ' + what + ' 이체확인증을 삭제할까요?\n삭제하면 되돌릴 수 없어요 (은행 PDF를 다시 올리면 다시 저장돼요).\n\n계속하려면 "삭제"라고 입력해 주세요.');
+  if(ans === null) return;
+  if(String(ans).trim() !== '삭제') { toast('"삭제"라고 입력해야 지워져요 — 취소했어요', true); return; }
+  try {
+    toast('삭제 중...');
+    var ids = targets.map(function(x){ return x.id; });
+    for(var i = 0; i < ids.length; i += 100) {
+      var u = {};
+      ids.slice(i, i + 100).forEach(function(id){ u['meta/' + id] = null; u['blob/' + id] = null; });
+      await db.ref(PAYCERT_DB).update(u);
+    }
+    var gone = {}; ids.forEach(function(id){ gone[id] = 1; delete _payCertBox.sel[id]; delete _payCertBox.open[id]; });
+    _payCertBox.list = _payCertBox.list.filter(function(m){ return !gone[m.id]; });
+    renderPayCertBox(); payCertBoxLiveAll();
+    toast(ids.length + '개 삭제했어요');
+  } catch(e) { console.warn(e); toast('삭제하지 못했어요 — 일부만 지워졌을 수 있어요. 보관함을 다시 열어 확인해 주세요', true); }
 }
 
 // ─── 간병사실확인서 ───
