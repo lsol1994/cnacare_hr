@@ -2592,7 +2592,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_16_06';
+const APP_BUILD = '26_11_16_07';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -19389,6 +19389,28 @@ function payCertReadyCardHtml(g, gi) {
     + '</div></div>';
 }
 
+// (26_11_16_07) 뒤에서 끝난 보관함 저장 때문에 목록을 다시 그릴 때 — 간병인 드롭다운·입력칸을 쓰는 중이면 손 뗄 때까지 미룸
+// (안 그러면 열려 있던 드롭다운이 닫히고, 못 읽은 장에 넣던 지급일·금액이 지워짐). 저장은 카드 순서를 안 바꾸니까
+// 다시 그린 뒤 쓰던 값(못 읽은 장의 지급일·금액·간병인)과 스크롤 위치를 그대로 되돌림
+function payCertRenderSoon() {
+  var el = document.getElementById('paycert-list'); if(!el) return;
+  var ae = document.activeElement;
+  if(ae && el.contains(ae) && /^(SELECT|INPUT|TEXTAREA)$/.test(ae.tagName)) {
+    if(!_payCert.waitRender) {
+      _payCert.waitRender = true;
+      el.addEventListener('focusout', function h() {
+        el.removeEventListener('focusout', h);
+        setTimeout(function(){ _payCert.waitRender = false; payCertRenderSoon(); }, 200);
+      });
+    }
+    return;
+  }
+  var keep = {}, top = el.scrollTop;
+  Array.prototype.forEach.call(el.querySelectorAll('[id^="paycert-fix-"]'), function(f){ if(f.value) keep[f.id] = f.value; });
+  renderPayCertList((document.getElementById('paycert-search') || {}).value || '');
+  Object.keys(keep).forEach(function(id){ var f = document.getElementById(id); if(f && !f.value) f.value = keep[id]; });
+  el.scrollTop = top;
+}
 function renderPayCertList(query) {
   var el = document.getElementById('paycert-list');
   if(!el) return;
@@ -19574,7 +19596,7 @@ function payCertSyncSaved() {
   var gen = _payCert.saveGen, mine = _payCert;
   _payCertSaveChain = _payCertSaveChain.then(async function() {
     if(mine !== _payCert || gen !== _payCert.saveGen) return;   // 그 사이 다시 바뀌었으면 최신 것만 처리
-    if(!db) { _payCert.groups.forEach(function(g){ if(!payCertGroupPending(g)) g.saveState = 'offline'; }); renderPayCertList((document.getElementById('paycert-search') || {}).value || ''); return; }
+    if(!db) { _payCert.groups.forEach(function(g){ if(!payCertGroupPending(g)) g.saveState = 'offline'; }); payCertRenderSoon(); return; }
     var user = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) || null;
     var keepIds = {}, changed = false;
     for(var gi = 0; gi < _payCert.groups.length; gi++) {
@@ -19608,7 +19630,7 @@ function payCertSyncSaved() {
     var dels = {};
     _payCert.rows.forEach(function(r){ if(r.savedId && !keepIds[r.savedId]) { dels['meta/' + r.savedId] = null; dels['blob/' + r.savedId] = null; r.savedId = null; } });
     if(Object.keys(dels).length) { try { await db.ref(PAYCERT_DB).update(dels); changed = true; } catch(e) { console.warn('[이체확인증] 보관함 삭제 실패', e); } }
-    if(changed && mine === _payCert) renderPayCertList((document.getElementById('paycert-search') || {}).value || '');
+    if(changed && mine === _payCert) payCertRenderSoon();
   }).catch(function(e){ console.warn('[이체확인증] 보관함 동기화 오류', e); });
   return _payCertSaveChain;
 }
