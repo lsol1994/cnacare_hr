@@ -19193,6 +19193,7 @@ function payCertRowNote(r) {
   bits.push('수취인 ' + payCertEsc(r.payee || '-') + (r.bank ? ' · ' + payCertEsc(r.bank) : '') + ' · ' + r.amount.toLocaleString('ko-KR') + '원');
   if(!r.cg) bits.push('<span style="color:var(--red)">⚠️ 간병인을 찾지 못했어요 (고객관리성명 ' + payCertEsc(r.custName || '-') + ') — 아래에서 직접 골라주세요</span>');
   else if(r.how === 'name') bits.push('<span style="color:#B45309">계좌번호가 간병인 정보와 달라 이름으로 찾았어요</span>');
+  else if(r.how === 'manual') bits.push('<span style="color:#B45309">직접 고른 간병인이에요</span>');
   if(r.dash) {
     if(r.dash.state === 'ok') bits.push('<span style="color:var(--green)">✅ 대시보드 ' + payCertEsc(r.dash.label) + ' 일치</span>');
     else if(r.dash.state === 'diff') bits.push('<span style="color:#B45309">📅 대시보드 ' + payCertMMDD(r.dash.cardDate) + ' ' + payCertEsc(r.dash.label) + (r.dash.exp !== r.dash.cardDate ? ' (지급 예정 ' + payCertMMDD(r.dash.exp) + ')' : '') + ' → 실제 ' + payCertMMDD(r.date) + ' 지급</span>');
@@ -19307,7 +19308,8 @@ async function openPayCertPreview(gi) {
       cv.width = vp.width; cv.height = vp.height;
       cv.style.cssText = 'width:100%;height:auto;display:block;border:1px solid var(--border);margin-bottom:10px;background:#fff';
       host.appendChild(cv);
-      await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+      // intent 'print' = 화면 갱신 타이밍(requestAnimationFrame)을 기다리지 않고 바로 그림 — 창이 뒤에 있어도 미리보기가 멈추지 않음
+      await page.render({ canvasContext: cv.getContext('2d'), viewport: vp, intent: 'print' }).promise;
     }
   } catch(e) { console.error(e); host.innerHTML = '<p style="color:var(--red);font-size:13px">미리보기를 만들지 못했어요</p>'; }
 }
