@@ -2600,7 +2600,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_16_09';
+const APP_BUILD = '26_11_17_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -7782,17 +7782,43 @@ function periodToJournalRow(p) {
 
 // 캘린더의 "이력에서 복구됨" 최종정산을 실제로 지급 처리했을 때 정산완료로 표시
 // (patientId+startDate로 식별 — assignHistory는 동기화 병합 시 재정렬될 수 있어 배열 인덱스는 불안정함)
-function markAssignHistorySettled(cgId, patientId, startDate) {
+function markAssignHistorySettled(cgId, patientId, startDate, opt) {
+  const silent = !!(opt && opt.silent); // (26_11_17_01) 자동 처리용 — 저장·새로고침·토스트는 호출한 쪽에서 한 번만
   const cg = caregivers.find(c=>String(c.id)===String(cgId));
-  if(!cg || !cg.assignHistory) return;
+  if(!cg || !cg.assignHistory) return false;
   const h = cg.assignHistory.find(x=>String(x.patientId)===String(patientId) && x.startDate===startDate);
-  if(!h) { toast('이력을 찾을 수 없어요', true); return; }
+  if(!h) { if(!silent) toast('이력을 찾을 수 없어요', true); return false; }
+  if(silent && h.settled === true) return false;
   h.settled = true;
   touchHist(h); // (26_10_06_01)
   markCgEdited(cg.id);
+  if(silent) return true;
   save();
   refreshCalendarIfOpen();
   toast('✅ 정산 완료로 표시했어요');
+  return true;
+}
+// (26_11_17_01) 이력 복구 최종정산 카드가 지출결의서 '지급완료'와 매칭되면 이력 settled를 자동 저장 — 근무건당 한 번만
+// (렌더 중에 바로 저장하지 않고 모아서 한 번에 저장. 서버 최신본을 못 받은 상태면 다음 렌더 때 다시 시도)
+var _hrAutoSettleDone = {}, _hrAutoSettleQ = [], _hrAutoSettleTimer = null;
+function hrQueueAutoSettle(cgId, patientId, startDate) {
+  var key = String(cgId) + '|' + String(patientId) + '|' + String(startDate);
+  if(_hrAutoSettleDone[key]) return;
+  _hrAutoSettleDone[key] = true;
+  _hrAutoSettleQ.push({ cgId: cgId, patientId: patientId, startDate: startDate, key: key });
+  if(!_hrAutoSettleTimer) _hrAutoSettleTimer = setTimeout(hrFlushAutoSettle, 0);
+}
+function hrFlushAutoSettle() {
+  _hrAutoSettleTimer = null;
+  var q = _hrAutoSettleQ; _hrAutoSettleQ = [];
+  if(!q.length) return;
+  if(typeof autoProcessBlocked === 'function' && autoProcessBlocked()) { q.forEach(function(x){ delete _hrAutoSettleDone[x.key]; }); return; }
+  var n = 0;
+  q.forEach(function(x){ try { if(markAssignHistorySettled(x.cgId, x.patientId, x.startDate, { silent: true })) n++; } catch(e) { console.warn('이력 정산완료 자동 처리 실패:', e); } });
+  if(!n) return;
+  save();
+  refreshCalendarIfOpen();
+  toast('✅ 지출결의서 지급완료된 이력 최종정산 ' + n + '건을 정산 완료로 표시했어요');
 }
 
 // ─── 중복 간병인 정리 ───
@@ -12495,8 +12521,67 @@ function hrExpRegFor(k, amount) {
     if(amt > 0 && ra > 0 && ra !== amt) return; // 금액이 다르면 다른 건으로 봄
     if(!best || (r.status === '지급완료' && best.status !== '지급완료')) best = r;
   });
+  // (26_11_17_01) 최종 정산은 라이브 카드('최종 정산 (근무 마감)')와 이력 복구 카드('H|…|최종 정산|시작일')의 라벨이 달라서
+  // 재배정 전에 라이브 카드에서 등록한 지출결의서를 이력 카드가 못 찾던 문제(반대 방향도) — 같은 근무건일 때만 서로 찾게 함
+  if(best && best.status === '지급완료') return best;
+  var cross = hrExpFinalCrossReg(k, amount);
+  if(cross && (!best || cross.status === '지급완료')) return cross;
   return best;
 }
+// hrKey 분해 — 일반: "cgId|지급일|라벨", 이력: "H|cgId|지급일|라벨|근무시작일" (키 형식 자체는 그대로 유지)
+function hrExpParseKey(k) {
+  k = String(k || '');
+  var parts = k.split('|');
+  if(k.indexOf('H|') === 0) {
+    if(parts.length < 5) return null;
+    return { h: true, cgId: hrCgIdAlias(parts[1]), date: parts[2], label: parts.slice(3, parts.length - 1).join('|'), start: parts[parts.length - 1] };
+  }
+  if(parts.length < 3) return null;
+  return { h: false, cgId: hrCgIdAlias(parts[0]), date: parts[1], label: parts.slice(2).join('|'), start: '' };
+}
+// 간병인 cgId의 근무건(시작일 start)들 중 마감일(주말·공휴일 조정 후)이 payDate인 게 있는지 — 라이브 값 + assignHistory
+function hrExpWorkEndsOn(cgId, start, payDate) {
+  if(!start || !payDate) return false;
+  var cg = caregivers.find(function(c){ return String(c.id) === String(cgId); });
+  if(!cg) return false;
+  var ends = [];
+  if(cg.startDate === start && cg.endDate) ends.push(cg.endDate);
+  (Array.isArray(cg.assignHistory) ? cg.assignHistory : []).forEach(function(h){ if(h && h.startDate === start && h.endDate) ends.push(h.endDate); });
+  return ends.some(function(e){ var d = parseLocalDate(e); return !!d && toLocalDateStr(adjustPayDateToMonday(d)) === payDate; });
+}
+var HR_EXP_FINAL_LIVE_LB = '최종 정산 (근무 마감)', HR_EXP_FINAL_HIST_LB = '최종 정산';
+function hrExpFinalCrossReg(k, amount) {
+  var a = hrExpParseKey(k); if(!a) return null;
+  var wantH;
+  if(a.h && a.label === HR_EXP_FINAL_HIST_LB) wantH = false;
+  else if(!a.h && a.label === HR_EXP_FINAL_LIVE_LB) wantH = true;
+  else return null;
+  var cg = caregivers.find(function(c){ return String(c.id) === String(a.cgId); });
+  if(!cg) return null;
+  var liveEndsOnDate = (function(){ var d = cg.endDate ? parseLocalDate(cg.endDate) : null; return !!d && toLocalDateStr(adjustPayDateToMonday(d)) === a.date; })();
+  var amt = Math.round(Number(amount) || 0), best = null;
+  Object.keys(_hrExpReg).forEach(function(kk) {
+    var b = hrExpParseKey(kk); if(!b || b.h !== wantH) return;
+    if(b.cgId !== a.cgId || b.date !== a.date) return;
+    if(b.label !== (wantH ? HR_EXP_FINAL_HIST_LB : HR_EXP_FINAL_LIVE_LB)) return;
+    var start = a.h ? a.start : b.start;
+    // 그 근무건의 마감일(조정 후) = 지급일인 건만 — 다른 근무와 섞이지 않게
+    if(!hrExpWorkEndsOn(a.cgId, start, a.date)) return;
+    if(a.h) {
+      // 이력 카드 → 일반 키: 지금 라이브 근무(다른 시작일)도 같은 날 마감이면 그 일반 키는 라이브 근무 것이라 매칭 안 함
+      if(liveEndsOnDate && cg.startDate !== start) return;
+    } else {
+      // 일반 카드 → 이력 키: 이력 키의 근무 시작일이 지금 라이브 근무와 같아야 같은 건
+      if(cg.startDate !== start) return;
+    }
+    var r = _hrExpReg[kk]; if(!r) return;
+    var ra = Math.round(Number(r.amount) || 0);
+    if(amt > 0 && ra > 0 && ra !== amt) return;
+    if(!best || (r.status === '지급완료' && best.status !== '지급완료')) best = r;
+  });
+  return best;
+}
+function hrExpRegPaid(k, amount) { var r = hrExpRegFor(k, amount); return !!(r && r.status === '지급완료'); }
 function hrExpBtnHtml(payload) {
   if(!payload) return '';
   _hrExpSink[payload.hrKey] = payload;
@@ -13305,6 +13390,8 @@ function unpaidToggleHtml(cgId, date, label, amount, opt) {
 function unpaidToggleHtmlBase(cgId, date, label, amount, opt) {
   var oKey = opt && opt.key ? String(opt.key) : '';
   var u = oKey ? ((cfg.unpaidPayments || []).find(function(x){ return x.key === oKey; }) || null) : findUnpaidPay(cgId, date, label);
+  // (26_11_17_01) 자동 미지급인데 지출결의서는 지급완료(라이브↔이력 키 달라도 같은 건)면 배지 안 띄움 — 다음 동기화 때 자동 해제됨
+  if(u && u.auto && hrExpRegPaid(u.key || payUnpaidKey(cgId, date, label), u.amount)) u = null;
   if(u) {
     return '<span title="등록일: ' + u.markedAt + (u.auto ? ' (지출결의서 미지급완료로 자동 체크)' : '') + '" style="font-size:10px;font-weight:700;color:#fff;background:var(--red);padding:2px 7px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayUnpaid(\'' + u.id + '\')">⚠️ 미지급' + (u.auto ? '(자동)' : '') + '</span>';
   }
@@ -13931,28 +14018,33 @@ function showCalDetail(dateStr, collectOnly) {
           + '<button class="btn btn-sm" style="flex:1;justify-content:center" onclick="copyCalExpenseMsg(' + histIdx + ')">📋 복사</button>'
           + '</div></div>';
       }
-      const stColor = isSettled ? 'var(--green)' : 'var(--amber)';
-      const stBg = isSettled ? 'var(--green-lt)' : 'var(--amber-lt)';
+      // (26_11_17_01) 재배정 전 라이브 카드('최종 정산 (근무 마감)')로 등록·지급완료된 건이면 정산 완료로 보고, 이력 settled도 자동 저장
+      const hfKey = 'H|' + cg.id + '|' + dateStr + '|최종 정산|' + h.startDate;
+      const hfRegPaid = !isSettled && !hMergedIntoWeek && hSp.base > 0 && hrExpRegPaid(hfKey, ovx.amount);
+      if(hfRegPaid) hrQueueAutoSettle(cg.id, h.patientId, h.startDate);
+      const isSettledV = isSettled || hfRegPaid;
+      const stColor = isSettledV ? 'var(--green)' : 'var(--amber)';
+      const stBg = isSettledV ? 'var(--green-lt)' : 'var(--amber-lt)';
       if(!hMergedIntoWeek && hSp.base > 0) payEvents.push({ time: '', html:
         '<div style="padding:10px 12px;border-left:3px solid ' + stColor + ';margin-bottom:8px;background:' + stBg + ';border-radius:0 var(--rsm) var(--rsm) 0">'
         + '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:3px">'
-        + '<span style="font-size:11px;font-weight:700;color:' + stColor + '">' + (isSettled ? '✅ 최종 정산 (정산 완료)' : '💰 최종 정산 (이력에서 복구됨)') + '</span>'
-        + (isSettled ? '' : unpaidToggleHtml(cg.id, dateStr, '최종 정산', ovx.amount, { key: 'H|' + cg.id + '|' + dateStr + '|최종 정산|' + h.startDate, ptName: h.patientName || '' }))
+        + '<span style="font-size:11px;font-weight:700;color:' + stColor + '">' + (isSettledV ? '✅ 최종 정산 (정산 완료)' : '💰 최종 정산 (이력에서 복구됨)') + '</span>'
+        + (isSettledV ? '' : unpaidToggleHtml(cg.id, dateStr, '최종 정산', ovx.amount, { key: hfKey, ptName: h.patientName || '' }))
         + '</div>'
         + '<div style="font-size:14px;font-weight:700">' + cg.name + ' (' + (h.patientName||'') + ')</div>'
         + '<div style="font-size:15px;font-weight:900;color:' + stColor + ';margin-top:4px">' + ovx.amountHtml + (isEstimate && !ovx.ov ?' <span style="font-size:11px;font-weight:700">(추정)</span>':'') + '</div>'
         + calHpSplitNoteHtml(hSp.hp)
         + calOtNoteHtml(vcgHf)
         + ovx.noteHtml
-        + (isSettled
+        + (isSettledV
             ? '<div style="font-size:11px;color:var(--green);font-weight:700;margin-top:2px">지급 완료로 처리된 건이에요</div>'
             : '<div style="font-size:11px;color:var(--gray);margin-top:2px">간병인의 현재 상태가 이 근무 이력과 어긋나 있어요 — 간병인 카드에서 상태를 확인해주세요</div>')
         + estimateNote
         + bankHtml
         + expenseHtml
-        + hrExpBtnHtml(Object.assign(hrExpMake({ key: 'H|' + cg.id + '|' + dateStr + '|최종 정산|' + h.startDate, kind: 'pay', cg: cg, label: '최종 정산', date: dateStr, amount: ovx.amount, ptName: h.patientName || '', memo: expenseMsg }), { hrSettled: isSettled }))
+        + hrExpBtnHtml(Object.assign(hrExpMake({ key: hfKey, kind: 'pay', cg: cg, label: '최종 정산', date: dateStr, amount: ovx.amount, ptName: h.patientName || '', memo: expenseMsg }), { hrSettled: isSettledV }))
         + ovx.btnHtml
-        + (isSettled ? '' : '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="markAssignHistorySettled(\'' + cg.id + '\',\'' + h.patientId + '\',\'' + h.startDate + '\')">✅ 정산 완료 처리</button>')
+        + (isSettledV ? '' : '<button class="btn btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="markAssignHistorySettled(\'' + cg.id + '\',\'' + h.patientId + '\',\'' + h.startDate + '\')">✅ 정산 완료 처리</button>')
         + '</div>' });
       if(hSp.hp > 0) {
         const hfhBlocks = holidayFinalPartBlocks(vcgHf);
@@ -14070,6 +14162,7 @@ function showCalDetail(dateStr, collectOnly) {
     var hrOrigSinks = {}; // 원래 지급일별 등록 데이터 (같은 날짜는 한 번만 계산)
     (cfg.unpaidPayments || []).forEach(function(u) {
       if(u.origDate === dateStr) return;
+      if(u.auto && hrExpRegPaid(u.key || payUnpaidKey(u.cgId, u.origDate, u.label), u.amount)) return; // (26_11_17_01) 지급완료 건은 자동 해제 대기 — 알림 안 띄움
       var bankHtml = u.bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + u.bankStr + '</div>' : '';
       // (26_10_12_01) 원래 지급일 카드와 같은 키로 등록 → 원래 날짜에서 등록했으면 '등록됨'으로 보임
       if(!hrOrigSinks[u.origDate]) hrOrigSinks[u.origDate] = hrExpCollectForDate(u.origDate);
