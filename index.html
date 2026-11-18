@@ -2600,7 +2600,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_17_01';
+const APP_BUILD = '26_11_18_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -12720,6 +12720,12 @@ function hrExpFinPayDate(cardDate) {
   d.setDate(d.getDate() + 1);
   return toLocalDateStr(adjustPayDateToMonday(d));
 }
+// (26_11_18_01) 카드 날짜 기준 실제 지급일(다음 영업일)이 아직 오늘 이후면 true — 아직 지급일이 안 된 건이라 미지급 아님
+// 예: 11/17 마감·주급 카드 → 실제 지급일 11/18 → 11/18 대시보드에 미지급(자동)으로 뜨지 않게 함
+function hrUnpaidNotDueYet(cardDate) {
+  var f = hrExpFinPayDate(cardDate);
+  return !!f && f >= todayStr();
+}
 // 지출결의서 문서 만들기 (재무관리 saveExp와 같은 필드) — ov: 확인창에서 고친 값
 function hrExpBuildDoc(p, ov) {
   ov = ov || {};
@@ -13218,12 +13224,14 @@ function hrUnpaidAutoSync() {
   var sinkCache = {};
   var sinkFor = function(d){ if(!sinkCache[d]) sinkCache[d] = hrExpCollectForDate(d) || {}; return sinkCache[d]; };
   var ghosts = [];
+  var notDue = [];
   kept = kept.filter(function(u){
     if(!u.auto || !u.origDate) return true;
+    if(hrUnpaidNotDueYet(u.origDate)) { notDue.push(u); return false; } // (26_11_18_01) 실제 지급일 전에 자동 체크된 건 정리
     if(sinkFor(u.origDate)[keyOf(u)]) return true;
     ghosts.push(u); return false;
   });
-  if(ghosts.length) changed = true;
+  if(ghosts.length || notDue.length) changed = true;
 
   // 2) 오래된 제외 기록 정리
   var dCut = hrUnpaidAddDays(today, -HR_UNPAID_DISMISS_KEEP);
@@ -13239,6 +13247,7 @@ function hrUnpaidAutoSync() {
   if(winFrom > from) from = winFrom;
   var added = [];
   for(var d = from; d < today; d = hrUnpaidAddDays(d, 1)) {
+    if(hrUnpaidNotDueYet(d)) continue; // (26_11_18_01) 다음날 지급 — 실제 지급일(다음 영업일)이 지나야 자동 체크
     var sink = sinkFor(d);
     Object.keys(sink).forEach(function(k){
       var p = sink[k];
@@ -13392,6 +13401,7 @@ function unpaidToggleHtmlBase(cgId, date, label, amount, opt) {
   var u = oKey ? ((cfg.unpaidPayments || []).find(function(x){ return x.key === oKey; }) || null) : findUnpaidPay(cgId, date, label);
   // (26_11_17_01) 자동 미지급인데 지출결의서는 지급완료(라이브↔이력 키 달라도 같은 건)면 배지 안 띄움 — 다음 동기화 때 자동 해제됨
   if(u && u.auto && hrExpRegPaid(u.key || payUnpaidKey(cgId, date, label), u.amount)) u = null;
+  if(u && u.auto && hrUnpaidNotDueYet(u.origDate || date)) u = null; // (26_11_18_01) 실제 지급일 전이면 자동 배지 안 띄움
   if(u) {
     return '<span title="등록일: ' + u.markedAt + (u.auto ? ' (지출결의서 미지급완료로 자동 체크)' : '') + '" style="font-size:10px;font-weight:700;color:#fff;background:var(--red);padding:2px 7px;border-radius:10px;cursor:pointer;white-space:nowrap;flex-shrink:0" onclick="releasePayUnpaid(\'' + u.id + '\')">⚠️ 미지급' + (u.auto ? '(자동)' : '') + '</span>';
   }
@@ -14162,6 +14172,7 @@ function showCalDetail(dateStr, collectOnly) {
     var hrOrigSinks = {}; // 원래 지급일별 등록 데이터 (같은 날짜는 한 번만 계산)
     (cfg.unpaidPayments || []).forEach(function(u) {
       if(u.origDate === dateStr) return;
+      if(u.auto && hrUnpaidNotDueYet(u.origDate)) return; // (26_11_18_01) 실제 지급일 전 자동 미지급은 알림 안 띄움
       if(u.auto && hrExpRegPaid(u.key || payUnpaidKey(u.cgId, u.origDate, u.label), u.amount)) return; // (26_11_17_01) 지급완료 건은 자동 해제 대기 — 알림 안 띄움
       var bankHtml = u.bankStr ? '<div style="font-size:11px;color:var(--gray);margin-top:3px">🏦 ' + u.bankStr + '</div>' : '';
       // (26_10_12_01) 원래 지급일 카드와 같은 키로 등록 → 원래 날짜에서 등록했으면 '등록됨'으로 보임
