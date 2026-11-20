@@ -2600,7 +2600,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_20_02';
+const APP_BUILD = '26_11_20_03';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -9241,6 +9241,7 @@ function applyReassignCore(cg, pt, ov) {
   pt.status        = '매칭완료';
   pt.recruited     = true;
   pt.caregiverName = cg.name;
+  delete pt.startCancelled; // (26_11_20_03) 다시 실제 매칭됐으므로 캘린더 숨김 해제 (저장 경로와 동일)
   if(ri) {
     // 재모집 시작일~원래 합의된 마감일로 환자 일정도 함께 갱신 (duration도 재계산해서
     // 아래 "마감일 무효화" 이후 fallback 계산에 낡은 duration이 쓰이지 않게 함)
@@ -9860,6 +9861,7 @@ function cancelEarlyTerminate(cgId) {
         pt.recruitStartDate = snap.patient.recruitStartDate || '';
         pt.recruitHistory   = JSON.parse(JSON.stringify(snap.patient.recruitHistory||[]));
         delete pt.endReason;
+        delete pt.startCancelled; // (26_11_20_03) 시작 전 취소를 되돌렸으므로 캘린더 숨김 해제
         // (26_10_22_03) 재모집 정보 복원 — 예전엔 중도종료(재모집)가 만든 recruitInfo가 그대로 남아서,
         // 매칭완료로 돌아온 환자가 모집중 탭·재모집 발송 목록에 계속 뜨고 날짜 동기화도 막혔음.
         // 이 값을 저장하기 전에 만들어진 예전 스냅샷(키 없음)은 중도종료가 만든 재모집 정보만 지움.
@@ -9874,6 +9876,7 @@ function cancelEarlyTerminate(cgId) {
         pt.status        = '매칭완료';
         pt.recruited     = true;
         pt.caregiverName = cg.name;
+        delete pt.startCancelled; // (26_11_20_03) 종료취소로 다시 매칭됐으므로 캘린더 숨김 해제
         // 자연 마감(기간종료) 취소인 경우 예전 마감일이 과거로 남아있으면
         // checkAutoEnd()가 바로 다시 "종료"로 되돌려버리므로 비워서 방지 (새 마감일은 다시 입력 필요)
         pt.endDate  = '';
@@ -13607,8 +13610,10 @@ function showCalDetail(dateStr, collectOnly) {
   // 환자 시작일 / 마감일 (환자-간병인 통합 카드 — 간병인 전용 시작/마감 카드는 별도로 만들지 않음)
   patients.forEach(function(p) {
     // 시작 전 취소(대기중 상태에서 취소)된 건은 실제로 근무한 적이 없으므로 캘린더에 아예 표시하지 않음
-    if(p.startCancelled) return;
     var liveCg = caregivers.find(function(c){ return String(c.patientId)===String(p.id); });
+    // (26_11_20_03) 단, 시작 전 취소 뒤 재배정 등으로 다시 간병인이 연결된 환자는 실제 근무가 있으므로 표시
+    // (예전엔 재배정 경로가 startCancelled를 안 지워서 매칭완료 환자가 캘린더에서 통째로 빠졌음)
+    if(p.startCancelled && !liveCg) return;
     // 시작 카드용 간병인: 라이브 매칭이 없으면(=재배정으로 다른 환자에게 넘어감) 이력에서
     // 시작일 기준으로 복구 — 재배정 전에는 이 이름이 정상 표시됐었는데, 재배정 후 간병인의
     // 라이브 patientId가 새 환자로 바뀌면서 통째로 사라져버리던 문제
