@@ -2600,7 +2600,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_18_01';
+const APP_BUILD = '26_11_20_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -4123,9 +4123,18 @@ function doCopy(text) {
 }
 
 // ─── REGISTER PATIENT ───
+// (26_11_20_01) 날짜 칸 연도 검사 — 연도를 지우거나 한 자리만 쳐서 0001-01-01 같은 값이 저장되던 문제 방지
+function isBadYearDate(v) {
+  if(!v) return false; // 비워둔 건 허용
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v));
+  if(!m) return true;
+  const y = Number(m[1]);
+  return y < 2000 || y > 2099;
+}
 function registerPatient() {
   const p = getFormPatient();
   if(!p.name||!p.hospital||!p.diagnosis) { toast('이름, 병원, 병증은 필수입니다',true); return; }
+  if(isBadYearDate(p.startDate)) { toast('시작일 연도가 올바르지 않아요 (' + p.startDate + '). 날짜를 다시 선택해주세요',true); return; }
   if(p.commute && !ptCommuteInfo(p)) { toast('출퇴근 근무는 출근·퇴근 시간을 서로 다르게 입력해주세요',true); return; }
   p._ts = Date.now(); // 동기화 충돌 해결(최신 우선)을 위한 저장 시각
   patients.unshift(p);
@@ -4746,6 +4755,11 @@ function savePatientEdit(id) {
   if(!p) return;
   const name = document.getElementById('ep-name').value.trim();
   if(!name){ toast('이름은 필수입니다',true); return; }
+  // (26_11_20_01) 시작일·종료일 연도 검사 (값을 바꾸기 전에)
+  const _epSd = document.getElementById('ep-startDate')?.value || '';
+  const _epEd = document.getElementById('ep-endDate')?.value || '';
+  if(isBadYearDate(_epSd)) { toast('시작일 연도가 올바르지 않아요 (' + _epSd + '). 날짜를 다시 선택해주세요',true); return; }
+  if(isBadYearDate(_epEd)) { toast('종료일 연도가 올바르지 않아요 (' + _epEd + '). 날짜를 다시 선택해주세요',true); return; }
   // (26_11_05_01) 출퇴근 시간 검증은 값을 바꾸기 전에
   const _cmForm = readCommuteForm('ep');
   if(_cmForm.commute && !ptCommuteInfo(_cmForm)) { toast('출퇴근 근무는 출근·퇴근 시간을 서로 다르게 입력해주세요',true); return; }
