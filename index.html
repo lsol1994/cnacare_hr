@@ -2600,7 +2600,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_20_01';
+const APP_BUILD = '26_11_20_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -4304,6 +4304,7 @@ function ptRowHTML(p) {
           <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>복사
         </button>
         <button class="btn btn-sm" onclick="openPatient('${p.id}')">상세</button>
+        ${(p.status==='종료' && !reEntryNextPt(p)) ? `<button class="btn btn-sm" style="border-color:#5E35B1;color:#5E35B1" onclick="openReEntry('${p.id}')">🔁 재입실</button>` : ''}
       </div>
     </div>
   </div>`;
