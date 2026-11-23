@@ -2601,7 +2601,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_23_05';
+const APP_BUILD = '26_11_23_06';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -10136,7 +10136,7 @@ const MANUAL_SECTIONS = [
 <li><b>퇴실일 = 주급일이면 한 건으로 지급</b> — 퇴실일(주말·공휴일 조정 후)이 정규 주급일과 같은 날이면, OT·자투리 정산분을 그날 주급과 합쳐 "💰 최종 정산 (근무 마감)" 카드 한 장으로 지급합니다. 카드 아래에 "n주차 주급 ○원 + 마감 정산(OT n시간) ○원" 내역이 나오고, 지출내용에는 "(n주차 주급_퇴실, OT n시간 포함)"으로 적힙니다. 예: 10/16 10:00 ~ 10/23 11:38 근무 → 예전에는 "1주차 주급 875,000원"과 "최종 정산 10,000원" 두 건이었지만, 이제는 "최종 정산 7일 885,000원" 한 건입니다. 명절할증은 이때도 별도 카드로 남습니다.</li>
 <li><b>주말·공휴일로 밀려 퇴실일과 겹친 주급은 따로 지급</b> — 11/16 카드부터는 원래 주급일(조정 전)이 퇴실일과 같을 때만 한 건으로 합칩니다. 원래 주급일이 주말·공휴일이라 퇴실일로 밀린 경우는 "n주차 주급"(원래 주급일 다음 영업일 지급)과 "최종 정산"(퇴실일 다음 영업일 지급) 두 장으로 나오고, 카드마다 "💳 실제 지급일"이 표시됩니다. 예: 11/14 16:00 ~ 11/23 12:00 → 1주차 주급 7일(11/14~11/21) 11/23 지급, 최종 정산 2일(11/21 16:00~11/23 12:00) 11/24 지급.</li>
 <li><b>근무일수 계산</b> — 24시간을 1일로 보고, 남는 시간이 10시간 이상이면 1일로, 10시간 미만이면 시간당 10,000원(OT)으로 계산합니다.</li>
-<li><b>주말·공휴일 조정</b> — 지급일이 토·일 또는 설정의 공휴일이면 다음 월요일로 옮겨지고, 카드에 "[주말·공휴일 조정]"과 원래 지급일이 표시됩니다.</li>
+<li><b>주말·공휴일 조정</b> — 11/21 마감·주급건부터는 토·일·공휴일이어도 그날(마감일·주급일) 대시보드에 카드가 올라오고, 지출결의서를 등록하면 지급일자가 금요일 건처럼 다음 영업일(보통 다음주 월요일)로 잡힙니다. 카드의 "💳 실제 지급일"에서 확인할 수 있어요. 11/20 이전 건은 예전처럼 다음 영업일로 옮겨져 "[주말·공휴일 조정]"과 원래 지급일이 표시됩니다.</li>
 <li><b>선지급 차감</b> — 간병인 상세에서 등록한 선지급은 이후 지급분에서 시간순으로 차감되고(남는 금액은 다음 지급일로 이월), 카드에 차감액이 표시됩니다.</li>
 <li><b>명절할증</b> — 설정에 등록한 명절기간에 근무했다면 할증분은 급여 카드와 분리된 별도 "🎉 명절할증" 카드로 표시됩니다.</li>
 </ul>
@@ -10545,7 +10545,7 @@ const QNA_ITEMS_RAW = [
   { cat:'dashboard', q:'특정 날짜의 환자·간병인 일정을 확인하려면?', a:'대시보드 하단 캘린더에서 ◀ / ▶ 버튼이나 날짜 선택창으로 원하는 날짜로 이동하면 그날 시작·종료되는 일정이 표시됩니다. "오늘" 버튼을 누르면 바로 오늘 날짜로 돌아옵니다.', keywords:['캘린더','일정조회','날짜이동','오늘버튼','시작종료'] },
   { cat:'dashboard', q:'미구인 알람 숫자는 어떻게 계산되나요?', a:'아직 간병인이 매칭되지 않은(구인 완료로 체크되지 않은) "모집중" 상태 환자 수가 미구인 알람으로 집계됩니다. 이 숫자가 늘어나면 단톡방 발송을 확인해달라는 리마인드 알림이 뜹니다.', keywords:['미구인알람','리마인드','모집중','알림','구인체크'] },
 
-  { cat:'dashboard', q:'급여 지급일은 어떻게 정해지나요?', a:'6일 이하 근무는 마감일에 "단기 급여"로 한 번에 지급하고, 7일 이상 근무는 시작일로부터 7일 뒤가 1주차 주급일이며 이후 매주 같은 요일에 "일급 × 7일"을 지급합니다. 근무가 끝나면 총 급여에서 이미 나간 주급을 뺀 나머지를 마감일에 "최종 정산"으로 지급해요(퇴실일이 주급일과 같으면 그날 주급과 합쳐 한 건). 지급일이 토·일·공휴일이면 다음 월요일로 옮겨지고 카드에 [주말·공휴일 조정]과 원래 지급일이 표시됩니다.', keywords:['주급','단기급여','최종정산','지급일','주말공휴일조정'] },
+  { cat:'dashboard', q:'급여 지급일은 어떻게 정해지나요?', a:'6일 이하 근무는 마감일에 "단기 급여"로 한 번에 지급하고, 7일 이상 근무는 시작일로부터 7일 뒤가 1주차 주급일이며 이후 매주 같은 요일에 "일급 × 7일"을 지급합니다. 근무가 끝나면 총 급여에서 이미 나간 주급을 뺀 나머지를 마감일에 "최종 정산"으로 지급해요(퇴실일이 주급일과 같으면 그날 주급과 합쳐 한 건). 11/21 마감·주급건부터는 토·일·공휴일이어도 그날 대시보드에 카드가 올라오고, 지출결의서 지급일자는 다음 영업일(금요일 건과 같이 보통 다음주 월요일)로 잡혀요. 11/20 이전 건은 다음 월요일로 옮겨져 [주말·공휴일 조정]이 표시됩니다.', keywords:['주급','단기급여','최종정산','지급일','주말공휴일조정'] },
   { cat:'dashboard', q:'총 간병비(근무일수)는 어떻게 계산되나요?', a:'시작~마감 시각을 24시간 단위로 1일씩 세고, 남는 시간이 10시간 이상이면 1일로, 10시간 미만이면 시간당 10,000원(OT)으로 계산합니다. 여기에 명절기간 근무분 할증이 더해져요.', keywords:['총간병비','근무일수','10시간','OT','계산규칙'] },
   { cat:'dashboard', q:'급여 카드의 "미지급 체크"는 뭔가요?', a:'그날 지급해야 했는데 아직 못 준 급여를 표시하는 기능이에요. 카드 오른쪽 위 "미지급 체크"를 누르면 빨간 "⚠️ 미지급" 배지로 바뀌고, 해제할 때까지 매일 오늘 날짜 캘린더 맨 위 "⚠️ 미지급 알림"에 원래 지급일과 함께 표시됩니다. 지급했으면 배지를 눌러 해제하세요.', keywords:['미지급체크','미지급알림','급여카드','해제','원래지급일'] },
   { cat:'dashboard', q:'급여 카드를 재무관리 지출결의서에 바로 올릴 수 있나요?', a:'네. 급여 카드마다 있는 "📤 지출결의서 등록"을 누르면 제목·지급금액·간병일수·예상매출액·수취인·계좌가 미리 채워진 확인창이 뜨고, "✓ 재무관리에 등록"을 누르면 재무관리 지출결의서에 대기 상태로 저장돼요. 그날 남은 건을 한 번에 올리려면 "💰 급여 지급" 위의 "📤 이 날짜 미등록 N건 지출결의서 전체 등록"을 누르세요.', keywords:['지출결의서','재무관리','전체등록','급여카드','대기상태'] },
@@ -12533,6 +12533,9 @@ function hrExpKeyCore(k) {
 function hrExpRegFor(k, amount) {
   k = String(k || '');
   if(_hrExpReg[k]) return _hrExpReg[k];
+  // (26_11_23_06) 11/21~ 주말·공휴일 카드: 다음 영업일 날짜 키로 이미 등록된 건도 같은 건 (금액이 다르면 다른 건)
+  var lk0 = hrPayLegacyKey(k), lr0 = lk0 ? _hrExpReg[lk0] : null;
+  if(lr0) { var la0 = Math.round(Number(amount) || 0), lra0 = Math.round(Number(lr0.amount) || 0); if(!(la0 > 0 && lra0 > 0 && la0 !== lra0)) return lr0; }
   var core = hrExpKeyCore(k), amt = Math.round(Number(amount) || 0), best = null;
   Object.keys(_hrExpReg).forEach(function(kk) {
     if(kk === k || hrExpKeyCore(kk) !== core) return;
@@ -12567,7 +12570,7 @@ function hrExpWorkEndsOn(cgId, start, payDate) {
   var ends = [];
   if(cg.startDate === start && cg.endDate) ends.push(cg.endDate);
   (Array.isArray(cg.assignHistory) ? cg.assignHistory : []).forEach(function(h){ if(h && h.startDate === start && h.endDate) ends.push(h.endDate); });
-  return ends.some(function(e){ var d = parseLocalDate(e); return !!d && toLocalDateStr(adjustPayDateToMonday(d)) === payDate; });
+  return ends.some(function(e){ var d = parseLocalDate(e); return !!d && toLocalDateStr(hrPayCardDate(d)) === payDate; });
 }
 var HR_EXP_FINAL_LIVE_LB = '최종 정산 (근무 마감)', HR_EXP_FINAL_HIST_LB = '최종 정산';
 function hrExpFinalCrossReg(k, amount) {
@@ -12578,7 +12581,7 @@ function hrExpFinalCrossReg(k, amount) {
   else return null;
   var cg = caregivers.find(function(c){ return String(c.id) === String(a.cgId); });
   if(!cg) return null;
-  var liveEndsOnDate = (function(){ var d = cg.endDate ? parseLocalDate(cg.endDate) : null; return !!d && toLocalDateStr(adjustPayDateToMonday(d)) === a.date; })();
+  var liveEndsOnDate = (function(){ var d = cg.endDate ? parseLocalDate(cg.endDate) : null; return !!d && toLocalDateStr(hrPayCardDate(d)) === a.date; })();
   var amt = Math.round(Number(amount) || 0), best = null;
   Object.keys(_hrExpReg).forEach(function(kk) {
     var b = hrExpParseKey(kk); if(!b || b.h !== wantH) return;
@@ -12968,7 +12971,7 @@ function calcFinalMergeInfo(cg, dateStr) {
   if(!cg || !cg.endDate || !cg.pay || cg.onsiteCancelDate) return null;
   const rawEnd = parseLocalDate(cg.endDate);
   if(!rawEnd) return null;
-  if(toLocalDateStr(adjustPayDateToMonday(rawEnd)) !== dateStr) return null;
+  if(toLocalDateStr(hrPayCardDate(rawEnd)) !== dateStr) return null;
   const entries = calcPayDates(cg);
   const weekEntry = entries.filter(p => p.week && p.date === dateStr).sort((a,b) => b.week - a.week)[0];
   if(!weekEntry) return null;
@@ -12984,7 +12987,7 @@ function calcFinalMergeInfo(cg, dateStr) {
   const sp = calHpSplit(settleAmount, hfLive.amount);
   if(sp.base <= 0) return null; // 명절할증분만 남은 경우는 합칠 기본급이 없음 (할증 카드는 따로 표시)
   return { week: weekEntry.week, settleAmount, totalOwed, alreadyPaid, base: sp.base, hp: sp.hp, hfLive,
-    wasAdjusted: toLocalDateStr(adjustPayDateToMonday(rawEnd)) !== cg.endDate };
+    wasAdjusted: toLocalDateStr(hrPayCardDate(rawEnd)) !== cg.endDate };
 }
 // 합쳐진 카드의 지출내용 (라이브 pt 또는 이력 h 기준)
 function buildMergedFinalMemo(cg, ptName, hospital, isReplace, week, amount) {
@@ -13018,7 +13021,7 @@ function histFinalSettle(h) {
 function calcHistFinalMergeInfo(h, dateStr) {
   if(!h || !h.endDate || !h.pay) return null;
   const rawEnd = parseLocalDate(h.endDate);
-  if(!rawEnd || toLocalDateStr(adjustPayDateToMonday(rawEnd)) !== dateStr) return null;
+  if(!rawEnd || toLocalDateStr(hrPayCardDate(rawEnd)) !== dateStr) return null;
   const v = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
   const weekEntry = calcPayDates(v).filter(function(p){ return p.week && p.date === dateStr; }).sort(function(a,b){ return b.week - a.week; })[0];
   if(!weekEntry) return null;
@@ -13289,7 +13292,8 @@ function hrUnpaidAutoSync() {
       if(!p || p.date !== d) return;
       if(!(Number(p.amount) > 0)) return;            // 차감 등으로 0원인 건은 지급할 게 없음
       if(p.hrSettled) return;                         // (26_11_02_02) HR에서 '정산 완료 처리'한 이력 카드는 이미 지급된 건
-      if(have[k] || skip[k] || isPaid(k, p.amount)) return;
+      var lk = hrPayLegacyKey(k); // (26_11_23_06) 옛 키(다음 영업일 날짜)로 체크·보류된 건도 같은 건
+      if(have[k] || skip[k] || (lk && (have[lk] || skip[lk])) || isPaid(k, p.amount)) return;
       have[k] = true;
       var bankStr = (p.bankRaw || p.account)
         ? ((p.bankRaw||'') + ' ' + (p.account||'') + (p.holder ? ' (' + p.holder + ')' : '')).trim() : '';
@@ -13328,7 +13332,7 @@ function payUnpaidKey(cgId, date, label) { return String(cgId) + '|' + date + '|
 
 function findUnpaidPay(cgId, date, label) {
   var key = payUnpaidKey(cgId, date, label);
-  return (cfg.unpaidPayments || []).find(function(u){ return u.key === key; }) || null;
+  return (cfg.unpaidPayments || []).find(function(u){ return hrPayKeyIs(u.key, key); }) || null; // (26_11_23_06) 옛 키도
 }
 
 // (26_10_30_02) keyOverride/ptNameOverride: "이력에서 복구됨" 카드용 — 재배정으로 라이브 값이 다른 근무건이
@@ -13336,7 +13340,7 @@ function findUnpaidPay(cgId, date, label) {
 function markPayUnpaid(cgId, date, label, amount, keyOverride, ptNameOverride) {
   if(!cfg.unpaidPayments) cfg.unpaidPayments = [];
   var key = keyOverride || payUnpaidKey(cgId, date, label);
-  if(cfg.unpaidPayments.some(function(u){ return u.key === key; })) return; // 이미 등록됨
+  if(cfg.unpaidPayments.some(function(u){ return hrPayKeyIs(u.key, key); })) return; // 이미 등록됨 (26_11_23_06 옛 키 포함)
   var cg = caregivers.find(function(c){ return String(c.id) === String(cgId); });
   if(!cg) { toast('간병인 정보를 찾을 수 없어요', true); return; }
   var pt = ptNameOverride ? null : resolveCalPt(cg);
@@ -13378,12 +13382,12 @@ function releasePayUnpaid(id) {
 // 해제 전까지 매일 대시보드 "⏸ 보류 알림"에 표시. 재무관리 지출결의서가 지급완료되면 자동 해제(hrUnpaidAutoSync).
 // 보류로 걸면 같은 건의 미지급 체크는 보류로 옮겨지고(중복 표시 방지), 보류 중엔 자동 미지급 체크·전체 등록 대상에서 빠짐.
 function findHeldPay(key) {
-  return hrUnpaidArr(cfg.heldPayments).find(function(u){ return u.key === key; }) || null;
+  return hrUnpaidArr(cfg.heldPayments).find(function(u){ return hrPayKeyIs(u.key, key); }) || null; // (26_11_23_06) 옛 키도
 }
 function markPayHold(cgId, date, label, amount, keyOverride, ptNameOverride) {
   cfg.heldPayments = hrUnpaidArr(cfg.heldPayments);
   var key = keyOverride || payUnpaidKey(cgId, date, label);
-  if(cfg.heldPayments.some(function(u){ return u.key === key; })) return;
+  if(cfg.heldPayments.some(function(u){ return hrPayKeyIs(u.key, key); })) return;
   var cg = caregivers.find(function(c){ return String(c.id) === String(cgId); });
   if(!cg) { toast('간병인 정보를 찾을 수 없어요', true); return; }
   var memo = prompt('보류 사유를 적어주세요 (예: 업체 확인 필요)\n비워둬도 보류는 걸려요', '');
@@ -13433,7 +13437,7 @@ function unpaidToggleHtml(cgId, date, label, amount, opt) {
 }
 function unpaidToggleHtmlBase(cgId, date, label, amount, opt) {
   var oKey = opt && opt.key ? String(opt.key) : '';
-  var u = oKey ? ((cfg.unpaidPayments || []).find(function(x){ return x.key === oKey; }) || null) : findUnpaidPay(cgId, date, label);
+  var u = oKey ? ((cfg.unpaidPayments || []).find(function(x){ return hrPayKeyIs(x.key, oKey); }) || null) : findUnpaidPay(cgId, date, label);
   // (26_11_17_01) 자동 미지급인데 지출결의서는 지급완료(라이브↔이력 키 달라도 같은 건)면 배지 안 띄움 — 다음 동기화 때 자동 해제됨
   if(u && u.auto && hrExpRegPaid(u.key || payUnpaidKey(cgId, date, label), u.amount)) u = null;
   if(u && u.auto && hrUnpaidNotDueYet(u.origDate || date)) u = null; // (26_11_18_01) 실제 지급일 전이면 자동 배지 안 띄움
@@ -13906,7 +13910,7 @@ function showCalDetail(dateStr, collectOnly) {
     if(!cg.endDate) return;
     var rawEndDate = parseLocalDate(cg.endDate);
     if(!rawEndDate) return;
-    var adjusted = adjustPayDateToMonday(rawEndDate);
+    var adjusted = hrPayCardDate(rawEndDate);
     var adjustedStr = toLocalDateStr(adjusted);
     if(adjustedStr !== dateStr) return;
     // (26_10_12_02) 예전엔 같은 날 정규 주급 카드가 있으면 최종정산을 통째로 건너뛰었는데,
@@ -14021,7 +14025,7 @@ function showCalDetail(dateStr, collectOnly) {
       if(settleAmount <= 0) return;
       const rawEndDate = parseLocalDate(h.endDate);
       if(!rawEndDate) return;
-      const adjusted = adjustPayDateToMonday(rawEndDate);
+      const adjusted = hrPayCardDate(rawEndDate);
       if(toLocalDateStr(adjusted) !== dateStr) return;
       // 라이브 cg.endDate가 이 이력의 endDate와 여전히 같으면(=재배정 등으로 아직 덮어써지지
       // 않았으면) 위의 "당일 근무가 마감되는 간병인" 블록에서 이미 정상적으로 계산·표시됐을
@@ -14812,7 +14816,7 @@ function calcPayDates(cg) {
     // 6일 이하 단기: 마감일 당일 지급 (주말/공휴일이면 다음주 월요일로 조정)
     const payDate = parseLocalDate(cg.endDate);
     if(!payDate) return [];
-    const adjusted = adjustPayDateToMonday(payDate);
+    const adjusted = hrPayCardDate(payDate);
     const wasAdjusted = toLocalDateStr(adjusted) !== toLocalDateStr(payDate);
     const shortTotal = calcTotalPayAmount(cg); // 명절할증 포함
     const hpShort = shortTotal ? holidayPremiumBlocks(cg) : [];
@@ -14835,7 +14839,7 @@ function calcPayDates(cg) {
     let week = 1;
     while(cur <= maxDate) {
       const dateStr = toLocalDateStr(cur);
-      const adjusted = adjustPayDateToMonday(cur);
+      const adjusted = hrPayCardDate(cur);
       const adjustedStr = toLocalDateStr(adjusted);
       const wasAdjusted = adjustedStr !== dateStr;
       // 이 주차에 해당하는 블록(시작일 기준 (week-1)*7 ~ week*7-1번째 날) 중 명절 할증 대상
@@ -15111,7 +15115,7 @@ function hpPayRefFor(entries, w, idx) {
   if(wk) return { label: wk.label, date: wk.date };
   if(w.endDate) {
     const ed = parseLocalDate(w.endDate);
-    return { label: '최종 정산', date: ed ? toLocalDateStr(adjustPayDateToMonday(ed)) : w.endDate };
+    return { label: '최종 정산', date: ed ? toLocalDateStr(hrPayCardDate(ed)) : w.endDate };
   }
   return { label: '진행중(마감 시 최종정산)', date: '' };
 }
@@ -15523,6 +15527,35 @@ function adjustPayDateToMonday(date) {
     guard++;
   }
   return d;
+}
+
+// (26_11_23_06) 2026-11-21 마감·주급건부터는 주말·공휴일이어도 대시보드 카드를 원래 날짜(마감일·주급일) 그대로 올림.
+// 실제 지급일은 지출결의서 등록 때 hrExpFinPayDate()가 "그 날짜 다음날 → 주말·공휴일이면 다음 영업일"로 정함
+// (예: 11/21(토)·11/22(일) 카드 → 11/23(월) 지급, 금요일 카드와 같음). 11/20 이전 건은 예전처럼 다음 영업일로 옮겨 표시.
+const HR_PAY_NOSHIFT_FROM = '2026-11-21';
+function hrPayCardDate(date) {
+  if(toLocalDateStr(date) >= HR_PAY_NOSHIFT_FROM) return new Date(date);
+  return adjustPayDateToMonday(date);
+}
+// (26_11_23_06) 바뀌기 전엔 11/21~ 주말·공휴일 카드가 다음 영업일 날짜 키(cgId|다음영업일|라벨)로 등록·보류·미지급 체크됐음.
+// 원래 날짜 키로 바뀐 카드도 그 옛 키 기록을 같은 건으로 찾게 옛 키를 돌려줌 (해당 없으면 '')
+function hrPayLegacyKey(k) {
+  k = String(k || '');
+  var parts = k.split('|'), i = (k.indexOf('H|') === 0) ? 2 : 1;
+  if(parts.length < i + 2) return '';
+  var ds = parts[i];
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(ds) || ds < HR_PAY_NOSHIFT_FROM) return '';
+  var d = parseLocalDate(ds); if(!d) return '';
+  var adj = toLocalDateStr(adjustPayDateToMonday(d));
+  if(adj === ds) return '';
+  parts[i] = adj;
+  return parts.join('|');
+}
+function hrPayKeyIs(stored, k) {
+  if(!stored) return false;
+  if(stored === k) return true;
+  var lk = hrPayLegacyKey(k);
+  return !!lk && stored === lk;
 }
 
 function nowTimeStr() {
@@ -18096,7 +18129,7 @@ async function verifyTodaysPayCaregivers() {
     let isSettleToday = false;
     if(cg.endDate) {
       const rawEnd = parseLocalDate(cg.endDate);
-      const adj = rawEnd ? adjustPayDateToMonday(rawEnd) : null;
+      const adj = rawEnd ? hrPayCardDate(rawEnd) : null;
       if(adj && toLocalDateStr(adj) === dateStr) isSettleToday = true;
     }
     if(isPayToday || isSettleToday) idsToCheck.add(String(cg.id));
