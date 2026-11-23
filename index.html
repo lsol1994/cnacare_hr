@@ -2601,7 +2601,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_23_03';
+const APP_BUILD = '26_11_23_04';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -18582,6 +18582,48 @@ function checkAutoEnd() {
     recalcDuration(cg, cg.endDate);
     cg.earlyEndPatientId = String(pt.id);
     saveToAssignHistory(cg);
+    markCgEdited(cg.id);
+    changed = true;
+  });
+
+  // ④ (26_11_23_04) 정합성 복구: 종료된 간병인의 라이브 배정값이 근무이력의 최신 근무건보다 옛날인 경우 이력 기준으로 복원.
+  // 동기화는 간병인 레코드를 "_ts가 더 최근인 쪽"으로 통째로 교체하는데, assignHistory만은 항상 양쪽을 합쳐 보존함.
+  // 그래서 재입실·재배정 전 상태를 들고 있던 기기가 그 간병인을 아무거나 수정·저장하면(예: 근무이력 1건 삭제)
+  // 라이브 배정(patientId/earlyEndPatientId/시작·마감일)만 옛 근무건으로 되돌아가고 이력은 멀쩡히 남음.
+  // → 환자 카드에서 옛 근무건(1차)이 "최근 매칭"처럼 보이고 재입실 건은 매칭 간병인이 안 뜸
+  //   (실제 사례: 이경화-김금자 10/7~10/12 → 재입실 10/13~10/21 종료 후, 라이브가 10/7~10/12로 되돌아감)
+  // 실제 근무하고 종료된 이력(시작=마감인 시작 전 취소 건 제외) 중 가장 늦게 시작한 건이 라이브보다
+  // 나중에 시작·나중에 마감됐으면, 라이브가 낡은 것이므로 그 근무건으로 맞춤 (보험 필드는 건드리지 않음)
+  caregivers.forEach(cg => {
+    if(cg.workStatus !== '종료' || !Array.isArray(cg.assignHistory) || !cg.assignHistory.length) return;
+    if(!cg.startDate || !cg.endDate) return; // 라이브 날짜가 비어있는 건 의도적으로 비운 상태(대기 풀 복귀 등) — 건드리지 않음
+    const tKey = (d, t) => (d || '') + ' ' + (t || '00:00');
+    let latest = null, latestPt = null;
+    cg.assignHistory.forEach(h => {
+      if(!h || !h.startDate || !h.endDate || h.status !== '종료') return;
+      if(h.startDate === h.endDate && (h.startTime || '') === (h.endTime || '')) return; // 시작 전 취소 건
+      const hp = patients.find(p => String(p.id) === String(h.patientId));
+      if(!hp || hp.status !== '종료') return; // 삭제된 환자·아직 진행 중인 환자 건은 기준으로 안 씀
+      if(!latest || tKey(h.startDate, h.startTime) > tKey(latest.startDate, latest.startTime)) { latest = h; latestPt = hp; }
+    });
+    if(!latest) return;
+    const liveStartKey = tKey(cg.startDate, cg.startTime);
+    const liveEndKey   = tKey(cg.endDate, cg.endTime);
+    if(!(tKey(latest.startDate, latest.startTime) > liveStartKey)) return;             // 라이브가 최신이거나 같음
+    if(cg.endDate && tKey(latest.endDate, latest.endTime) < liveEndKey) return;        // 라이브가 더 늦게 끝남 → 판단 보류
+    console.warn('[정합성④] 간병인 라이브 배정 복원:', cg.name,
+      `${cg.startDate||''} ${cg.startTime||''}~${cg.endDate||''} ${cg.endTime||''}`, '→',
+      `${latestPt.name} ${latest.startDate} ${latest.startTime||''}~${latest.endDate} ${latest.endTime||''}`);
+    cg.startDate = latest.startDate;
+    cg.startTime = latest.startTime || '';
+    cg.endTime   = latest.endTime   || '';
+    recalcDuration(cg, latest.endDate); // endDate·duration 같이 갱신
+    if(latest.pay) cg.pay = latest.pay;
+    if(latestPt.hospital) cg.hospital = latestPt.hospital;
+    cg.patientId = '';                            // 종료 상태의 정상 값 (매칭 해제)
+    cg.earlyEndPatientId = String(latestPt.id);   // 종료보고/종료취소/환자 카드 연결용 "마지막 담당 환자"
+    delete cg.earlyEndSnapshot;                   // 옛 근무건 기준 스냅샷 — 종료취소 시 옛 건으로 되돌아가는 것 방지
+    delete cg._snapshot;
     markCgEdited(cg.id);
     changed = true;
   });
