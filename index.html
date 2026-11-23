@@ -2601,7 +2601,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_23_01';
+const APP_BUILD = '26_11_23_02';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -10281,7 +10281,7 @@ const MANUAL_SECTIONS = [
 <img class="manual-img" src="${MANUAL_IMG.img26}" alt="출퇴근 체크">
 <div class="manual-sub-title">배상보험 현황</div>
 <p class="manual-p">전체 / 가입전 / 가입 / 만료 상태로 필터링해서 배상보험 가입 현황을 관리합니다. 가입전인 간병인은 근무 시작일이 되면 가입 알림이, 가입된 간병인은 서비스 마감일이 다가오면(설정의 사전 알림 일수) 해지 신고 알림이 뜹니다 — 보험 해지는 <b>서비스 마감일 +1일</b>로 신고하세요. 만료 이력은 연도·월로 검색할 수 있습니다.</p>
-<p class="manual-p"><b>⚠ 미가입(누락) / 🚫 취소(가입불필요)</b> 탭은 근무건(간병인 × 환자) 단위로 보험 가입 여부를 나눠 보여줍니다. <b>시작 전 취소·도착 후 취소</b>처럼 근무 없이 끝난 건(시작=마감)은 가입 대상이 아니므로 취소 탭에만 모이고, <b>실제로 근무했는데 보험 기록이 없는 건</b>만 미가입(누락)에 나옵니다(과거 전체 대상). [가입 처리]를 누르면 그 근무건 정보로 보험 입력창이 미리 채워지고, 가입 대상이 아니었던 건은 [✔ 확인완료](여러 건 선택 가능)로 목록에서 뺄 수 있습니다(아래 확인완료 목록에서 되돌리기). 근무가 마감됐는데 마지막 근무건 보험이 해지되지 않은 간병인은 <b>🛡 미해지(누락)</b> 탭에 모이고, 해지 신고 후 [해지완료]를 누르면 해지일(마감 다음 날)이 기록됩니다. 현재 환자와 근무 중인데 보험 기록이 없는 간병인은 '가입' 탭 맨 위에 <b>⚠ 미가입(누락)</b>으로 표시되고, 2026-10-28 이후까지 이어진 누락 건은 배상보험 알림 팝업으로도 안내됩니다.</p>
+<p class="manual-p"><b>⚠ 미가입(누락) / 🚫 취소(가입불필요)</b> 탭은 근무건(간병인 × 환자) 단위로 보험 가입 여부를 나눠 보여줍니다. <b>시작 전 취소·도착 후 취소</b>처럼 근무 없이 끝난 건(시작=마감)은 가입 대상이 아니므로 취소 탭에만 모이고, <b>실제로 근무했는데 보험 기록이 없는 건</b>만 미가입(누락)에 나옵니다(과거 전체 대상). [가입 처리]를 누르면 그 근무건 정보로 보험 입력창이 미리 채워지고, 가입 대상이 아니었던 건은 [✔ 확인완료](여러 건 선택 가능)로 목록에서 뺄 수 있습니다(아래 확인완료 목록에서 되돌리기). 근무가 마감됐는데 마지막 근무건 보험이 해지되지 않은 간병인은 <b>🛡 미해지(누락)</b> 탭에 모이고, 해지 신고 후 실 해지일(기본값: 마감 다음 날, 늦게 해지했으면 실제 날짜로 수정)을 확인하고 [해지완료]를 누르면 그 날짜로 기록됩니다. 현재 환자와 근무 중인데 보험 기록이 없는 간병인은 '가입' 탭 맨 위에 <b>⚠ 미가입(누락)</b>으로 표시되고, 2026-10-28 이후까지 이어진 누락 건은 배상보험 알림 팝업으로도 안내됩니다.</p>
 <ul>
 <li><b>근무가 끝난 간병인</b> — 담당 환자가 없는 간병인은 마지막 보험 건이 현재 줄에 "— 마지막 근무건: 환자명"과 함께 표시되고 상태(만료처리 완료 / D-n / 가입중(미해지))가 나옵니다. 예전처럼 실제로는 가입했다 만료된 건이 "미가입·가입전"으로 보이지 않습니다.</li>
 <li><b>과거 이력 자동 정리</b> — 끝난 근무건의 보험 이력에 만료일이 비어 있으면 "서비스 마감일 + 1일"로 자동 채워지고, 만료일이 지난 건은 "만료처리 완료"로 바뀝니다. 가입일이 있는데 미가입으로 남은 건은 가입으로 고쳐집니다. 보험사 등록내역으로 맞춘 건, 다음 근무건으로 이어진 건(연속 재배정), 아직 해지 전인 직전 근무건은 건드리지 않습니다.</li>
@@ -16796,7 +16796,7 @@ function renderInsUnterm(el) {
   const today = todayStr();
   const head = `<div style="font-size:12px;color:var(--gray);line-height:1.7;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm);margin-bottom:8px">
       근무가 <b>마감</b>돼서 담당 환자가 없는데, 마지막 근무건 배상보험이 <b>해지되지 않은</b> 간병인이에요.<br>
-      보험사에 해지 신고를 하고 <b>[해지완료]</b>를 누르면 해지일(서비스 마감 다음 날)이 기록되고 목록에서 빠져요. 바로 다른 환자에 재배정할 예정이면 재배정하면 보험이 자동으로 이어져요.
+      보험사에 해지 신고를 하고 <b>[해지완료]</b>를 누르면 <b>실 해지일</b>이 기록되고 목록에서 빠져요. 실 해지일은 서비스 마감 다음 날로 미리 채워지고, 늦게 해지했으면 실제 해지한 날짜로 바꾼 뒤 누르세요. 바로 다른 환자에 재배정할 예정이면 재배정하면 보험이 자동으로 이어져요.
     </div>`;
   const rows = list.length ? list.map(e => {
     const c = e.cg, h = e.src;
@@ -16811,6 +16811,8 @@ function renderInsUnterm(el) {
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <span class="badge" style="font-size:10px;background:${bCol}22;color:${bCol};border:1px solid ${bCol}44">${bTxt}</span>
+        <label style="font-size:11px;color:var(--gray);display:flex;align-items:center;gap:4px">실 해지일
+          <input type="date" id="ins-unterm-date-${c.id}" value="${e.termDate || ''}" style="font-size:12px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--black)"></label>
         <button class="btn btn-sm btn-teal" style="font-size:11px" onclick="insTerminateUnterm('${c.id}')">해지완료</button>
       </div>
     </div>`;
@@ -16820,8 +16822,12 @@ function renderInsUnterm(el) {
 function insTerminateUnterm(cgId) {
   const e = insUntermScan().find(x => String(x.cg.id) === String(cgId));
   if(!e) { renderInsurance(); return; }
-  if(!confirm(`${e.cg.name} — ${e.src.patientName || '직전 근무건'} 건 배상보험을 해지완료 처리할까요?\n보험사 해지 신고를 마친 뒤 눌러주세요.\n\n해지일: ${e.termDate || '(마감일 없음 — 해지일은 비워둠)'}`)) return;
-  e.hs.forEach(h => { h.terminated = true; if(!h.expiry && e.termDate) h.expiry = e.termDate; });
+  // (26_11_23_02) 실 해지일 직접 입력 — 늦게 해지한 경우 실제 해지일로 기록 (기본값 = 서비스 마감 다음 날)
+  const inp = document.getElementById('ins-unterm-date-' + e.cg.id);
+  const td = (inp && inp.value) ? inp.value : e.termDate;
+  if(td && e.endD && td < e.endD) { toast('❌ 해지일이 서비스 마감일(' + e.endD + ')보다 빨라요', true); return; }
+  if(!confirm(`${e.cg.name} — ${e.src.patientName || '직전 근무건'} 건 배상보험을 해지완료 처리할까요?\n보험사 해지 신고를 마친 뒤 눌러주세요.\n\n실 해지일: ${td || '(입력 없음 — 해지일은 비워둠)'}${td && e.termDate && td !== e.termDate ? '\n(서비스 마감 다음 날 ' + e.termDate + '과 달라요)' : ''}`)) return;
+  e.hs.forEach(h => { h.terminated = true; if(td) h.expiry = td; }); // 같은 근무건 미해지 기록 전부 같은 해지일로
   markCgEdited(e.cg.id); // Firebase 덮어쓰기 방지
   save(); renderInsurance();
   toast(`✅ ${e.cg.name} 보험 해지완료 처리했어요`);
