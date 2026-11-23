@@ -1152,6 +1152,7 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
           <button id="ins-flt-active"  class="btn btn-sm btn-teal" onclick="setInsFlt('active')"  style="font-size:11px">가입</button>
           <button id="ins-flt-expired" class="btn btn-sm" onclick="setInsFlt('expired')" style="font-size:11px">만료</button>
           <button id="ins-flt-gap"     class="btn btn-sm" onclick="setInsFlt('gap')"     style="font-size:11px" title="실제로 근무했는데 배상보험 가입 기록이 없는 근무건 (시작 전 취소·도착 후 취소는 제외)">⚠ 미가입(누락)</button>
+          <button id="ins-flt-unterm"  class="btn btn-sm" onclick="setInsFlt('unterm')"  style="font-size:11px" title="근무가 마감됐는데(담당 환자 없음) 마지막 근무건 배상보험이 아직 해지되지 않은 간병인">🛡 미해지(누락)</button>
           <button id="ins-flt-cancel"  class="btn btn-sm" onclick="setInsFlt('cancel')"  style="font-size:11px" title="시작 전 취소 · 도착 후 취소 — 근무가 없어 보험 가입이 필요 없는 건">🚫 취소(가입불필요)</button>
           <button id="ins-flt-roster"  class="btn btn-sm" onclick="setInsFlt('roster')"  style="font-size:11px" title="보험사 전문인내역 업로드 · 간병인/매칭환자 자동 연결 · 확인 필요 건 수정">📄 보험사 등록내역</button>
           <input type="file" id="ins-roster-file" accept=".xls,.xlsx,.htm,.html,.csv" style="display:none" onchange="onInsRosterFile(this)">
@@ -2600,7 +2601,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_20_03';
+const APP_BUILD = '26_11_23_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -10280,7 +10281,7 @@ const MANUAL_SECTIONS = [
 <img class="manual-img" src="${MANUAL_IMG.img26}" alt="출퇴근 체크">
 <div class="manual-sub-title">배상보험 현황</div>
 <p class="manual-p">전체 / 가입전 / 가입 / 만료 상태로 필터링해서 배상보험 가입 현황을 관리합니다. 가입전인 간병인은 근무 시작일이 되면 가입 알림이, 가입된 간병인은 서비스 마감일이 다가오면(설정의 사전 알림 일수) 해지 신고 알림이 뜹니다 — 보험 해지는 <b>서비스 마감일 +1일</b>로 신고하세요. 만료 이력은 연도·월로 검색할 수 있습니다.</p>
-<p class="manual-p"><b>⚠ 미가입(누락) / 🚫 취소(가입불필요)</b> 탭은 근무건(간병인 × 환자) 단위로 보험 가입 여부를 나눠 보여줍니다. <b>시작 전 취소·도착 후 취소</b>처럼 근무 없이 끝난 건(시작=마감)은 가입 대상이 아니므로 취소 탭에만 모이고, <b>실제로 근무했는데 보험 기록이 없는 건</b>만 미가입(누락)에 나옵니다(과거 전체 대상). [가입 처리]를 누르면 그 근무건 정보로 보험 입력창이 미리 채워지고, 가입 대상이 아니었던 건은 [✔ 확인완료](여러 건 선택 가능)로 목록에서 뺄 수 있습니다(아래 확인완료 목록에서 되돌리기). 현재 환자와 근무 중인데 보험 기록이 없는 간병인은 '가입' 탭 맨 위에 <b>⚠ 미가입(누락)</b>으로 표시되고, 2026-10-28 이후까지 이어진 누락 건은 배상보험 알림 팝업으로도 안내됩니다.</p>
+<p class="manual-p"><b>⚠ 미가입(누락) / 🚫 취소(가입불필요)</b> 탭은 근무건(간병인 × 환자) 단위로 보험 가입 여부를 나눠 보여줍니다. <b>시작 전 취소·도착 후 취소</b>처럼 근무 없이 끝난 건(시작=마감)은 가입 대상이 아니므로 취소 탭에만 모이고, <b>실제로 근무했는데 보험 기록이 없는 건</b>만 미가입(누락)에 나옵니다(과거 전체 대상). [가입 처리]를 누르면 그 근무건 정보로 보험 입력창이 미리 채워지고, 가입 대상이 아니었던 건은 [✔ 확인완료](여러 건 선택 가능)로 목록에서 뺄 수 있습니다(아래 확인완료 목록에서 되돌리기). 근무가 마감됐는데 마지막 근무건 보험이 해지되지 않은 간병인은 <b>🛡 미해지(누락)</b> 탭에 모이고, 해지 신고 후 [해지완료]를 누르면 해지일(마감 다음 날)이 기록됩니다. 현재 환자와 근무 중인데 보험 기록이 없는 간병인은 '가입' 탭 맨 위에 <b>⚠ 미가입(누락)</b>으로 표시되고, 2026-10-28 이후까지 이어진 누락 건은 배상보험 알림 팝업으로도 안내됩니다.</p>
 <ul>
 <li><b>근무가 끝난 간병인</b> — 담당 환자가 없는 간병인은 마지막 보험 건이 현재 줄에 "— 마지막 근무건: 환자명"과 함께 표시되고 상태(만료처리 완료 / D-n / 가입중(미해지))가 나옵니다. 예전처럼 실제로는 가입했다 만료된 건이 "미가입·가입전"으로 보이지 않습니다.</li>
 <li><b>과거 이력 자동 정리</b> — 끝난 근무건의 보험 이력에 만료일이 비어 있으면 "서비스 마감일 + 1일"로 자동 채워지고, 만료일이 지난 건은 "만료처리 완료"로 바뀝니다. 가입일이 있는데 미가입으로 남은 건은 가입으로 고쳐집니다. 보험사 등록내역으로 맞춘 건, 다음 근무건으로 이어진 건(연속 재배정), 아직 해지 전인 직전 근무건은 건드리지 않습니다.</li>
@@ -15930,7 +15931,7 @@ function checkOut(cgId) {
 
 
 // ─── 배상보험 ───
-let insFlt = 'default'; // default=가입전+가입, all, none, active, expired, gap(미가입 누락), cancel(취소·가입불필요), roster
+let insFlt = 'default'; // default=가입전+가입, all, none, active, expired, gap(미가입 누락), unterm(미해지 누락), cancel(취소·가입불필요), roster
 
 // 배상보험현황에는 대기중/근무중/종료 간병인만 대상으로 함.
 // 예비(한번도 매칭된 적 없음) 간병인은 보험 관리 대상이 아니므로 어떤 탭/검색에서도 노출되지 않아야 함.
@@ -15940,7 +15941,7 @@ function isInsEligible(c) {
 
 function setInsFlt(flt) {
   insFlt = flt;
-  ['all','none','active','expired','gap','cancel','roster'].forEach(t=>{
+  ['all','none','active','expired','gap','unterm','cancel','roster'].forEach(t=>{
     const btn = document.getElementById('ins-flt-'+t);
     if(!btn) return;
     const isOn = flt===t || (flt==='default' && (t==='none'||t==='active'));
@@ -16323,6 +16324,7 @@ function renderInsurance() {
   const gscan = insGapScan();
   refreshInsGapTabLabels(gscan);
   if(insFlt === 'gap')    { renderInsGap(el, gscan); return; }
+  if(insFlt === 'unterm') { renderInsUnterm(el); return; }
   if(insFlt === 'cancel') { renderInsCancel(el, gscan); return; }
 
   // 보험사 등록내역(전문인내역 업로드 · 확인 필요 · 매칭 완료) 보기
@@ -16682,6 +16684,8 @@ function insPeriodTxt(p) {
 function refreshInsGapTabLabels(scan) {
   const g = document.getElementById('ins-flt-gap');
   if(g) g.innerHTML = '⚠ 미가입(누락)' + (scan.gaps.length ? ` <span style="background:#dc2626;color:#fff;border-radius:9px;padding:0 6px;font-size:10px;margin-left:2px">${scan.gaps.length}</span>` : '');
+  const u = document.getElementById('ins-flt-unterm');
+  if(u) { const n = insUntermScan().length; u.innerHTML = '🛡 미해지(누락)' + (n ? ` <span style="background:#d97706;color:#fff;border-radius:9px;padding:0 6px;font-size:10px;margin-left:2px">${n}</span>` : ''); }
   const c = document.getElementById('ins-flt-cancel');
   if(c) c.innerHTML = '🚫 취소(가입불필요)' + (scan.cancels.length ? ` <span style="font-size:10px;opacity:.75;margin-left:2px">${scan.cancels.length}</span>` : '');
 }
@@ -16764,6 +16768,63 @@ function renderInsCancel(el, scan) {
     </div>`;
   }).join('') : `<div class="empty" style="padding:1rem 0"><p style="font-size:12px">취소된 근무건이 없어요</p></div>`;
   el.innerHTML = head + rows;
+}
+
+// ── 미해지(누락) 탭 (26_11_23_01) ──
+// 근무가 마감돼서 담당 환자가 없는데, 마지막 근무건 배상보험이 해지되지 않고 남아 있는 간병인 목록.
+// 판정은 현황 줄의 '🛡 보험 미해지'(insFindCarrySource)와 같고, 연속 재배정용 14일 제한만 빼서 오래 방치된 건도 잡음.
+// 같은 근무건에 해지 안 된 기록이 여러 줄이면 [해지완료] 때 한꺼번에 정리함.
+function insUntermScan() {
+  const out = [];
+  caregivers.filter(isInsEligible).forEach(c => {
+    if(c.patientId) return; // 담당 환자가 있으면 근무 중(또는 재배정 대기) → 대상 아님
+    const last = (c.assignHistory||[]).slice().sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''))[0];
+    if(!last) return;
+    const hs = (c.insuranceHistory||[]).filter(h =>
+      String(h.patientId||'') === String(last.patientId) && insEntryOpen(h) && !h.continued);
+    if(!hs.length) return;
+    hs.sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''));
+    const src = hs[0];
+    const endD = src.coverTo || last.endDate || '';
+    out.push({ cg: c, last, hs, src, endD, termDate: endD ? insAddDays(endD, 1) : '' });
+  });
+  out.sort((a,b) => (a.endD||'').localeCompare(b.endD||'') || String(a.cg.name).localeCompare(String(b.cg.name)));
+  return out;
+}
+function renderInsUnterm(el) {
+  const list = insUntermScan();
+  const today = todayStr();
+  const head = `<div style="font-size:12px;color:var(--gray);line-height:1.7;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm);margin-bottom:8px">
+      근무가 <b>마감</b>돼서 담당 환자가 없는데, 마지막 근무건 배상보험이 <b>해지되지 않은</b> 간병인이에요.<br>
+      보험사에 해지 신고를 하고 <b>[해지완료]</b>를 누르면 해지일(서비스 마감 다음 날)이 기록되고 목록에서 빠져요. 바로 다른 환자에 재배정할 예정이면 재배정하면 보험이 자동으로 이어져요.
+    </div>`;
+  const rows = list.length ? list.map(e => {
+    const c = e.cg, h = e.src;
+    const over = e.termDate && e.termDate < today, due = e.termDate && e.termDate === today;
+    const bTxt = !e.termDate ? '마감일 없음' : over ? `해지 신고일 지남 (${e.termDate})` : due ? `오늘 해지 신고 (${e.termDate})` : `해지 신고 예정 (${e.termDate})`;
+    const bCol = over ? '#dc2626' : '#b45309';
+    return `<div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:1;min-width:160px">
+        <div style="font-size:13px;font-weight:700">${insEsc(c.name)} <span style="font-weight:400;color:var(--gray);font-size:11px">— 마지막 근무건: ${insEsc(h.patientName || e.last.patientName || '(환자 정보 없음)')}</span></div>
+        <div style="font-size:11px;color:var(--gray);margin-top:2px">보험 가입 ${h.startDate || '?'} · 서비스 마감 ${e.endD || '?'}${e.hs.length > 1 ? ` · 미해지 기록 ${e.hs.length}줄` : ''}</div>
+        ${h.memo ? `<div style="font-size:11px;color:var(--teal);margin-top:2px;font-family:var(--mono)">🔖 ${insEsc(h.memo)}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span class="badge" style="font-size:10px;background:${bCol}22;color:${bCol};border:1px solid ${bCol}44">${bTxt}</span>
+        <button class="btn btn-sm btn-teal" style="font-size:11px" onclick="insTerminateUnterm('${c.id}')">해지완료</button>
+      </div>
+    </div>`;
+  }).join('') : `<div class="empty" style="padding:1rem 0"><p style="font-size:12px">마감됐는데 보험이 남아 있는 간병인이 없어요 👍</p></div>`;
+  el.innerHTML = head + rows;
+}
+function insTerminateUnterm(cgId) {
+  const e = insUntermScan().find(x => String(x.cg.id) === String(cgId));
+  if(!e) { renderInsurance(); return; }
+  if(!confirm(`${e.cg.name} — ${e.src.patientName || '직전 근무건'} 건 배상보험을 해지완료 처리할까요?\n보험사 해지 신고를 마친 뒤 눌러주세요.\n\n해지일: ${e.termDate || '(마감일 없음 — 해지일은 비워둠)'}`)) return;
+  e.hs.forEach(h => { h.terminated = true; if(!h.expiry && e.termDate) h.expiry = e.termDate; });
+  markCgEdited(e.cg.id); // Firebase 덮어쓰기 방지
+  save(); renderInsurance();
+  toast(`✅ ${e.cg.name} 보험 해지완료 처리했어요`);
 }
 
 function toggleInsGapSel(keyArg, on) {
