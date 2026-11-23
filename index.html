@@ -2601,7 +2601,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_23_02';
+const APP_BUILD = '26_11_23_03';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -16640,6 +16640,13 @@ function insGapScan() {
       const e = { key, cg, p, pt, ptName: pi.name, hospital: pi.hospital, covered };
       if(insPeriodIsCancel(p)) {
         e.type = 'cancel'; e.kind = insCancelKind(cg, p, pt);
+        if(covered) {
+          // (26_11_23_03) 시작 전 취소 후 다른 환자와 매칭돼 실제로 근무한 경우 → 보험이 그 근무로 이어진 것이라 해지 확인 불필요(자동 확인완료)
+          const nx = periods.find(q => q !== p && !insPeriodIsCancel(q) && q.startDate >= p.startDate && q.startDate <= today
+                                     && !(q.live && cg.workStatus === '대기중'));
+          if(nx) e.carried = { p: nx, ptName: insPeriodPatient(cg, nx).name };
+          e.done = insGetGapDone(key); // 수동 [확인완료]
+        }
         cancels.push(e); byKey.set(key, e); return;
       }
       if(covered) { e.type = 'ok'; byKey.set(key, e); return; }
@@ -16749,7 +16756,7 @@ function renderInsCancel(el, scan) {
   const nPre = list.filter(e => e.kind !== 'onsite').length, nOn = list.length - nPre;
   const head = `<div style="font-size:12px;color:var(--gray);line-height:1.7;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm);margin-bottom:8px">
       근무 없이 끝난 건(시작=마감)이라 배상보험 가입 대상이 아니에요. 미가입(누락)·가입전에는 나오지 않아요.<br>
-      <b>보험 가입 기록 있음</b>으로 표시된 건은 이미 가입 신고를 했던 건이니 보험사 해지 여부를 확인하세요.
+      <b>보험 가입 기록 있음</b>으로 표시된 건은 이미 가입 신고를 했던 건이니 보험사 해지 여부를 확인하고 <b>[✔ 확인완료]</b>를 누르세요. 취소 후 다른 환자와 매칭돼 근무한 간병인은 보험이 그대로 이어진 것이라 자동으로 확인완료돼요.
     </div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
       ${insMonthSelectHtml(scan.cancels, insCancelMonth, 'setInsCancelMonth')}
@@ -16762,8 +16769,15 @@ function renderInsCancel(el, scan) {
       <div style="flex:1;min-width:160px">
         <div style="font-size:13px;font-weight:700">${insEsc(e.cg.name)} <span style="font-weight:400;color:var(--gray);font-size:11px">— ${insEsc(e.ptName || '(환자 정보 없음)')}${e.hospital ? ' · ' + insEsc(e.hospital) : ''}</span></div>
         <div style="font-size:11px;color:var(--gray);margin-top:2px">취소일시 ${e.p.startDate}${e.p.startTime ? ' ' + e.p.startTime : ''}${on ? ' · 간병인 15,000원 지급 대상' : ' · 근무·급여 없음'}</div>
-        ${e.covered ? `<div style="font-size:11px;color:var(--amber);margin-top:2px">🛡 보험 가입 기록 있음 — 보험사 해지(또는 가입 취소) 여부를 확인하세요</div>` : ''}
+        ${!e.covered ? '' : e.done
+          ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">✔ 해지 여부 확인완료 ${insEsc(e.done.at || '')}${e.done.memo ? ' · ' + insEsc(e.done.memo) : ''}</div>`
+          : e.carried
+          ? `<div style="font-size:11px;color:var(--teal);margin-top:2px">✔ 확인완료 — 이후 ${insEsc(e.carried.ptName || '다른 환자')} 건(${e.carried.p.startDate}~) 근무로 보험 이어짐 · 해지 불필요</div>`
+          : `<div style="font-size:11px;color:var(--amber);margin-top:2px">🛡 보험 가입 기록 있음 — 보험사 해지(또는 가입 취소) 여부를 확인하세요</div>`}
       </div>
+      ${e.covered && !e.carried ? (e.done
+        ? `<button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="undoInsCancelDone('${insGapArg(e.key)}')">되돌리기</button>`
+        : `<button class="btn btn-sm" style="font-size:11px" onclick="markInsCancelDone('${insGapArg(e.key)}')">✔ 확인완료</button>`) : ''}
       <span class="badge" style="font-size:10px;background:${on ? '#d9770622' : 'var(--surface2)'};color:${on ? '#b45309' : 'var(--gray)'};border:1px solid ${on ? '#d9770644' : 'var(--border)'}">🚫 ${insCancelLabel(e.kind)} · 가입 불필요</span>
     </div>`;
   }).join('') : `<div class="empty" style="padding:1rem 0"><p style="font-size:12px">취소된 근무건이 없어요</p></div>`;
@@ -16880,6 +16894,25 @@ function undoInsGapDone(keyArg) {
   markCfgEdited(); save(); renderInsurance();
   toast('미가입(누락)으로 되돌렸어요');
 }
+// (26_11_23_03) 취소 탭 — 보험 가입 기록 있는 취소건의 해지 여부 확인완료 / 되돌리기 (cfg.insGapDone에 같이 저장)
+function markInsCancelDone(keyArg) {
+  const k = decodeURIComponent(keyArg);
+  const e = insGapScan().cancels.find(x => x.key === k);
+  if(!e) { renderInsurance(); return; }
+  const memo = prompt(`${e.cg.name} — ${e.ptName || '환자'} (${insCancelLabel(e.kind)} ${e.p.startDate})\n\n보험사 해지 여부를 확인했으면 확인완료 처리할까요? '해지 여부 확인하세요' 안내가 사라지고, 되돌리기로 다시 띄울 수 있어요.\n\n메모 (선택):`, '해지 확인');
+  if(memo === null) return;
+  insSetGapDone([e], memo);
+  toast('✔ 확인완료 처리했어요');
+}
+function undoInsCancelDone(keyArg) {
+  const k = decodeURIComponent(keyArg);
+  const d = insGetGapDone(k);
+  if(!d) return;
+  if(!confirm(`${d.cg || ''} — ${d.pt || ''} (${d.s || ''})\n확인완료를 되돌려서 다시 '해지 여부 확인' 안내를 띄울까요?`)) return;
+  cfg.insGapDone[k] = { del: true, _t: Date.now() };
+  markCfgEdited(); save(); renderInsurance();
+  toast('되돌렸어요');
+}
 // [가입 처리] — 현재 근무건이면 보험 칸 수정, 지난 근무건이면 그 근무건으로 미리 채운 과거 이력 추가
 function insGapJoin(keyArg) {
   const k = decodeURIComponent(keyArg);
@@ -16914,7 +16947,7 @@ function downloadInsGapXLSX() {
   ]);
   scan.gaps.forEach(e => push('미가입(누락)', e, e.ongoing ? '근무중' : '근무 종료'));
   scan.done.forEach(e => push('미가입(확인완료)', e, e.ongoing ? '근무중' : '근무 종료'));
-  scan.cancels.forEach(e => push(insCancelLabel(e.kind), e, '가입 불필요'));
+  scan.cancels.forEach(e => push(insCancelLabel(e.kind), e, !e.covered ? '가입 불필요' : e.done ? '해지 확인완료' : e.carried ? '이후 근무로 보험 이어짐' : '해지 여부 확인 필요'));
   if(aoa.length === 1) { toast('내보낼 내역이 없어요', true); return; }
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols'] = [{wch:15},{wch:10},{wch:10},{wch:18},{wch:16},{wch:16},{wch:8},{wch:10},{wch:8},{wch:30}];
