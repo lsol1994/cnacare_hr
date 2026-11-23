@@ -2601,7 +2601,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_23_04';
+const APP_BUILD = '26_11_23_05';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -10134,6 +10134,7 @@ const MANUAL_SECTIONS = [
 <li><b>주급(7일 이상 근무)</b> — 시작일로부터 7일 뒤가 1주차 주급일이고, 이후 매주 같은 요일에 "일급 × 7일"을 지급합니다. 예: 6/8(월) 시작 → 6/15 1주차, 6/22 2주차…</li>
 <li><b>최종 정산(근무 마감)</b> — 근무가 끝나면 총 급여에서 이미 지급한 주급을 뺀 나머지를 마감일에 지급합니다. 마지막 주급일이 마감일과 딱 맞고 남는 금액이 없으면 그 주급 카드에 "(근무 마감)"으로 표시됩니다.</li>
 <li><b>퇴실일 = 주급일이면 한 건으로 지급</b> — 퇴실일(주말·공휴일 조정 후)이 정규 주급일과 같은 날이면, OT·자투리 정산분을 그날 주급과 합쳐 "💰 최종 정산 (근무 마감)" 카드 한 장으로 지급합니다. 카드 아래에 "n주차 주급 ○원 + 마감 정산(OT n시간) ○원" 내역이 나오고, 지출내용에는 "(n주차 주급_퇴실, OT n시간 포함)"으로 적힙니다. 예: 10/16 10:00 ~ 10/23 11:38 근무 → 예전에는 "1주차 주급 875,000원"과 "최종 정산 10,000원" 두 건이었지만, 이제는 "최종 정산 7일 885,000원" 한 건입니다. 명절할증은 이때도 별도 카드로 남습니다.</li>
+<li><b>주말·공휴일로 밀려 퇴실일과 겹친 주급은 따로 지급</b> — 11/16 카드부터는 원래 주급일(조정 전)이 퇴실일과 같을 때만 한 건으로 합칩니다. 원래 주급일이 주말·공휴일이라 퇴실일로 밀린 경우는 "n주차 주급"(원래 주급일 다음 영업일 지급)과 "최종 정산"(퇴실일 다음 영업일 지급) 두 장으로 나오고, 카드마다 "💳 실제 지급일"이 표시됩니다. 예: 11/14 16:00 ~ 11/23 12:00 → 1주차 주급 7일(11/14~11/21) 11/23 지급, 최종 정산 2일(11/21 16:00~11/23 12:00) 11/24 지급.</li>
 <li><b>근무일수 계산</b> — 24시간을 1일로 보고, 남는 시간이 10시간 이상이면 1일로, 10시간 미만이면 시간당 10,000원(OT)으로 계산합니다.</li>
 <li><b>주말·공휴일 조정</b> — 지급일이 토·일 또는 설정의 공휴일이면 다음 월요일로 옮겨지고, 카드에 "[주말·공휴일 조정]"과 원래 지급일이 표시됩니다.</li>
 <li><b>선지급 차감</b> — 간병인 상세에서 등록한 선지급은 이후 지급분에서 시간순으로 차감되고(남는 금액은 다음 지급일로 이월), 카드에 차감액이 표시됩니다.</li>
@@ -12481,7 +12482,7 @@ function hrExpMake(o) {
   return {
     hrKey: String(o.key), kind: o.kind, label: o.label || '',
     cgId: String(cg.id), cgName: cg.name || '', ptName: (o.ptName||'').trim(),
-    date: o.date, amount: amount, careDays: careDays, expectedRev: expectedRev,
+    date: o.date, rawDate: o.rawDate || '', amount: amount, careDays: careDays, expectedRev: expectedRev,
     title: hrExpTitle(o.kind, o.ptName, o.memo),
     desc: o.memo || '',
     bankRaw: cg.bankName || '', account: cg.bankAccount || '', holder: cg.bankHolder || ''
@@ -12699,7 +12700,7 @@ function hrExpOpen(k) {
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:15px;font-weight:800">📤 지출결의서 등록 <span style="font-size:11px;font-weight:700;color:var(--teal)">' + kindLabel + '</span></div><button class="btn btn-sm" onclick="hrExpClose()">✕</button></div>'
     + row('제목', '<input type="text" id="hrexp-title" value="' + hrExpEsc(p.title) + '">')
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
-    + row('지급일자', '<input type="date" id="hrexp-paydate" value="' + hrExpEsc(hrExpFinPayDate(p.payDate || p.date)) + '">' + (hrExpFinPayDate(p.payDate || p.date) !== (p.payDate || p.date) ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">카드 날짜 ' + hrExpEsc(p.payDate || p.date) + ' → 다음 영업일 지급</div>' : ''))
+    + row('지급일자', '<input type="date" id="hrexp-paydate" value="' + hrExpEsc(hrExpFinPayDate(p.payDate || p.date, p.payDate ? '' : p.rawDate)) + '">' + (hrExpFinPayDate(p.payDate || p.date, p.payDate ? '' : p.rawDate) !== (p.payDate || p.date) ? '<div style="font-size:11px;color:var(--gray);margin-top:2px">카드 날짜 ' + hrExpEsc(p.payDate || p.date) + ' → 다음 영업일 지급</div>' : ''))
     + row('지급금액(원)', '<input type="number" id="hrexp-amount" value="' + p.amount + '" oninput="hrExpRecalc()">')
     + row('간병일수' + (dayLocked ? ' (0 고정)' : ''), '<input type="number" id="hrexp-days" value="' + p.careDays + '" min="0" oninput="hrExpRecalc()"' + (dayLocked ? ' readonly style="background:var(--surface2)"' : '') + '>')
     + row('예상매출액(원)', '<input type="number" id="hrexp-rev" value="' + p.expectedRev + '" style="font-weight:700">')
@@ -12732,12 +12733,22 @@ function hrExpClose() {
 // (26_11_13_01) 2026-11-16 카드부터 간병비는 당일이 아니라 다음 영업일에 지급 — 재무관리 지출결의서 지급일자만 바꿈
 // 대시보드 캘린더·카드 날짜·hrKey(중복 방지 키)는 그대로 카드 날짜를 씀. 다음날이 주말·공휴일이면 그다음 영업일로 넘김(금 → 월)
 const HR_EXP_NEXTDAY_FROM = '2026-11-16';
-function hrExpFinPayDate(cardDate) {
+// (26_11_23_05) rawDate(주말·공휴일 조정 전 원래 지급일/마감일)가 있으면 그 날 기준 다음 영업일.
+// 예: 1주차 주급 원래 11/21(토) → 카드 11/23(월) — 예전엔 카드 날짜 기준이라 11/24로 하루 더 밀렸음 → 이제 11/22(일)→11/23(월)
+function hrExpFinPayDate(cardDate, rawDate) {
   var s = String(cardDate || '');
   if(!/^\d{4}-\d{2}-\d{2}$/.test(s) || s < HR_EXP_NEXTDAY_FROM) return s;
-  var d = parseLocalDate(s);
+  var r = String(rawDate || '');
+  var d = parseLocalDate((/^\d{4}-\d{2}-\d{2}$/.test(r) && r <= s) ? r : s);
   d.setDate(d.getDate() + 1);
   return toLocalDateStr(adjustPayDateToMonday(d));
+}
+// (26_11_23_05) 대시보드 급여 카드에 실제 지급일(다음 영업일) 표시 — 같은 날 카드라도 지급일이 다를 수 있어서
+function hrPayDayNoteHtml(cardDate, rawDate) {
+  if(!cardDate || cardDate < HR_EXP_NEXTDAY_FROM) return '';
+  var f = hrExpFinPayDate(cardDate, rawDate), d = parseLocalDate(f);
+  if(!d) return '';
+  return '<div style="font-size:11px;font-weight:700;color:var(--teal);margin-top:2px">💳 실제 지급일: ' + (d.getMonth()+1) + '/' + d.getDate() + '(' + '일월화수목금토'[d.getDay()] + ')</div>';
 }
 // (26_11_18_01) 카드 날짜 기준 실제 지급일(다음 영업일)이 아직 오늘 이후면 true — 아직 지급일이 안 된 건이라 미지급 아님
 // 예: 11/17 마감·주급 카드 → 실제 지급일 11/18 → 11/18 대시보드에 미지급(자동)으로 뜨지 않게 함
@@ -12750,7 +12761,7 @@ function hrExpBuildDoc(p, ov) {
   ov = ov || {};
   var pick = function(k, d){ return (ov[k] !== undefined) ? ov[k] : d; };
   return {
-    draftDate: todayStr(), payDate: pick('payDate', hrExpFinPayDate(p.payDate || p.date)), title: pick('title', p.title), payee: pick('payee', p.cgName),
+    draftDate: todayStr(), payDate: pick('payDate', hrExpFinPayDate(p.payDate || p.date, p.payDate ? '' : p.rawDate)), title: pick('title', p.title), payee: pick('payee', p.cgName),
     bizno: '', acct: HR_EXP_ACCT, amount: Number(pick('amount', p.amount))||0, method: '계좌이체',
     bank: pick('bank', ''), bankCode: pick('bankCode', ''), account: pick('account', p.account),
     desc: pick('desc', p.desc), status: '대기',
@@ -12961,6 +12972,10 @@ function calcFinalMergeInfo(cg, dateStr) {
   const entries = calcPayDates(cg);
   const weekEntry = entries.filter(p => p.week && p.date === dateStr).sort((a,b) => b.week - a.week)[0];
   if(!weekEntry) return null;
+  // (26_11_23_05) 다음날 지급(11/16~)부터는 원래 주급일 = 퇴실일일 때만 합침. 주말·공휴일 조정으로 같은 날이 된 경우는
+  // 주급(원래 주급일 다음 영업일 지급)과 최종정산(퇴실일 다음 영업일 지급)의 실제 지급일이 달라서 따로 둠
+  // 예: 11/14 16:00 ~ 11/23 12:00 — 1주차 원래 11/21(토)→11/23 지급, 나머지 11/21 16:00~11/23 12:00 → 11/24 지급
+  if(dateStr >= HR_EXP_NEXTDAY_FROM && weekEntry.payDate !== cg.endDate) return null;
   const totalOwed = calcTotalPayAmount(cg);
   const alreadyPaid = entries.reduce((s,p) => s + (p.amount||0), 0) + totalAdvance(cg);
   const settleAmount = totalOwed - alreadyPaid;
@@ -13007,6 +13022,7 @@ function calcHistFinalMergeInfo(h, dateStr) {
   const v = { pay: h.pay, startDate: h.startDate, endDate: h.endDate, startTime: h.startTime, endTime: h.endTime };
   const weekEntry = calcPayDates(v).filter(function(p){ return p.week && p.date === dateStr; }).sort(function(a,b){ return b.week - a.week; })[0];
   if(!weekEntry) return null;
+  if(dateStr >= HR_EXP_NEXTDAY_FROM && weekEntry.payDate !== h.endDate) return null; // (26_11_23_05) 라이브와 같은 규칙
   const settle = histFinalSettle(h).settle;
   if(settle <= 0) return null;
   const sp = calHpSplit(settle, holidayFinalPartPremium(v).amount);
@@ -13783,7 +13799,8 @@ function showCalDetail(dateStr, collectOnly) {
         + advanceNoteStr
         + ovx.noteHtml
         + expenseHtml
-        + hrExpBtnHtml(hrExpMake({ key: payUnpaidKey(cg.id, p.date, p.label), kind: 'pay', cg: cg, label: p.label, date: p.date, amount: ovx.amount,
+        + hrPayDayNoteHtml(p.date, p.payDate || p.endDate)
+        + hrExpBtnHtml(hrExpMake({ key: payUnpaidKey(cg.id, p.date, p.label), kind: 'pay', cg: cg, label: p.label, date: p.date, rawDate: p.payDate || p.endDate, amount: ovx.amount,
             ptName: pt ? pt.name : (histFallback ? (histFallback.patientName||'') : ''),
             memo: ovx.memo }))
         + ovx.btnHtml
@@ -13796,7 +13813,7 @@ function showCalDetail(dateStr, collectOnly) {
           whoStr: cg.name + ptStr, bankHtml: bankHtml, unpaid: true,
           note: (hpSp.hp < (p.holidayPremium||0)) ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">선지급 차감으로 할증 ' + Number(p.holidayPremium).toLocaleString() + '원 중 일부만 지급</div>' : '',
           memo: (pt || histFallback) ? buildHolidayExpenseMemo(hpPtName, hpHosp, cg.name, p.holidayBlocks, p.holidayDays, hpSp.hp, p.label) : '',
-          hrBtn: hrExpBtnHtml(hrExpMake({ key: payUnpaidKey(cg.id, p.date, p.label + ' 명절할증'), kind: 'holiday', cg: cg, label: p.label + ' 명절할증', date: p.date, amount: hpSp.hp, ptName: hpPtName,
+          hrBtn: hrExpBtnHtml(hrExpMake({ key: payUnpaidKey(cg.id, p.date, p.label + ' 명절할증'), kind: 'holiday', cg: cg, label: p.label + ' 명절할증', date: p.date, rawDate: p.payDate || p.endDate, amount: hpSp.hp, ptName: hpPtName,
             memo: buildHolidayExpenseMemo(hpPtName, hpHosp, cg.name, p.holidayBlocks, p.holidayDays, hpSp.hp, p.label) }))
         }) });
       }
@@ -13962,7 +13979,8 @@ function showCalDetail(dateStr, collectOnly) {
       + bankHtml
       + reserveStr
       + expenseHtml
-      + hrExpBtnHtml(hrExpMake({ key: payUnpaidKey(cg.id, dateStr, '최종 정산 (근무 마감)'), kind: 'pay', cg: cg, label: '최종 정산 (근무 마감)', date: dateStr, amount: ovx.amount,
+      + hrPayDayNoteHtml(dateStr, cg.endDate)
+      + hrExpBtnHtml(hrExpMake({ key: payUnpaidKey(cg.id, dateStr, '최종 정산 (근무 마감)'), kind: 'pay', cg: cg, label: '최종 정산 (근무 마감)', date: dateStr, rawDate: cg.endDate, amount: ovx.amount,
           ptName: pt ? pt.name : (histFallback ? (histFallback.patientName||'') : ''),
           memo: ovx.memo }))
       + ovx.btnHtml
@@ -13977,7 +13995,7 @@ function showCalDetail(dateStr, collectOnly) {
         whoStr: cg.name + ptStr, bankHtml: bankHtml, unpaid: true,
         note: (fSp.hp < hfLive.amount) ? '<div style="font-size:11px;color:var(--amber);margin-top:2px">기지급·선지급 차감으로 할증 ' + hfLive.amount.toLocaleString() + '원 중 일부만 지급</div>' : '',
         memo: (pt || histFallback) ? buildHolidayExpenseMemo(fHpPtName, fHpHosp, cg.name, hfBlocks, hfLive.days, fSp.hp, '최종 정산') : '',
-        hrBtn: hrExpBtnHtml(hrExpMake({ key: payUnpaidKey(cg.id, dateStr, '최종 정산 명절할증'), kind: 'holiday', cg: cg, label: '최종 정산 명절할증', date: dateStr, amount: fSp.hp, ptName: fHpPtName,
+        hrBtn: hrExpBtnHtml(hrExpMake({ key: payUnpaidKey(cg.id, dateStr, '최종 정산 명절할증'), kind: 'holiday', cg: cg, label: '최종 정산 명절할증', date: dateStr, rawDate: cg.endDate, amount: fSp.hp, ptName: fHpPtName,
           memo: buildHolidayExpenseMemo(fHpPtName, fHpHosp, cg.name, hfBlocks, hfLive.days, fSp.hp, '최종 정산') }))
       }) });
     }
@@ -19504,7 +19522,7 @@ function payCertCheckDash(rows, cards) {
       if(used[p.hrKey] || Number(p.amount) !== r.amount) return false;
       return cgIdOf(p.cgId) === myId || (myAcc.length >= 6 && payCertDigits(p.account) === myAcc);
     })
-      .map(function(p){ return { p: p, exp: hrExpFinPayDate(p.date) }; })
+      .map(function(p){ return { p: p, exp: hrExpFinPayDate(p.date, p.rawDate) }; })
       .sort(function(a, b){ return Math.abs(dayDiff(a.exp, r.date)) - Math.abs(dayDiff(b.exp, r.date)); });
     if(!list.length) { r.dash = { state: 'none' }; return; }
     var hit = list[0]; used[hit.p.hrKey] = 1;
