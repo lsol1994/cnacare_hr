@@ -1827,6 +1827,13 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       </button>
     </div>
     <p style="font-size:13px;color:var(--gray);margin-bottom:1rem;line-height:1.6">다운로드할 환자를 선택하세요. 여러 명 선택 가능해요.</p>
+    <div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;margin-bottom:.875rem">
+      <label class="ck-wrap" style="font-weight:700"><input type="checkbox" id="journal-cutoff-on" onchange="toggleDocCutoff('journal')"> 📌 자료 마감일 지정 <span style="font-size:10px;font-weight:400;color:var(--gray)">(특이사항 · 간병이 안 끝났는데 자료 요청할 때)</span></label>
+      <div id="journal-cutoff-fields" style="display:none;margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap">
+        <input type="date" id="journal-cutoff-date" onchange="" style="padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface);color:var(--black)">
+        <span style="font-size:12px;color:var(--gray)">까지만 자료가 나와요 (체크 안 하면 전 기간)</span>
+      </div>
+    </div>
     <div style="display:flex;gap:6px;margin-bottom:.875rem">
       <button class="btn btn-sm" onclick="journalSelectAll(true)">전체 선택</button>
       <button class="btn btn-sm" onclick="journalSelectAll(false)">전체 해제</button>
@@ -1924,6 +1931,13 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       </button>
     </div>
     <p style="font-size:13px;color:var(--gray);margin-bottom:1rem;line-height:1.6">확인서를 만들 환자·간병인 조합을 선택하세요.</p>
+    <div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;margin-bottom:.875rem">
+      <label class="ck-wrap" style="font-weight:700"><input type="checkbox" id="cert-cutoff-on" onchange="toggleDocCutoff('cert')"> 📌 자료 마감일 지정 <span style="font-size:10px;font-weight:400;color:var(--gray)">(특이사항 · 간병이 안 끝났는데 자료 요청할 때)</span></label>
+      <div id="cert-cutoff-fields" style="display:none;margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap">
+        <input type="date" id="cert-cutoff-date" onchange="renderCertSelectList(document.getElementById('cert-select-search').value)" style="padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface);color:var(--black)">
+        <span style="font-size:12px;color:var(--gray)">까지만 자료가 나와요 (체크 안 하면 전 기간)</span>
+      </div>
+    </div>
     <div style="position:relative;display:flex;align-items:center;margin-bottom:10px">
       <svg viewBox="0 0 24 24" style="position:absolute;left:9px;width:14px;height:14px;stroke:var(--gray-lt);stroke-width:2;fill:none;stroke-linecap:round;pointer-events:none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <input type="text" id="cert-select-search" placeholder="환자명 또는 간병인명 검색..." oninput="renderCertSelectList(this.value)"
@@ -1967,6 +1981,13 @@ select{cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%
       </button>
     </div>
     <p style="font-size:13px;color:var(--gray);margin-bottom:1rem;line-height:1.6">간병일지를 만들 환자·간병인 조합을 선택하세요.</p>
+    <div style="background:var(--surface2);border-radius:var(--rsm);padding:10px 12px;margin-bottom:.875rem">
+      <label class="ck-wrap" style="font-weight:700"><input type="checkbox" id="jv2-cutoff-on" onchange="toggleDocCutoff('jv2')"> 📌 자료 마감일 지정 <span style="font-size:10px;font-weight:400;color:var(--gray)">(특이사항 · 간병이 안 끝났는데 자료 요청할 때)</span></label>
+      <div id="jv2-cutoff-fields" style="display:none;margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap">
+        <input type="date" id="jv2-cutoff-date" onchange="renderJv2SelectList(document.getElementById('jv2-select-search').value)" style="padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--rsm);background:var(--surface);color:var(--black)">
+        <span style="font-size:12px;color:var(--gray)">까지만 자료가 나와요 (체크 안 하면 전 기간)</span>
+      </div>
+    </div>
     <div style="position:relative;display:flex;align-items:center;margin-bottom:10px">
       <svg viewBox="0 0 24 24" style="position:absolute;left:9px;width:14px;height:14px;stroke:var(--gray-lt);stroke-width:2;fill:none;stroke-linecap:round;pointer-events:none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <input type="text" id="jv2-select-search" placeholder="환자명 또는 간병인명 검색..." oninput="renderJv2SelectList(this.value)"
@@ -2601,7 +2622,7 @@ let _journalFmt    = 'xlsx';
 // 2026-08-31: 기기마다 브라우저 캐시에 각자 다른(낡은) 버전이 남아있어서, 이미 고친 동기화
 // 버그가 일부 기기에서는 여전히 재현되는 것처럼 보이던 문제가 있었음. 배포마다 이 값을 올리고,
 // 저장소 루트의 version.txt 파일도 같은 값으로 갱신해야 함. (한쪽만 바꾸면 새 버전 감지가 안 됨)
-const APP_BUILD = '26_11_23_06';
+const APP_BUILD = '26_11_25_01';
 let _versionCheckTimer = null;
 function checkForNewVersion() {
   fetch('version.txt?t=' + Date.now(), { cache: 'no-store' })
@@ -10342,6 +10363,7 @@ const MANUAL_SECTIONS = [
 <ul>
 <li><b>간병일지 다운로드</b> — "📒 간병일지"의 .xlsx/.csv 버튼으로 환자를 골라(여러 명 가능) 출퇴근 기록을 파일로 받습니다.</li>
 <li><b>📝 간병일지 서식</b> — 씨앤에이케어 종이 양식 그대로 환자·간병인 조합을 골라 미리보기 후 인쇄합니다.</li>
+<li><b>📌 자료 마감일 지정</b> — 간병이 아직 안 끝났는데 자료를 요청받은 경우, 간병일지 다운로드·간병일지 서식·간병사실확인서 선택 창에서 체크하고 날짜를 고르면 그날까지만 기간·일별 기록이 나옵니다. 체크하지 않으면 평소처럼 전 기간이 나옵니다(데이터는 바뀌지 않음).</li>
 <li><b>📝 간병사실확인서</b> — "생성"으로 환자·간병인 조합을 골라 확인서를 만듭니다. 미리보기에서 점선 밑줄 값은 인쇄 전에 직접 고칠 수 있습니다.</li>
 <li><b>🧾 간병인 이체확인증</b> (파일 업로드에 PDF) — 은행 인터넷뱅킹에서 받은 입금확인증 PDF(한 장 = 이체 1건, 여러 장 한 파일도 OK)를 위 "📤 파일 업로드"에 올리면(CSV·엑셀과 같이 올려도 됨), 입금계좌로 간병인을 찾아 <b>실제지급일_이름(금액원).pdf</b>로 나눕니다. 같은 날 같은 간병인 건은 한 파일로 합쳐집니다. 수취인성명이 잘리거나 예금주가 달라도 계좌번호로 찾고, 재무관리 지출결의서와 금액·지급일이 맞는지도 함께 표시합니다(재무를 못 읽으면 대시보드 급여 카드로 대조). 간병인 정보로 못 찾은 이체는 지출결의서 계좌로 간병인을 찾아줍니다. 간병인을 못 찾았거나·이름으로만 찾았거나·지출결의서 지급일/금액과 다른 건은 맨 위 <b>⚠️ 확인 필요</b>에 따로 모이고, 간병인을 고치거나 "✓ 확인함"을 눌러야 이체확인증(미리보기·다운로드·ZIP)에 들어갑니다. 못 읽은 장은 지급일·금액·간병인을 직접 넣어 확인합니다. 업체(유바이오젠)·협회 직원처럼 간병인이 아닌 이체는 "🚫 간병인 아님 — 목록에서 빼기"로 빼면 이체확인증·보관함에 들어가지 않고, 맨 아래에서 되돌릴 수 있습니다. 확인된 이체확인증은 회사 DB에 자동 저장되고, "📥 자료 다운로드"의 간병일지 아래 <b>🗂 이체확인증 보관함</b>에서 간병인 선택·이름·날짜·월로 찾고(선택 삭제·전체 삭제도 가능 — "삭제"를 입력해야 지워짐), ▸를 눌러 이체 내역(시각·은행·수취인·금액·간병인 찾은 방법·지출결의서 대조 결과)과 PDF를 펼쳐 볼 수 있으며, 다시 받거나(선택 ZIP 가능) 삭제할 수 있습니다. 같은 입금확인증을 다시 올려도 중복 저장되지 않습니다. 건별 미리보기·인쇄·PDF 다운로드, 전체 ZIP 다운로드가 됩니다.</li>
 </ul>
@@ -19083,12 +19105,57 @@ function downloadAll(fmt) {
   toast('✅ 전체 '+fmt.toUpperCase()+' 다운로드 시작!');
 }
 
+// ─── 자료 마감일 지정 (26_11_25_01) ───
+// 간병이 아직 안 끝났는데 간병일지·간병사실확인서를 요청받는 특이 건용. 선택 모달에서 체크하면
+// 지정한 날짜까지만 기간·일별 기록이 나옴. 체크 안 하면(평시) 지금처럼 전 기간.
+// 출력용으로 기간만 잘라 보여줄 뿐 간병인·환자·출퇴근 데이터는 바꾸지 않음.
+function toggleDocCutoff(prefix) {
+  const on = !!document.getElementById(prefix+'-cutoff-on')?.checked;
+  const box = document.getElementById(prefix+'-cutoff-fields');
+  const inp = document.getElementById(prefix+'-cutoff-date');
+  if(box) box.style.display = on ? 'flex' : 'none';
+  if(on && inp && !inp.value) inp.value = todayStr();
+  if(prefix==='cert') renderCertSelectList(document.getElementById('cert-select-search')?.value||'');
+  if(prefix==='jv2') renderJv2SelectList(document.getElementById('jv2-select-search')?.value||'');
+}
+function resetDocCutoff(prefix) {
+  const ck = document.getElementById(prefix+'-cutoff-on');
+  const box = document.getElementById(prefix+'-cutoff-fields');
+  const inp = document.getElementById(prefix+'-cutoff-date');
+  if(ck) ck.checked = false;
+  if(box) box.style.display = 'none';
+  if(inp) inp.value = '';
+}
+// 체크돼 있고 날짜가 올바르면 'YYYY-MM-DD', 아니면 '' (체크했는데 날짜가 비었으면 null)
+function getDocCutoff(prefix) {
+  const ck = document.getElementById(prefix+'-cutoff-on');
+  if(!ck || !ck.checked) return '';
+  const v = document.getElementById(prefix+'-cutoff-date')?.value || '';
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+}
+// 기간 끝을 마감일로 자름 — 마감일 전에 시작 안 한 건은 null(제외).
+// 마감일이 원래 끝보다 늦으면 그대로, 끝이 없는(근무중) 건은 마감일까지.
+function cutoffPeriodEnd(startDate, endDate, cutoff) {
+  if(!cutoff) return { start: startDate||'', end: endDate||'', cut: false };
+  if(!startDate || startDate > cutoff) return null;
+  if(endDate && endDate <= cutoff) return { start: startDate, end: endDate, cut: false };
+  return { start: startDate, end: cutoff, cut: true };
+}
+function clipJournalRowToCutoff(row, cutoff) {
+  if(!cutoff) return row;
+  const r = cutoffPeriodEnd(row.startDate, row.endDate, cutoff);
+  if(!r) return null;
+  if(!r.cut) return row;
+  return Object.assign({}, row, { endDate: r.end, endTime: '' });
+}
+
 // ─── 간병일지 환자 선택 ───
 
 // 환자별로 "그 환자를 담당했던 모든 간병인"(라이브 매칭 중 + 재배정으로 넘어간 과거 이력 전원)을
 // 체크리스트로 보여준다 — getAllAssignPeriods() 참고.
 function openJournalSelect(fmt) {
   _journalFmt = fmt || 'xlsx';
+  resetDocCutoff('journal'); // 평시엔 전 기간
   document.getElementById('journal-modal-title').textContent = '간병일지 다운로드 (.' + _journalFmt + ')';
   document.getElementById('journal-dl-btn').innerHTML =
     '<svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 선택 항목 .' + _journalFmt + ' 다운로드';
@@ -19276,8 +19343,10 @@ function journalLines(c, todayStr2) {
 function downloadSelectedJournals() {
   const checked = [...document.querySelectorAll('.journal-ck:checked')];
   if(!checked.length) { toast('최소 1개를 선택해주세요', true); return; }
+  const cutoff = getDocCutoff('journal');
+  if(cutoff === null) { toast('자료 마감일을 선택해주세요', true); return; }
   const allPeriods = getAllAssignPeriods();
-  const selectedCgList = [];
+  let selectedCgList = [];
   checked.forEach(ck => {
     if(ck.dataset.ptid) {
       // 그 환자를 담당했던 모든 간병인(라이브+과거 이력 전원)의 기간을 전부 포함
@@ -19288,13 +19357,14 @@ function downloadSelectedJournals() {
       if(c) selectedCgList.push(c);
     }
   });
-  if(!selectedCgList.length){ toast('데이터가 없어요',true); return; }
+  if(cutoff) selectedCgList = selectedCgList.map(c=>clipJournalRowToCutoff(c, cutoff)).filter(Boolean);
+  if(!selectedCgList.length){ toast(cutoff ? cutoff+' 이전에 시작한 간병이 없어요' : '데이터가 없어요',true); return; }
   const ptCount = [...new Set(selectedCgList.map(c=>c.patientId).filter(Boolean))].length + selectedCgList.filter(c=>!c.patientId).length;
-  const fname = '씨앤에이케어_간병일지_통합_'+ptCount+'건';
+  const fname = '씨앤에이케어_간병일지_통합_'+ptCount+'건'+(cutoff ? '_'+cutoff.replace(/-/g,'')+'까지' : '');
   if(_journalFmt==='xlsx') downloadJournalXLSX(selectedCgList, fname+'.xlsx');
   else downloadJournalCSVFile(selectedCgList, fname+'.csv');
   closeOverlay('journal-overlay');
-  toast('✅ 간병일지 통합본 .'+_journalFmt+' '+ptCount+'건 다운로드 완료');
+  toast('✅ 간병일지 통합본 .'+_journalFmt+' '+ptCount+'건 다운로드 완료'+(cutoff ? ' ('+cutoff+'까지)' : ''));
 }
 
 // ─── 출퇴근 근무 (26_11_05_01) ───
@@ -20356,6 +20426,7 @@ function certField(value, placeholder) {
 function openCertSelect() {
   const searchEl = document.getElementById('cert-select-search');
   if(searchEl) searchEl.value = '';
+  resetDocCutoff('cert'); // 평시엔 전 기간
   renderCertSelectList('');
   document.getElementById('cert-select-overlay').classList.add('open');
 }
@@ -20375,6 +20446,7 @@ function renderCertSelectList(query) {
 
   const ptIds = [...new Set(allPeriods.map(p=>p.patientId))];
   let html = '';
+  const _cut = getDocCutoff('cert') || '';
   ptIds.forEach(pid => {
     const pt = patients.find(p=>String(p.id)===String(pid));
     if(!pt) return;
@@ -20383,10 +20455,13 @@ function renderCertSelectList(query) {
       const ptMatch = (pt.name||'').toLowerCase().includes(q);
       if(!ptMatch) periodList = periodList.filter(p => (p.cg.name||'').toLowerCase().includes(q));
     }
+    if(_cut) periodList = periodList.filter(p => cutoffPeriodEnd(p.startDate, p.endDate, _cut)); // 마감일 이후 시작 건 숨김
     if(!periodList.length) return;
     html += `<div style="font-size:12px;font-weight:700;color:var(--gray);margin:10px 0 4px">${pt.name} <span style="font-weight:400">· ${pt.hospital||''}</span></div>`;
     periodList.forEach(p => {
-      const period = p.startDate && p.endDate ? p.startDate+' ~ '+p.endDate : (p.startDate+' ~ 근무중');
+      const _r = _cut ? cutoffPeriodEnd(p.startDate, p.endDate, _cut) : null;
+      const period = (_r && _r.cut) ? p.startDate+' ~ <b style="color:var(--teal)">'+_r.end+'</b> <span style="font-size:10px">(지정)</span>'
+        : (p.startDate && p.endDate ? p.startDate+' ~ '+p.endDate : (p.startDate+' ~ 근무중'));
       const histTag = p.live ? '' : '<span style="font-size:10px;color:var(--gray);background:var(--surface2);border-radius:4px;padding:1px 5px;margin-left:5px">이력</span>';
       html += `<button class="btn" style="width:100%;justify-content:space-between;margin-bottom:6px;padding:10px 14px" onclick="openCertPreview('${p.cg.id}','${p.startDate}')">
         <span style="font-size:13px;font-weight:700">${p.cg.name}${histTag}</span>
@@ -20409,8 +20484,16 @@ function openCertPreview(cgId, periodStartDate) {
   const pt = patients.find(p=>String(p.id)===String(period.patientId));
   if(!pt) { toast('환자 정보를 찾을 수 없어요', true); return; }
 
+  const _cutoff = getDocCutoff('cert');
+  if(_cutoff === null) { toast('자료 마감일을 선택해주세요', true); return; }
   const start = period.startDate || '';
-  const end   = period.endDate || todayStr();
+  let end   = period.endDate || todayStr();
+  if(_cutoff) {
+    // (26_11_25_01) 자료 마감일 지정 — 지정한 날까지만 (근무중이라 끝이 없으면 지정일까지)
+    const _r = cutoffPeriodEnd(period.startDate, period.endDate, _cutoff);
+    if(!_r) { toast(_cutoff+' 이후에 시작한 간병이라 자료를 만들 수 없어요', true); return; }
+    end = _r.end;
+  }
   let totalDays = '';
   if(start) {
     // 이 앱 전반의 "사용기간" 계산과 동일한 방식(마감일-시작일, +1 없음) — 템플릿 예시(8/29~9/1 → 총 3일간)와도 일치
@@ -20475,6 +20558,7 @@ window.addEventListener('afterprint', () => document.body.classList.remove('prin
 function openJournalV2Select() {
   const searchEl = document.getElementById('jv2-select-search');
   if(searchEl) searchEl.value = '';
+  resetDocCutoff('jv2'); // 평시엔 전 기간
   renderJv2SelectList('');
   document.getElementById('jv2-select-overlay').classList.add('open');
 }
@@ -20495,6 +20579,7 @@ function renderJv2SelectList(query) {
 
   const ptIds = [...new Set(allPeriods.map(p=>p.patientId))];
   let html = '';
+  const _cut = getDocCutoff('jv2') || '';
   ptIds.forEach(pid => {
     const pt = patients.find(p=>String(p.id)===String(pid));
     if(!pt) return;
@@ -20503,10 +20588,13 @@ function renderJv2SelectList(query) {
       const ptMatch = (pt.name||'').toLowerCase().includes(q);
       if(!ptMatch) periodList = periodList.filter(p => (p.cg.name||'').toLowerCase().includes(q));
     }
+    if(_cut) periodList = periodList.filter(p => cutoffPeriodEnd(p.startDate, p.endDate, _cut)); // 마감일 이후 시작 건 숨김
     if(!periodList.length) return;
     html += `<div style="font-size:12px;font-weight:700;color:var(--gray);margin:10px 0 4px">${pt.name} <span style="font-weight:400">· ${pt.hospital||''}</span></div>`;
     periodList.forEach(p => {
-      const period = p.startDate && p.endDate ? p.startDate+' ~ '+p.endDate : (p.startDate+' ~ 근무중');
+      const _r = _cut ? cutoffPeriodEnd(p.startDate, p.endDate, _cut) : null;
+      const period = (_r && _r.cut) ? p.startDate+' ~ <b style="color:var(--teal)">'+_r.end+'</b> <span style="font-size:10px">(지정)</span>'
+        : (p.startDate && p.endDate ? p.startDate+' ~ '+p.endDate : (p.startDate+' ~ 근무중'));
       const histTag = p.live ? '' : '<span style="font-size:10px;color:var(--gray);background:var(--surface2);border-radius:4px;padding:1px 5px;margin-left:5px">이력</span>';
       html += `<button class="btn" style="width:100%;justify-content:space-between;margin-bottom:6px;padding:10px 14px" onclick="openJournalV2Preview('${p.cg.id}','${p.startDate}')">
         <span style="font-size:13px;font-weight:700">${p.cg.name}${histTag}</span>
@@ -20532,8 +20620,16 @@ function openJournalV2Preview(cgId, periodStartDate) {
   const pt = patients.find(p=>String(p.id)===String(period.patientId));
   if(!pt) { toast('환자 정보를 찾을 수 없어요', true); return; }
 
+  const _cutoff = getDocCutoff('jv2');
+  if(_cutoff === null) { toast('자료 마감일을 선택해주세요', true); return; }
   const start = period.startDate || '';
-  const end   = period.endDate || todayStr();
+  let end   = period.endDate || todayStr();
+  if(_cutoff) {
+    // (26_11_25_01) 자료 마감일 지정 — 지정한 날까지만 (근무중이라 끝이 없으면 지정일까지)
+    const _r = cutoffPeriodEnd(period.startDate, period.endDate, _cutoff);
+    if(!_r) { toast(_cutoff+' 이후에 시작한 간병이라 자료를 만들 수 없어요', true); return; }
+    end = _r.end;
+  }
   let totalDays = '';
   if(start) {
     // 간병사실확인서와 동일한 기간·일수 계산 방식(마감일-시작일, +1 없음)
